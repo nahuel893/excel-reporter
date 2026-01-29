@@ -1,0 +1,10 @@
+# Normalizar finales de línea
+* text=auto eol=lf
+
+# Archivos específicos de Windows
+*.bat text eol=crlf
+
+# Binarios
+*.xlsx binary
+*.png binary
+*.jpg binary
