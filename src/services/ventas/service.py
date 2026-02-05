@@ -110,7 +110,9 @@ class VentasService(BaseService):
         df_procesado = procesar_ventas_diarias(
             df_ventas,
             config.fecha_desde,
-            config.fecha_hasta
+            config.fecha_hasta,
+            df_sucursales,
+            df_articulos
         )
 
         # 3. Detectar columnas de dias (entre Marca y Total)

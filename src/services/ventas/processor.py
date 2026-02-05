@@ -46,7 +46,13 @@ def formatear_nombre_dia(fecha: datetime) -> str:
     return f"{fecha.strftime('%d-%m')} {dia_semana}"
 
 
-def procesar_ventas_diarias(df: pd.DataFrame, fecha_desde: str, fecha_hasta: str) -> pd.DataFrame:
+def procesar_ventas_diarias(
+    df: pd.DataFrame,
+    fecha_desde: str,
+    fecha_hasta: str,
+    df_sucursales: pd.DataFrame | None = None,
+    df_articulos: pd.DataFrame | None = None
+) -> pd.DataFrame:
     """
     Procesa las ventas diarias para generar tabla con columnas por dia.
 
@@ -57,6 +63,8 @@ def procesar_ventas_diarias(df: pd.DataFrame, fecha_desde: str, fecha_hasta: str
         df: DataFrame con columnas: sucursal, generico, marca, fecha, cantidad, monto
         fecha_desde: Fecha inicio formato 'YYYY-MM-DD'
         fecha_hasta: Fecha fin formato 'YYYY-MM-DD'
+        df_sucursales: DataFrame con todas las sucursales (para completar combinaciones)
+        df_articulos: DataFrame con todas las combinaciones generico-marca
 
     Returns:
         DataFrame con formato incluyendo dias como columnas
@@ -67,6 +75,34 @@ def procesar_ventas_diarias(df: pd.DataFrame, fecha_desde: str, fecha_hasta: str
     # Asegurar que fecha sea datetime
     df = df.copy()
     df["fecha"] = pd.to_datetime(df["fecha"])
+
+    # Completar combinaciones faltantes si se proporcionan las dimensiones
+    if df_sucursales is not None and df_articulos is not None:
+        fechas_unicas = df["fecha"].unique()
+
+        # Crear producto cartesiano: sucursales × articulos × fechas
+        df_sucursales_temp = df_sucursales.copy()
+        df_articulos_temp = df_articulos.copy()
+        df_sucursales_temp["_key"] = 1
+        df_articulos_temp["_key"] = 1
+
+        todas_combinaciones = df_sucursales_temp.merge(df_articulos_temp, on="_key").drop("_key", axis=1)
+
+        # Expandir por fechas
+        df_fechas = pd.DataFrame({"fecha": fechas_unicas, "_key": 1})
+        todas_combinaciones["_key"] = 1
+        todas_combinaciones = todas_combinaciones.merge(df_fechas, on="_key").drop("_key", axis=1)
+
+        # Merge con ventas reales (left join)
+        df = todas_combinaciones.merge(
+            df,
+            on=["sucursal", "generico", "marca", "fecha"],
+            how="left"
+        )
+
+        # Rellenar NaN con 0
+        df["cantidad"] = df["cantidad"].fillna(0)
+        df["monto"] = df["monto"].fillna(0)
 
     # Factor de tendencia
     factor_tendencia = calcular_factor_tendencia(fecha_desde, fecha_hasta)
