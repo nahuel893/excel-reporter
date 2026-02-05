@@ -51,6 +51,7 @@ class SheetStyle:
         numeric_format: Formato para columnas numericas (ej: '#,##0' sin decimales)
         column_formats: Formatos especificos por nombre de columna
         column_groups: Lista de grupos de columnas colapsables
+        summary_rows: Filas de resumen al inicio {etiqueta: valor}
     """
     header_bold: bool = True
     header_center: bool = True
@@ -58,6 +59,7 @@ class SheetStyle:
     numeric_format: str = "#,##0"
     column_formats: dict[str, ColumnFormat] = field(default_factory=dict)
     column_groups: list[ColumnGroup] = field(default_factory=list)
+    summary_rows: dict[str, int | float | str] = field(default_factory=dict)
 
 
 # Estilo por defecto
@@ -102,12 +104,12 @@ def _apply_cell_format(cell, col_name: str, style: SheetStyle, is_header: bool =
         cell.number_format = style.numeric_format
 
 
-def _auto_fit_columns(ws, style: SheetStyle, column_formats: dict[str, ColumnFormat] = None):
+def _auto_fit_columns(ws, style: SheetStyle, header_row: int = 1):
     """Ajusta el ancho de columnas automaticamente o segun configuracion."""
     if not style.auto_width:
         return
 
-    headers = [cell.value for cell in ws[1]]
+    headers = [cell.value for cell in ws[header_row]]
 
     for col_idx, column in enumerate(ws.columns):
         col_name = headers[col_idx] if col_idx < len(headers) else None
@@ -152,17 +154,44 @@ def _apply_column_groups(ws, df: pd.DataFrame, style: SheetStyle):
     ws.sheet_properties.outlinePr.summaryRight = False
 
 
+def _write_summary_rows(ws, style: SheetStyle) -> int:
+    """Escribe filas de resumen al inicio de la hoja.
+
+    Returns:
+        Numero de filas escritas (offset para los datos)
+    """
+    if not style.summary_rows:
+        return 0
+
+    for r_idx, (label, value) in enumerate(style.summary_rows.items(), 1):
+        # Columna A: etiqueta en negrita
+        cell_label = ws.cell(row=r_idx, column=1, value=label)
+        cell_label.font = Font(bold=True)
+
+        # Columna B: valor
+        cell_value = ws.cell(row=r_idx, column=2, value=value)
+
+    # Fila vacia de separacion
+    return len(style.summary_rows) + 1
+
+
 def _write_sheet(ws, df: pd.DataFrame, style: SheetStyle):
     """Escribe datos y aplica formato a una hoja."""
     headers = list(df.columns)
 
+    # Escribir filas de resumen primero
+    row_offset = _write_summary_rows(ws, style)
+
+    # Escribir datos con offset
     for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
+        actual_row = r_idx + row_offset
         for c_idx, value in enumerate(row, 1):
-            cell = ws.cell(row=r_idx, column=c_idx, value=value)
+            cell = ws.cell(row=actual_row, column=c_idx, value=value)
             col_name = headers[c_idx - 1] if c_idx <= len(headers) else ""
             _apply_cell_format(cell, col_name, style, is_header=(r_idx == 1))
 
-    _auto_fit_columns(ws, style)
+    header_row = row_offset + 1
+    _auto_fit_columns(ws, style, header_row=header_row)
     _apply_column_groups(ws, df, style)
 
 

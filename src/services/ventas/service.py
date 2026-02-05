@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from config.settings import COLUMN_NAMES
+from src.core.base_processor import calcular_info_dias
 from src.core.data_loader import DataLoader
 from src.core.excel_writer import generar_excel, SheetStyle, ColumnFormat, ColumnGroup
 from src.services.base_service import BaseService
@@ -20,16 +21,21 @@ VENTAS_COLUMN_FORMATS = {
 }
 
 
-def _crear_estilo_ventas(columnas_dias: list[str], dias_visibles: int = 2) -> SheetStyle:
+def _crear_estilo_ventas(
+    columnas_dias: list[str],
+    info_dias: dict[str, int],
+    dias_visibles: int = 2
+) -> SheetStyle:
     """
     Crea el estilo para el reporte de ventas con grupos de columnas.
 
     Args:
         columnas_dias: Lista de nombres de columnas de dias
+        info_dias: Diccionario con info de dias habiles para mostrar en encabezado
         dias_visibles: Cantidad de dias al final que no se agrupan (default: 2)
 
     Returns:
-        SheetStyle configurado con el grupo de dias
+        SheetStyle configurado con el grupo de dias y filas de resumen
     """
     groups = []
 
@@ -42,7 +48,8 @@ def _crear_estilo_ventas(columnas_dias: list[str], dias_visibles: int = 2) -> Sh
 
     return SheetStyle(
         column_formats=VENTAS_COLUMN_FORMATS,
-        column_groups=groups
+        column_groups=groups,
+        summary_rows=info_dias
     )
 
 
@@ -108,13 +115,16 @@ class VentasService(BaseService):
         idx_total = columnas.index(COLUMN_NAMES["total_marca"])
         columnas_dias = columnas[idx_marca + 1:idx_total]
 
-        # 4. Crear estilo con grupo de dias
-        style = _crear_estilo_ventas(columnas_dias)
+        # 4. Calcular info de dias habiles
+        info_dias = calcular_info_dias(config.fecha_desde, config.fecha_hasta)
 
-        # 5. Generar Excel
+        # 5. Crear estilo con grupo de dias e info de resumen
+        style = _crear_estilo_ventas(columnas_dias, info_dias)
+
+        # 6. Generar Excel
         ruta = generar_excel(df_procesado, config.nombre_archivo, sheet_name="Ventas", style=style)
 
-        # 6. Construir resultado
+        # 7. Construir resultado
         genericos_incluidos = df_articulos["generico"].unique().tolist() if not df_articulos.empty else []
 
         return ReporteVentasResult(

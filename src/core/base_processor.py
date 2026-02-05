@@ -50,6 +50,29 @@ def calcular_dias_habiles(fecha_desde: date, fecha_hasta: date) -> tuple[int, in
     return dias_transcurridos, dias_totales
 
 
+def calcular_info_dias(fecha_desde: str, fecha_hasta: str) -> dict[str, int]:
+    """
+    Calcula informacion completa de dias habiles para el reporte.
+
+    Args:
+        fecha_desde: Fecha inicio formato 'YYYY-MM-DD'
+        fecha_hasta: Fecha fin formato 'YYYY-MM-DD'
+
+    Returns:
+        Diccionario con dias_habiles, dias_transcurridos, dias_faltantes
+    """
+    fecha_desde_dt = datetime.strptime(fecha_desde, "%Y-%m-%d").date()
+    fecha_hasta_dt = datetime.strptime(fecha_hasta, "%Y-%m-%d").date()
+    dias_transcurridos, dias_habiles = calcular_dias_habiles(fecha_desde_dt, fecha_hasta_dt)
+    dias_faltantes = dias_habiles - dias_transcurridos
+
+    return {
+        "Dias Habiles": dias_habiles,
+        "Dias Transcurridos": dias_transcurridos,
+        "Dias Faltantes": dias_faltantes,
+    }
+
+
 def calcular_factor_tendencia(fecha_desde: str, fecha_hasta: str) -> float:
     """
     Calcula el factor de tendencia basado en dias habiles.
