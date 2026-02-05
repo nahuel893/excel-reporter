@@ -10,7 +10,7 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import Font, Alignment, numbers
+from openpyxl.styles import Font, Alignment, PatternFill, numbers
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from config.settings import DATA_OUTPUT
@@ -87,7 +87,8 @@ def _apply_cell_format(cell, col_name: str, style: SheetStyle, is_header: bool =
         is_header: Si es celda de encabezado
     """
     if is_header:
-        # Texto blanco, negrita, centrado y distribuido
+        # Fondo burdeo pastel, texto blanco, negrita, centrado y distribuido
+        cell.fill = PatternFill(start_color="9E6B6B", end_color="9E6B6B", fill_type="solid")
         cell.font = Font(bold=style.header_bold, color="FFFFFF")
         cell.alignment = Alignment(
             horizontal="center",
