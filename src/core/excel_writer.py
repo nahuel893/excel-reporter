@@ -22,7 +22,7 @@ class ColumnFormat:
     number_format: str | None = None
     alignment: str | None = None
     font_bold: bool = False
-    width: int | None = None
+    width: int | float | None = None
 
 
 @dataclass
@@ -110,6 +110,7 @@ def _apply_cell_format(cell, col_name: str, style: SheetStyle, is_header: bool =
     # Formato generico para numericos
     if isinstance(cell.value, (int, float)) and cell.value is not None:
         cell.number_format = style.numeric_format
+        cell.alignment = Alignment(horizontal="center")
 
 
 def _auto_fit_columns(ws, style: SheetStyle, header_row: int = 1):

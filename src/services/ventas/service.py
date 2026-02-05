@@ -14,9 +14,11 @@ from src.core.excel_writer import generar_excel, SheetStyle, ColumnFormat, Colum
 from src.services.base_service import BaseService
 from src.services.ventas.processor import completar_combinaciones, procesar_ventas, procesar_ventas_diarias
 
-# Configuracion base de formatos de moneda para ventas
+# Configuracion base de formatos para ventas
 VENTAS_COLUMN_FORMATS = {
-    COLUMN_NAMES["monto_generico"]: ColumnFormat(number_format='$ #,##0'),
+    COLUMN_NAMES["cant_generico"]: ColumnFormat(width=13.3),
+    COLUMN_NAMES["tend_generico"]: ColumnFormat(width=13.3),
+    COLUMN_NAMES["monto_generico"]: ColumnFormat(number_format='$ #,##0', width=13.3),
     COLUMN_NAMES["monto_marca"]: ColumnFormat(number_format='$ #,##0'),
 }
 
