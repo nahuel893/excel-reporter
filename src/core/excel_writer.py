@@ -86,6 +86,15 @@ def _apply_cell_format(cell, col_name: str, style: SheetStyle, is_header: bool =
         style: Estilo de la hoja
         is_header: Si es celda de encabezado
     """
+    if is_header:
+        # Texto blanco, negrita, centrado y distribuido
+        cell.font = Font(bold=style.header_bold, color="FFFFFF")
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True
+        )
+        return
 
     # Formato especifico por columna
     if col_name in style.column_formats:
