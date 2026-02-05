@@ -95,18 +95,19 @@ def agregar_slicers(
             if posiciones and i < len(posiciones):
                 left, top = posiciones[i]
             else:
-                # Posicion automatica: arriba a la derecha, escalonados horizontalmente
-                # Posicion fija para que siempre sean visibles
-                left = 800 + (i * 160)  # Escalonados horizontalmente
-                top = 10  # Cerca del borde superior
+                # Posicion automatica: debajo de filas de resumen, escalonados horizontalmente
+                # Posicion basada en columnas (aproximadamente columna H en adelante)
+                # Cada slicer tiene ~150 de ancho + 10 de separacion
+                left = 500 + (i * 160)  # Columna H aprox, escalonados
+                top = 5  # Fila 1 aproximadamente
 
-            # Crear Slicer visual
+            # Crear Slicer visual (tamano mas compacto)
             slicer = slicer_cache.Slicers.Add(
                 ws,
                 Left=left,
                 Top=top,
-                Width=150,
-                Height=180,
+                Width=144,
+                Height=110,
                 Caption=columna
             )
 

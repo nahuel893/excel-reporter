@@ -104,14 +104,16 @@ def _apply_cell_format(cell, col_name: str, style: SheetStyle, is_header: bool =
             cell.number_format = fmt.number_format
         if fmt.alignment:
             cell.alignment = Alignment(horizontal=fmt.alignment)
-        if fmt.font_bold:
-            cell.font = Font(bold=True)
+        cell.font = Font(bold=True)
         return
 
     # Formato generico para numericos
     if isinstance(cell.value, (int, float)) and cell.value is not None:
         cell.number_format = style.numeric_format
         cell.alignment = Alignment(horizontal="center")
+
+    # Negrita para todas las celdas de datos
+    cell.font = Font(bold=True)
 
 
 def _auto_fit_columns(ws, style: SheetStyle, header_row: int = 1):
@@ -153,11 +155,12 @@ def _apply_column_groups(ws, df: pd.DataFrame, style: SheetStyle):
         end_idx = col_to_idx.get(group.end_col)
 
         if start_idx and end_idx and start_idx <= end_idx:
-            # Agrupar columnas
+            # Para que el grupo inicie colapsado, las columnas deben estar ocultas
+            should_hide = group.collapsed or group.hidden
             ws.column_dimensions.group(
                 get_column_letter(start_idx),
                 get_column_letter(end_idx),
-                hidden=group.hidden
+                hidden=should_hide
             )
 
     # Configurar para que el boton de grupo este arriba

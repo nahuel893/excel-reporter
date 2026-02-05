@@ -9,6 +9,7 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 - Pandas (procesamiento)
 - OpenPyXL (generacion Excel)
 - pywin32 (slicers, solo Windows)
+- FastAPI (API REST)
 - pytest (testing)
 
 ## Estructura del Proyecto
@@ -22,6 +23,10 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 │   │   ├── excel_writer.py   # generar_excel, SheetStyle, ColumnFormat, ColumnGroup, summary_rows, as_table
 │   │   ├── excel_slicers.py  # agregar_slicers, slicers_disponibles (solo Windows)
 │   │   └── base_processor.py # calcular_dias_habiles, calcular_info_dias, calcular_factor_tendencia
+│   ├── api/                  # API REST (FastAPI)
+│   │   ├── routes/
+│   │   │   └── ventas.py     # Endpoints de ventas
+│   │   └── __init__.py
 │   └── services/
 │       ├── base_service.py   # BaseService (clase abstracta)
 │       └── ventas/           # Reporte de ventas
@@ -29,6 +34,7 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 │           └── processor.py  # procesar_ventas_diarias, formatear_nombre_dia
 ├── tests/
 ├── main.py                   # CLI con subcomandos
+├── api.py                    # FastAPI application
 └── data/output/              # Archivos generados
 ```
 
@@ -49,6 +55,37 @@ python main.py ventas --desde 2026-01-01 --hasta 2026-01-31 --no-slicers
 
 # Tests
 pytest -v
+
+# Iniciar API
+uvicorn api:app --reload --port 8000
+```
+
+## API REST
+
+La API expone los servicios via HTTP. Documentacion interactiva en:
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
+### Endpoints de Ventas
+
+| Metodo | Endpoint | Descripcion |
+|--------|----------|-------------|
+| POST | `/ventas/reporte` | Genera reporte y retorna metadata |
+| POST | `/ventas/reporte/download` | Genera reporte y lo descarga |
+| GET | `/ventas/genericos` | Lista genericos disponibles |
+| GET | `/ventas/sucursales` | Lista sucursales disponibles |
+
+### Ejemplo de Request
+
+```bash
+curl -X POST "http://localhost:8000/ventas/reporte" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fecha_desde": "2026-01-01",
+    "fecha_hasta": "2026-01-31",
+    "genericos": ["CERVEZAS", "AGUAS"],
+    "con_slicers": true
+  }'
 ```
 
 ## Formato del Reporte de Ventas
