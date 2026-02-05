@@ -47,7 +47,8 @@ def cmd_ventas(args) -> int:
         fecha_desde=args.desde,
         fecha_hasta=args.hasta,
         genericos=genericos,
-        nombre_archivo=args.output
+        nombre_archivo=args.output,
+        con_slicers=args.slicers
     )
 
     if genericos:
@@ -66,6 +67,10 @@ def cmd_ventas(args) -> int:
     print(f"  - Registros procesados: {result.registros_procesados}")
     print(f"  - Sucursales: {result.sucursales}")
     print(f"  - Genericos: {len(result.genericos_incluidos)}")
+    if result.slicers_agregados:
+        print(f"  - Slicers: Agregados (Sucursal, Generico, Marca)")
+    elif args.slicers:
+        print(f"  - Slicers: No disponibles (requiere Windows + Excel)")
 
     return 0
 
@@ -116,6 +121,18 @@ Ejemplos:
         "--genericos",
         default=None,
         help="Genericos a incluir, separados por coma (ej: CERVEZAS,AGUAS,VINOS)"
+    )
+    ventas_parser.add_argument(
+        "--slicers",
+        action="store_true",
+        default=True,
+        help="Agregar slicers/segmentadores (solo Windows con Excel)"
+    )
+    ventas_parser.add_argument(
+        "--no-slicers",
+        action="store_false",
+        dest="slicers",
+        help="No agregar slicers"
     )
     ventas_parser.set_defaults(func=cmd_ventas)
 

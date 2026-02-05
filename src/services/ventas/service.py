@@ -11,17 +11,25 @@ from config.settings import COLUMN_NAMES
 from src.core.base_processor import calcular_info_dias
 from src.core.data_loader import DataLoader
 from src.core.excel_writer import generar_excel, SheetStyle, ColumnFormat, ColumnGroup
+from src.core.excel_slicers import agregar_slicers, slicers_disponibles
 from src.services.base_service import BaseService
 from src.services.ventas.processor import completar_combinaciones, procesar_ventas, procesar_ventas_diarias
 
+# Columnas para slicers en reporte de ventas
+SLICER_COLUMNS = [
+    COLUMN_NAMES["sucursal"],
+    COLUMN_NAMES["generico"],
+    COLUMN_NAMES["marca"],
+]
+
 # Configuracion base de formatos para ventas
 VENTAS_COLUMN_FORMATS = {
-    COLUMN_NAMES["cant_generico"]: ColumnFormat(number_format='#,##0', width=15),
-    COLUMN_NAMES["tend_generico"]: ColumnFormat(number_format='#,##0', width=15),
-    COLUMN_NAMES["monto_generico"]: ColumnFormat(number_format='$ #,##0', width=15),
-    COLUMN_NAMES["total_marca"]: ColumnFormat(number_format='#,##0', width=11),
-    COLUMN_NAMES["tend_marca"]: ColumnFormat(number_format='#,##0', width=11),
-    COLUMN_NAMES["monto_marca"]: ColumnFormat(number_format='$ #,##0', width=15),
+    COLUMN_NAMES["cant_generico"]: ColumnFormat(number_format='#,##0', width=15, font_bold=True),
+    COLUMN_NAMES["tend_generico"]: ColumnFormat(number_format='#,##0', width=15, font_bold=True),
+    COLUMN_NAMES["monto_generico"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True),
+    COLUMN_NAMES["total_marca"]: ColumnFormat(number_format='#,##0', width=11, font_bold=True),
+    COLUMN_NAMES["tend_marca"]: ColumnFormat(number_format='#,##0', width=11, font_bold=True),
+    COLUMN_NAMES["monto_marca"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True),
 }
 
 
@@ -64,6 +72,7 @@ class ReporteVentasConfig:
     fecha_hasta: str
     genericos: list[str] | None = None
     nombre_archivo: str | None = None
+    con_slicers: bool = True  # Agregar slicers si esta disponible (solo Windows)
 
     def __post_init__(self):
         if self.nombre_archivo is None:
@@ -78,6 +87,7 @@ class ReporteVentasResult:
     registros_procesados: int
     sucursales: int
     genericos_incluidos: list[str]
+    slicers_agregados: bool = False  # True si se agregaron slicers exitosamente
 
 
 class VentasService(BaseService):
@@ -130,7 +140,13 @@ class VentasService(BaseService):
         # 6. Generar Excel
         ruta = generar_excel(df_procesado, config.nombre_archivo, sheet_name="Ventas", style=style)
 
-        # 7. Construir resultado
+        # 7. Agregar slicers (solo en Windows con Excel instalado)
+        slicers_ok = False
+        if config.con_slicers and slicers_disponibles():
+            nombre_tabla = "Tabla_Ventas"  # Coincide con sheet_name en generar_excel
+            slicers_ok = agregar_slicers(ruta, nombre_tabla, SLICER_COLUMNS)
+
+        # 8. Construir resultado
         genericos_incluidos = df_articulos["generico"].unique().tolist() if not df_articulos.empty else []
 
         return ReporteVentasResult(
@@ -138,7 +154,8 @@ class VentasService(BaseService):
             registros_ventas=len(df_ventas),
             registros_procesados=len(df_procesado),
             sucursales=len(df_sucursales),
-            genericos_incluidos=genericos_incluidos
+            genericos_incluidos=genericos_incluidos,
+            slicers_agregados=slicers_ok
         )
 
     def obtener_ventas(
