@@ -11,6 +11,7 @@ from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, numbers
+from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from config.settings import DATA_OUTPUT
 
@@ -52,6 +53,8 @@ class SheetStyle:
         column_formats: Formatos especificos por nombre de columna
         column_groups: Lista de grupos de columnas colapsables
         summary_rows: Filas de resumen al inicio {etiqueta: valor}
+        as_table: Convertir datos a tabla Excel nativa
+        table_style: Estilo de tabla Excel (ej: 'TableStyleMedium9')
     """
     header_bold: bool = True
     header_center: bool = True
@@ -60,6 +63,8 @@ class SheetStyle:
     column_formats: dict[str, ColumnFormat] = field(default_factory=dict)
     column_groups: list[ColumnGroup] = field(default_factory=list)
     summary_rows: dict[str, int | float | str] = field(default_factory=dict)
+    as_table: bool = True
+    table_style: str = "TableStyleMedium9"
 
 
 # Estilo por defecto
@@ -81,12 +86,6 @@ def _apply_cell_format(cell, col_name: str, style: SheetStyle, is_header: bool =
         style: Estilo de la hoja
         is_header: Si es celda de encabezado
     """
-    if is_header:
-        if style.header_bold:
-            cell.font = Font(bold=True)
-        if style.header_center:
-            cell.alignment = Alignment(horizontal="center")
-        return
 
     # Formato especifico por columna
     if col_name in style.column_formats:
@@ -175,6 +174,42 @@ def _write_summary_rows(ws, style: SheetStyle) -> int:
     return len(style.summary_rows) + 1
 
 
+def _apply_table_format(ws, df: pd.DataFrame, style: SheetStyle, header_row: int):
+    """Aplica formato de tabla Excel nativa al rango de datos.
+
+    Args:
+        ws: Worksheet de openpyxl
+        df: DataFrame con los datos
+        style: Estilo de la hoja
+        header_row: Fila donde inicia el encabezado de la tabla
+    """
+    if not style.as_table or df.empty:
+        return
+
+    # Calcular rango de la tabla
+    num_rows = len(df) + 1  # +1 por el header
+    num_cols = len(df.columns)
+    start_cell = f"A{header_row}"
+    end_cell = f"{get_column_letter(num_cols)}{header_row + num_rows - 1}"
+    table_range = f"{start_cell}:{end_cell}"
+
+    # Crear tabla con nombre unico
+    table_name = f"Tabla_{ws.title.replace(' ', '_')}"
+    table = Table(displayName=table_name, ref=table_range)
+
+    # Aplicar estilo
+    table_style = TableStyleInfo(
+        name=style.table_style,
+        showFirstColumn=False,
+        showLastColumn=False,
+        showRowStripes=True,
+        showColumnStripes=False
+    )
+    table.tableStyleInfo = table_style
+
+    ws.add_table(table)
+
+
 def _write_sheet(ws, df: pd.DataFrame, style: SheetStyle):
     """Escribe datos y aplica formato a una hoja."""
     headers = list(df.columns)
@@ -193,6 +228,7 @@ def _write_sheet(ws, df: pd.DataFrame, style: SheetStyle):
     header_row = row_offset + 1
     _auto_fit_columns(ws, style, header_row=header_row)
     _apply_column_groups(ws, df, style)
+    _apply_table_format(ws, df, style, header_row=header_row)
 
 
 def generar_excel(
