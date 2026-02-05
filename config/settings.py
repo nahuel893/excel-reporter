@@ -47,7 +47,19 @@ COLUMN_NAMES = {
     "tend_generico": "Tendencia (Generico)",
     "monto_generico": "Monto (Generico)",
     "marca": "Marca",
-    "cant_marca": "Cantidad (Marca)",
+    # Columnas dinamicas de dias van aqui (generadas en processor)
+    "total_marca": "Total",
     "tend_marca": "Tendencia (Marca)",
     "monto_marca": "Monto (Marca)",
+}
+
+# Nombres de dias en espanol
+DIAS_SEMANA = {
+    0: "Lunes",
+    1: "Martes",
+    2: "Miercoles",
+    3: "Jueves",
+    4: "Viernes",
+    5: "Sabado",
+    6: "Domingo",
 }

@@ -7,10 +7,19 @@ from dataclasses import dataclass
 from pathlib import Path
 import pandas as pd
 
+from config.settings import COLUMN_NAMES
 from src.core.data_loader import DataLoader
-from src.core.excel_writer import generar_excel
+from src.core.excel_writer import generar_excel, SheetStyle, ColumnFormat
 from src.services.base_service import BaseService
-from src.services.ventas.processor import completar_combinaciones, procesar_ventas
+from src.services.ventas.processor import completar_combinaciones, procesar_ventas, procesar_ventas_diarias
+
+# Estilo para el reporte de ventas
+VENTAS_STYLE = SheetStyle(
+    column_formats={
+        COLUMN_NAMES["monto_generico"]: ColumnFormat(number_format='$ #,##0'),
+        COLUMN_NAMES["monto_marca"]: ColumnFormat(number_format='$ #,##0'),
+    }
+)
 
 
 @dataclass
@@ -45,7 +54,7 @@ class VentasService(BaseService):
 
     def generar_reporte(self, config: ReporteVentasConfig) -> ReporteVentasResult:
         """
-        Genera un reporte de ventas completo.
+        Genera un reporte de ventas completo con desglose diario.
 
         Args:
             config: Configuracion del reporte.
@@ -53,8 +62,8 @@ class VentasService(BaseService):
         Returns:
             ReporteVentasResult con informacion del reporte generado.
         """
-        # 1. Extraer datos
-        df_ventas = self.data_loader.get_ventas(
+        # 1. Extraer datos diarios
+        df_ventas = self.data_loader.get_ventas_diarias(
             config.fecha_desde,
             config.fecha_hasta,
             config.genericos
@@ -62,18 +71,15 @@ class VentasService(BaseService):
         df_sucursales = self.data_loader.get_sucursales()
         df_articulos = self.data_loader.get_articulos(config.genericos)
 
-        # 2. Completar combinaciones faltantes
-        df_completo = completar_combinaciones(df_ventas, df_sucursales, df_articulos)
-
-        # 3. Procesar datos (formato final con tendencias)
-        df_procesado = procesar_ventas(
-            df_completo,
+        # 2. Procesar datos (formato final con dias como columnas)
+        df_procesado = procesar_ventas_diarias(
+            df_ventas,
             config.fecha_desde,
             config.fecha_hasta
         )
 
         # 4. Generar Excel
-        ruta = generar_excel(df_procesado, config.nombre_archivo, sheet_name="Ventas")
+        ruta = generar_excel(df_procesado, config.nombre_archivo, sheet_name="Ventas", style=VENTAS_STYLE)
 
         # 5. Construir resultado
         genericos_incluidos = df_articulos["generico"].unique().tolist() if not df_articulos.empty else []
