@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, numbers
 
 from config.settings import DATA_OUTPUT
@@ -24,6 +25,22 @@ class ColumnFormat:
 
 
 @dataclass
+class ColumnGroup:
+    """Define un grupo de columnas colapsable.
+
+    Attributes:
+        start_col: Nombre de columna donde inicia el grupo
+        end_col: Nombre de columna donde termina el grupo
+        collapsed: Si el grupo inicia colapsado
+        hidden: Si las columnas estan ocultas
+    """
+    start_col: str
+    end_col: str
+    collapsed: bool = True
+    hidden: bool = False
+
+
+@dataclass
 class SheetStyle:
     """Estilos configurables para una hoja Excel.
 
@@ -33,12 +50,14 @@ class SheetStyle:
         auto_width: Ajustar ancho automaticamente
         numeric_format: Formato para columnas numericas (ej: '#,##0' sin decimales)
         column_formats: Formatos especificos por nombre de columna
+        column_groups: Lista de grupos de columnas colapsables
     """
     header_bold: bool = True
     header_center: bool = True
     auto_width: bool = True
     numeric_format: str = "#,##0"
     column_formats: dict[str, ColumnFormat] = field(default_factory=dict)
+    column_groups: list[ColumnGroup] = field(default_factory=list)
 
 
 # Estilo por defecto
@@ -109,6 +128,30 @@ def _auto_fit_columns(ws, style: SheetStyle, column_formats: dict[str, ColumnFor
         ws.column_dimensions[column_letter].width = max_length + 2
 
 
+def _apply_column_groups(ws, df: pd.DataFrame, style: SheetStyle):
+    """Aplica grupos de columnas colapsables."""
+    if not style.column_groups:
+        return
+
+    headers = list(df.columns)
+    col_to_idx = {name: idx + 1 for idx, name in enumerate(headers)}
+
+    for group in style.column_groups:
+        start_idx = col_to_idx.get(group.start_col)
+        end_idx = col_to_idx.get(group.end_col)
+
+        if start_idx and end_idx and start_idx <= end_idx:
+            # Agrupar columnas
+            ws.column_dimensions.group(
+                get_column_letter(start_idx),
+                get_column_letter(end_idx),
+                hidden=group.hidden
+            )
+
+    # Configurar para que el boton de grupo este arriba
+    ws.sheet_properties.outlinePr.summaryRight = False
+
+
 def _write_sheet(ws, df: pd.DataFrame, style: SheetStyle):
     """Escribe datos y aplica formato a una hoja."""
     headers = list(df.columns)
@@ -120,6 +163,7 @@ def _write_sheet(ws, df: pd.DataFrame, style: SheetStyle):
             _apply_cell_format(cell, col_name, style, is_header=(r_idx == 1))
 
     _auto_fit_columns(ws, style)
+    _apply_column_groups(ws, df, style)
 
 
 def generar_excel(

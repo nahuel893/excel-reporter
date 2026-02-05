@@ -9,17 +9,41 @@ import pandas as pd
 
 from config.settings import COLUMN_NAMES
 from src.core.data_loader import DataLoader
-from src.core.excel_writer import generar_excel, SheetStyle, ColumnFormat
+from src.core.excel_writer import generar_excel, SheetStyle, ColumnFormat, ColumnGroup
 from src.services.base_service import BaseService
 from src.services.ventas.processor import completar_combinaciones, procesar_ventas, procesar_ventas_diarias
 
-# Estilo para el reporte de ventas
-VENTAS_STYLE = SheetStyle(
-    column_formats={
-        COLUMN_NAMES["monto_generico"]: ColumnFormat(number_format='$ #,##0'),
-        COLUMN_NAMES["monto_marca"]: ColumnFormat(number_format='$ #,##0'),
-    }
-)
+# Configuracion base de formatos de moneda para ventas
+VENTAS_COLUMN_FORMATS = {
+    COLUMN_NAMES["monto_generico"]: ColumnFormat(number_format='$ #,##0'),
+    COLUMN_NAMES["monto_marca"]: ColumnFormat(number_format='$ #,##0'),
+}
+
+
+def _crear_estilo_ventas(columnas_dias: list[str], dias_visibles: int = 2) -> SheetStyle:
+    """
+    Crea el estilo para el reporte de ventas con grupos de columnas.
+
+    Args:
+        columnas_dias: Lista de nombres de columnas de dias
+        dias_visibles: Cantidad de dias al final que no se agrupan (default: 2)
+
+    Returns:
+        SheetStyle configurado con el grupo de dias
+    """
+    groups = []
+
+    # Solo agrupar si hay mas dias que los visibles
+    if len(columnas_dias) > dias_visibles:
+        # Agrupar desde el primer dia hasta (total - dias_visibles)
+        start_col = columnas_dias[0]
+        end_col = columnas_dias[-(dias_visibles + 1)]
+        groups.append(ColumnGroup(start_col=start_col, end_col=end_col, collapsed=True))
+
+    return SheetStyle(
+        column_formats=VENTAS_COLUMN_FORMATS,
+        column_groups=groups
+    )
 
 
 @dataclass
@@ -78,10 +102,19 @@ class VentasService(BaseService):
             config.fecha_hasta
         )
 
-        # 4. Generar Excel
-        ruta = generar_excel(df_procesado, config.nombre_archivo, sheet_name="Ventas", style=VENTAS_STYLE)
+        # 3. Detectar columnas de dias (entre Marca y Total)
+        columnas = list(df_procesado.columns)
+        idx_marca = columnas.index(COLUMN_NAMES["marca"])
+        idx_total = columnas.index(COLUMN_NAMES["total_marca"])
+        columnas_dias = columnas[idx_marca + 1:idx_total]
 
-        # 5. Construir resultado
+        # 4. Crear estilo con grupo de dias
+        style = _crear_estilo_ventas(columnas_dias)
+
+        # 5. Generar Excel
+        ruta = generar_excel(df_procesado, config.nombre_archivo, sheet_name="Ventas", style=style)
+
+        # 6. Construir resultado
         genericos_incluidos = df_articulos["generico"].unique().tolist() if not df_articulos.empty else []
 
         return ReporteVentasResult(
