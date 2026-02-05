@@ -88,7 +88,7 @@ def _apply_cell_format(cell, col_name: str, style: SheetStyle, is_header: bool =
     """
     if is_header:
         # Fondo burdeo pastel, texto blanco, negrita, centrado y distribuido
-        cell.fill = PatternFill(start_color="9E6B6B", end_color="9E6B6B", fill_type="solid")
+        cell.fill = PatternFill(start_color="A92C1F", end_color="A92C1F", fill_type="solid")
         cell.font = Font(bold=style.header_bold, color="FFFFFF")
         cell.alignment = Alignment(
             horizontal="center",

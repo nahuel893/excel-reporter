@@ -19,7 +19,9 @@ VENTAS_COLUMN_FORMATS = {
     COLUMN_NAMES["cant_generico"]: ColumnFormat(width=15),
     COLUMN_NAMES["tend_generico"]: ColumnFormat(width=15),
     COLUMN_NAMES["monto_generico"]: ColumnFormat(number_format='$ #,##0', width=15),
-    COLUMN_NAMES["monto_marca"]: ColumnFormat(number_format='$ #,##0'),
+    COLUMN_NAMES["total_marca"]: ColumnFormat(width=11),
+    COLUMN_NAMES["tend_marca"]: ColumnFormat(width=11),
+    COLUMN_NAMES["monto_marca"]: ColumnFormat(number_format='$ #,##0', width=15),
 }
 
 
