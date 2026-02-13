@@ -186,6 +186,132 @@ class DataLoader:
 
         return self.execute_query(query, params)
 
+    # ── Cobertura ──────────────────────────────────────────────
+
+    def get_cobertura_preventista_generico(
+        self,
+        periodo_desde: str,
+        periodo_hasta: str,
+        sucursales: list[str] | None = None
+    ) -> pd.DataFrame:
+        """
+        Obtiene cobertura por preventista y generico.
+
+        Args:
+            periodo_desde: Periodo inicio formato 'YYYY-MM-DD'
+            periodo_hasta: Periodo fin formato 'YYYY-MM-DD'
+            sucursales: Lista de sucursales a filtrar. Si es None, trae todas.
+
+        Returns:
+            DataFrame con columnas: periodo, sucursal, id_vendedor, id_ruta,
+            generico, clientes_compradores, volumen_total
+        """
+        filtro_suc = ""
+        params = {"desde": periodo_desde, "hasta": periodo_hasta}
+
+        if sucursales:
+            placeholders = ", ".join([f":suc_{i}" for i in range(len(sucursales))])
+            filtro_suc = f"AND ds_sucursal IN ({placeholders})"
+            params.update({f"suc_{i}": s for i, s in enumerate(sucursales)})
+
+        query = f"""
+        SELECT
+            periodo,
+            ds_sucursal AS sucursal,
+            id_vendedor,
+            id_ruta,
+            generico,
+            clientes_compradores,
+            volumen_total
+        FROM gold.cob_preventista_generico
+        WHERE periodo BETWEEN :desde AND :hasta
+        {filtro_suc}
+        ORDER BY periodo, ds_sucursal, generico
+        """
+        return self.execute_query(query, params)
+
+    def get_cobertura_preventista_marca(
+        self,
+        periodo_desde: str,
+        periodo_hasta: str,
+        sucursales: list[str] | None = None
+    ) -> pd.DataFrame:
+        """
+        Obtiene cobertura por preventista y marca.
+
+        Args:
+            periodo_desde: Periodo inicio formato 'YYYY-MM-DD'
+            periodo_hasta: Periodo fin formato 'YYYY-MM-DD'
+            sucursales: Lista de sucursales a filtrar. Si es None, trae todas.
+
+        Returns:
+            DataFrame con columnas: periodo, sucursal, id_vendedor, id_ruta,
+            marca, clientes_compradores, volumen_total
+        """
+        filtro_suc = ""
+        params = {"desde": periodo_desde, "hasta": periodo_hasta}
+
+        if sucursales:
+            placeholders = ", ".join([f":suc_{i}" for i in range(len(sucursales))])
+            filtro_suc = f"AND ds_sucursal IN ({placeholders})"
+            params.update({f"suc_{i}": s for i, s in enumerate(sucursales)})
+
+        query = f"""
+        SELECT
+            periodo,
+            ds_sucursal AS sucursal,
+            id_vendedor,
+            id_ruta,
+            marca,
+            clientes_compradores,
+            volumen_total
+        FROM gold.cob_preventista_marca
+        WHERE periodo BETWEEN :desde AND :hasta
+        {filtro_suc}
+        ORDER BY periodo, ds_sucursal, marca
+        """
+        return self.execute_query(query, params)
+
+    def get_cobertura_sucursal_marca(
+        self,
+        periodo_desde: str,
+        periodo_hasta: str,
+        sucursales: list[str] | None = None
+    ) -> pd.DataFrame:
+        """
+        Obtiene cobertura agregada por sucursal y marca.
+
+        Args:
+            periodo_desde: Periodo inicio formato 'YYYY-MM-DD'
+            periodo_hasta: Periodo fin formato 'YYYY-MM-DD'
+            sucursales: Lista de sucursales a filtrar. Si es None, trae todas.
+
+        Returns:
+            DataFrame con columnas: periodo, sucursal, marca,
+            clientes_compradores, volumen_total
+        """
+        filtro_suc = ""
+        params = {"desde": periodo_desde, "hasta": periodo_hasta}
+
+        if sucursales:
+            placeholders = ", ".join([f":suc_{i}" for i in range(len(sucursales))])
+            filtro_suc = f"AND ds_sucursal IN ({placeholders})"
+            params.update({f"suc_{i}": s for i, s in enumerate(sucursales)})
+
+        query = f"""
+        SELECT
+            periodo,
+            ds_sucursal AS sucursal,
+            marca,
+            clientes_compradores,
+            volumen_total
+        FROM gold.cob_sucursal_marca
+        WHERE periodo BETWEEN :desde AND :hasta
+        {filtro_suc}
+        ORDER BY periodo, ds_sucursal, marca
+        """
+        return self.execute_query(query, params)
+
 
 # Instancia por defecto para compatibilidad
 _default_loader = None
