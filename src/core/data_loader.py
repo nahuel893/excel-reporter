@@ -211,22 +211,24 @@ class DataLoader:
 
         if sucursales:
             placeholders = ", ".join([f":suc_{i}" for i in range(len(sucursales))])
-            filtro_suc = f"AND ds_sucursal IN ({placeholders})"
+            filtro_suc = f"AND cpg.ds_sucursal IN ({placeholders})"
             params.update({f"suc_{i}": s for i, s in enumerate(sucursales)})
 
         query = f"""
         SELECT
-            periodo,
-            ds_sucursal AS sucursal,
-            id_vendedor,
-            id_ruta,
-            generico,
-            clientes_compradores,
-            volumen_total
-        FROM gold.cob_preventista_generico
-        WHERE periodo BETWEEN :desde AND :hasta
+            cpg.periodo,
+            cpg.ds_sucursal AS sucursal,
+            cpg.id_vendedor,
+            dv.des_vendedor AS vendedor,
+            cpg.id_ruta,
+            cpg.generico,
+            cpg.clientes_compradores,
+            cpg.volumen_total
+        FROM gold.cob_preventista_generico cpg
+        LEFT JOIN gold.dim_vendedor dv ON cpg.id_vendedor = dv.id_vendedor
+        WHERE cpg.periodo BETWEEN :desde AND :hasta
         {filtro_suc}
-        ORDER BY periodo, ds_sucursal, generico
+        ORDER BY cpg.periodo, cpg.ds_sucursal, dv.des_vendedor, cpg.generico
         """
         return self.execute_query(query, params)
 
@@ -245,30 +247,32 @@ class DataLoader:
             sucursales: Lista de sucursales a filtrar. Si es None, trae todas.
 
         Returns:
-            DataFrame con columnas: periodo, sucursal, id_vendedor, id_ruta,
-            marca, clientes_compradores, volumen_total
+            DataFrame con columnas: periodo, sucursal, id_vendedor, vendedor,
+            id_ruta, marca, clientes_compradores, volumen_total
         """
         filtro_suc = ""
         params = {"desde": periodo_desde, "hasta": periodo_hasta}
 
         if sucursales:
             placeholders = ", ".join([f":suc_{i}" for i in range(len(sucursales))])
-            filtro_suc = f"AND ds_sucursal IN ({placeholders})"
+            filtro_suc = f"AND cpm.ds_sucursal IN ({placeholders})"
             params.update({f"suc_{i}": s for i, s in enumerate(sucursales)})
 
         query = f"""
         SELECT
-            periodo,
-            ds_sucursal AS sucursal,
-            id_vendedor,
-            id_ruta,
-            marca,
-            clientes_compradores,
-            volumen_total
-        FROM gold.cob_preventista_marca
-        WHERE periodo BETWEEN :desde AND :hasta
+            cpm.periodo,
+            cpm.ds_sucursal AS sucursal,
+            cpm.id_vendedor,
+            dv.des_vendedor AS vendedor,
+            cpm.id_ruta,
+            cpm.marca,
+            cpm.clientes_compradores,
+            cpm.volumen_total
+        FROM gold.cob_preventista_marca cpm
+        LEFT JOIN gold.dim_vendedor dv ON cpm.id_vendedor = dv.id_vendedor
+        WHERE cpm.periodo BETWEEN :desde AND :hasta
         {filtro_suc}
-        ORDER BY periodo, ds_sucursal, marca
+        ORDER BY cpm.periodo, cpm.ds_sucursal, dv.des_vendedor, cpm.marca
         """
         return self.execute_query(query, params)
 
@@ -295,20 +299,20 @@ class DataLoader:
 
         if sucursales:
             placeholders = ", ".join([f":suc_{i}" for i in range(len(sucursales))])
-            filtro_suc = f"AND ds_sucursal IN ({placeholders})"
+            filtro_suc = f"AND csm.ds_sucursal IN ({placeholders})"
             params.update({f"suc_{i}": s for i, s in enumerate(sucursales)})
 
         query = f"""
         SELECT
-            periodo,
-            ds_sucursal AS sucursal,
-            marca,
-            clientes_compradores,
-            volumen_total
-        FROM gold.cob_sucursal_marca
-        WHERE periodo BETWEEN :desde AND :hasta
+            csm.periodo,
+            csm.ds_sucursal AS sucursal,
+            csm.marca,
+            csm.clientes_compradores,
+            csm.volumen_total
+        FROM gold.cob_sucursal_marca csm
+        WHERE csm.periodo BETWEEN :desde AND :hasta
         {filtro_suc}
-        ORDER BY periodo, ds_sucursal, marca
+        ORDER BY csm.periodo, csm.ds_sucursal, csm.marca
         """
         return self.execute_query(query, params)
 
