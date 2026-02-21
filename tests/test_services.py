@@ -18,6 +18,14 @@ class TestReporteVentasConfig:
         )
         assert config.nombre_archivo == "ventas_2026-01-01_2026-01-31"
 
+    def test_sin_unidad(self):
+        """Config ya no tiene campo unidad (se generan ambas hojas)."""
+        config = ReporteVentasConfig(
+            fecha_desde="2026-01-01",
+            fecha_hasta="2026-01-31"
+        )
+        assert not hasattr(config, "unidad")
+
     def test_nombre_archivo_personalizado(self):
         """Se puede especificar nombre personalizado."""
         config = ReporteVentasConfig(
@@ -54,6 +62,16 @@ class TestVentasServiceUnit:
         loader = Mock(spec=DataLoader)
 
         # Configurar respuestas de los metodos
+        loader.get_ventas_diarias.return_value = pd.DataFrame({
+            "sucursal": ["SUC1"],
+            "generico": ["CERVEZAS"],
+            "marca": ["CORONA"],
+            "fecha": pd.to_datetime(["2026-01-15"]),
+            "cantidad": [100],
+            "cantidad_htls": [50],
+            "monto": [5000]
+        })
+
         loader.get_ventas.return_value = pd.DataFrame({
             "sucursal": ["SUC1"],
             "generico": ["CERVEZAS"],
@@ -83,25 +101,13 @@ class TestVentasServiceUnit:
         service = VentasService()
         assert isinstance(service.data_loader, DataLoader)
 
-    @patch("src.services.ventas.service.generar_excel")
-    @patch("src.services.ventas.service.procesar_ventas")
-    @patch("src.services.ventas.service.completar_combinaciones")
-    def test_generar_reporte_llama_funciones_correctamente(
-        self, mock_completar, mock_procesar, mock_excel, mock_loader
-    ):
-        """Verifica que generar_reporte orquesta correctamente."""
-        # Configurar mocks
-        mock_completar.return_value = pd.DataFrame({
-            "sucursal": ["SUC1"],
-            "generico": ["CERVEZAS"],
-            "marca": ["CORONA"],
-            "cantidad": [100],
-            "monto": [5000]
-        })
-        mock_procesar.return_value = pd.DataFrame({"col": [1, 2]})
-        mock_excel.return_value = Path("/tmp/test.xlsx")
+    @patch("src.services.ventas.service.ExcelWriter")
+    def test_generar_reporte_crea_dos_hojas(self, mock_writer_cls, mock_loader):
+        """Verifica que generar_reporte crea ambas hojas (Bultos y HTLs)."""
+        mock_writer = Mock()
+        mock_writer.save.return_value = Path("/tmp/test.xlsx")
+        mock_writer_cls.return_value = mock_writer
 
-        # Ejecutar
         service = VentasService(data_loader=mock_loader)
         config = ReporteVentasConfig(
             fecha_desde="2026-01-01",
@@ -109,30 +115,18 @@ class TestVentasServiceUnit:
         )
         result = service.generar_reporte(config)
 
-        # Verificar llamadas
-        mock_loader.get_ventas.assert_called_once_with("2026-01-01", "2026-01-31", None)
-        mock_loader.get_sucursales.assert_called_once()
-        mock_loader.get_articulos.assert_called_once_with(None)
-        mock_completar.assert_called_once()
-        mock_procesar.assert_called_once()
-        mock_excel.assert_called_once()
+        # Verificar que se crearon 2 hojas
+        assert mock_writer.add_sheet.call_count == 2
+        sheet_names = [call.kwargs.get("sheet_name") or call.args[1] for call in mock_writer.add_sheet.call_args_list]
+        assert "Ventas Bultos" in sheet_names
+        assert "Ventas HTLs" in sheet_names
 
-    @patch("src.services.ventas.service.generar_excel")
-    @patch("src.services.ventas.service.procesar_ventas")
-    @patch("src.services.ventas.service.completar_combinaciones")
-    def test_generar_reporte_retorna_result(
-        self, mock_completar, mock_procesar, mock_excel, mock_loader
-    ):
+    @patch("src.services.ventas.service.ExcelWriter")
+    def test_generar_reporte_retorna_result(self, mock_writer_cls, mock_loader):
         """Verifica que generar_reporte retorna ReporteVentasResult."""
-        mock_completar.return_value = pd.DataFrame({
-            "sucursal": ["SUC1"],
-            "generico": ["CERVEZAS"],
-            "marca": ["CORONA"],
-            "cantidad": [100],
-            "monto": [5000]
-        })
-        mock_procesar.return_value = pd.DataFrame({"col": [1, 2]})
-        mock_excel.return_value = Path("/tmp/test.xlsx")
+        mock_writer = Mock()
+        mock_writer.save.return_value = Path("/tmp/test.xlsx")
+        mock_writer_cls.return_value = mock_writer
 
         service = VentasService(data_loader=mock_loader)
         config = ReporteVentasConfig(
@@ -145,23 +139,14 @@ class TestVentasServiceUnit:
         assert result.ruta_archivo == Path("/tmp/test.xlsx")
         assert result.registros_ventas == 1
         assert result.sucursales == 1
+        assert result.hojas == ["Ventas Bultos", "Ventas HTLs"]
 
-    @patch("src.services.ventas.service.generar_excel")
-    @patch("src.services.ventas.service.procesar_ventas")
-    @patch("src.services.ventas.service.completar_combinaciones")
-    def test_generar_reporte_con_genericos(
-        self, mock_completar, mock_procesar, mock_excel, mock_loader
-    ):
+    @patch("src.services.ventas.service.ExcelWriter")
+    def test_generar_reporte_con_genericos(self, mock_writer_cls, mock_loader):
         """Verifica que los genericos se pasan correctamente."""
-        mock_completar.return_value = pd.DataFrame({
-            "sucursal": ["SUC1"],
-            "generico": ["CERVEZAS"],
-            "marca": ["CORONA"],
-            "cantidad": [100],
-            "monto": [5000]
-        })
-        mock_procesar.return_value = pd.DataFrame({"col": [1]})
-        mock_excel.return_value = Path("/tmp/test.xlsx")
+        mock_writer = Mock()
+        mock_writer.save.return_value = Path("/tmp/test.xlsx")
+        mock_writer_cls.return_value = mock_writer
 
         service = VentasService(data_loader=mock_loader)
         config = ReporteVentasConfig(
@@ -172,7 +157,7 @@ class TestVentasServiceUnit:
         service.generar_reporte(config)
 
         # Verificar que los genericos se pasaron
-        mock_loader.get_ventas.assert_called_once_with(
+        mock_loader.get_ventas_diarias.assert_called_once_with(
             "2026-01-01", "2026-01-31", ["CERVEZAS", "AGUAS"]
         )
         mock_loader.get_articulos.assert_called_once_with(["CERVEZAS", "AGUAS"])

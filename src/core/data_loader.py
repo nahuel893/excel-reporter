@@ -105,6 +105,7 @@ class DataLoader:
                 da.marca,
                 fv.fecha_comprobante AS fecha,
                 SUM(fv.cantidades_total) AS cantidad,
+                SUM(fv.cantidad_total_htls) AS cantidad_htls,
                 SUM(fv.subtotal_neto) AS monto
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
@@ -124,6 +125,7 @@ class DataLoader:
                 da.marca,
                 fv.fecha_comprobante AS fecha,
                 SUM(fv.cantidades_total) AS cantidad,
+                SUM(fv.cantidad_total_htls) AS cantidad_htls,
                 SUM(fv.subtotal_neto) AS monto
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
@@ -156,6 +158,7 @@ class DataLoader:
                 da.generico,
                 da.marca,
                 SUM(fv.cantidades_total) AS cantidad,
+                SUM(fv.cantidad_total_htls) AS cantidad_htls,
                 SUM(fv.subtotal_neto) AS monto
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
@@ -174,6 +177,7 @@ class DataLoader:
                 da.generico,
                 da.marca,
                 SUM(fv.cantidades_total) AS cantidad,
+                SUM(fv.cantidad_total_htls) AS cantidad_htls,
                 SUM(fv.subtotal_neto) AS monto
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
@@ -188,31 +192,54 @@ class DataLoader:
 
     # ── Cobertura ──────────────────────────────────────────────
 
+    def _filtro_periodos(
+        self,
+        alias: str,
+        periodos: list[str] | None = None,
+        periodo_desde: str | None = None,
+        periodo_hasta: str | None = None,
+    ) -> tuple[str, dict]:
+        """Construye filtro SQL y params para periodos (lista o rango)."""
+        params = {}
+        if periodos:
+            placeholders = ", ".join([f":per_{i}" for i in range(len(periodos))])
+            filtro = f"{alias}.periodo IN ({placeholders})"
+            params.update({f"per_{i}": p for i, p in enumerate(periodos)})
+        elif periodo_desde and periodo_hasta:
+            filtro = f"{alias}.periodo BETWEEN :desde AND :hasta"
+            params = {"desde": periodo_desde, "hasta": periodo_hasta}
+        else:
+            raise ValueError("Debe especificar 'periodos' o 'periodo_desde'/'periodo_hasta'")
+        return filtro, params
+
+    def _filtro_sucursales(self, alias: str, sucursales: list[str] | None) -> tuple[str, dict]:
+        """Construye filtro SQL y params para sucursales."""
+        if not sucursales:
+            return "", {}
+        placeholders = ", ".join([f":suc_{i}" for i in range(len(sucursales))])
+        filtro = f"AND {alias}.ds_sucursal IN ({placeholders})"
+        params = {f"suc_{i}": s for i, s in enumerate(sucursales)}
+        return filtro, params
+
     def get_cobertura_preventista_generico(
         self,
-        periodo_desde: str,
-        periodo_hasta: str,
+        periodo_desde: str | None = None,
+        periodo_hasta: str | None = None,
+        periodos: list[str] | None = None,
         sucursales: list[str] | None = None
     ) -> pd.DataFrame:
         """
         Obtiene cobertura por preventista y generico.
 
         Args:
-            periodo_desde: Periodo inicio formato 'YYYY-MM-DD'
-            periodo_hasta: Periodo fin formato 'YYYY-MM-DD'
-            sucursales: Lista de sucursales a filtrar. Si es None, trae todas.
-
-        Returns:
-            DataFrame con columnas: periodo, sucursal, id_vendedor, id_ruta,
-            generico, clientes_compradores, volumen_total
+            periodo_desde: Periodo inicio formato 'YYYY-MM-DD' (rango)
+            periodo_hasta: Periodo fin formato 'YYYY-MM-DD' (rango)
+            periodos: Lista de periodos especificos ['2025-02-01', '2026-01-01']
+            sucursales: Lista de sucursales a filtrar.
         """
-        filtro_suc = ""
-        params = {"desde": periodo_desde, "hasta": periodo_hasta}
-
-        if sucursales:
-            placeholders = ", ".join([f":suc_{i}" for i in range(len(sucursales))])
-            filtro_suc = f"AND cpg.ds_sucursal IN ({placeholders})"
-            params.update({f"suc_{i}": s for i, s in enumerate(sucursales)})
+        filtro_per, params = self._filtro_periodos("cpg", periodos, periodo_desde, periodo_hasta)
+        filtro_suc, params_suc = self._filtro_sucursales("cpg", sucursales)
+        params.update(params_suc)
 
         query = f"""
         SELECT
@@ -226,7 +253,7 @@ class DataLoader:
             cpg.volumen_total
         FROM gold.cob_preventista_generico cpg
         LEFT JOIN gold.dim_vendedor dv ON cpg.id_vendedor = dv.id_vendedor
-        WHERE cpg.periodo BETWEEN :desde AND :hasta
+        WHERE {filtro_per}
         {filtro_suc}
         ORDER BY cpg.periodo, cpg.ds_sucursal, dv.des_vendedor, cpg.generico
         """
@@ -234,29 +261,23 @@ class DataLoader:
 
     def get_cobertura_preventista_marca(
         self,
-        periodo_desde: str,
-        periodo_hasta: str,
+        periodo_desde: str | None = None,
+        periodo_hasta: str | None = None,
+        periodos: list[str] | None = None,
         sucursales: list[str] | None = None
     ) -> pd.DataFrame:
         """
         Obtiene cobertura por preventista y marca.
 
         Args:
-            periodo_desde: Periodo inicio formato 'YYYY-MM-DD'
-            periodo_hasta: Periodo fin formato 'YYYY-MM-DD'
-            sucursales: Lista de sucursales a filtrar. Si es None, trae todas.
-
-        Returns:
-            DataFrame con columnas: periodo, sucursal, id_vendedor, vendedor,
-            id_ruta, marca, clientes_compradores, volumen_total
+            periodo_desde: Periodo inicio formato 'YYYY-MM-DD' (rango)
+            periodo_hasta: Periodo fin formato 'YYYY-MM-DD' (rango)
+            periodos: Lista de periodos especificos ['2025-02-01', '2026-01-01']
+            sucursales: Lista de sucursales a filtrar.
         """
-        filtro_suc = ""
-        params = {"desde": periodo_desde, "hasta": periodo_hasta}
-
-        if sucursales:
-            placeholders = ", ".join([f":suc_{i}" for i in range(len(sucursales))])
-            filtro_suc = f"AND cpm.ds_sucursal IN ({placeholders})"
-            params.update({f"suc_{i}": s for i, s in enumerate(sucursales)})
+        filtro_per, params = self._filtro_periodos("cpm", periodos, periodo_desde, periodo_hasta)
+        filtro_suc, params_suc = self._filtro_sucursales("cpm", sucursales)
+        params.update(params_suc)
 
         query = f"""
         SELECT
@@ -270,7 +291,7 @@ class DataLoader:
             cpm.volumen_total
         FROM gold.cob_preventista_marca cpm
         LEFT JOIN gold.dim_vendedor dv ON cpm.id_vendedor = dv.id_vendedor
-        WHERE cpm.periodo BETWEEN :desde AND :hasta
+        WHERE {filtro_per}
         {filtro_suc}
         ORDER BY cpm.periodo, cpm.ds_sucursal, dv.des_vendedor, cpm.marca
         """
@@ -278,29 +299,23 @@ class DataLoader:
 
     def get_cobertura_sucursal_marca(
         self,
-        periodo_desde: str,
-        periodo_hasta: str,
+        periodo_desde: str | None = None,
+        periodo_hasta: str | None = None,
+        periodos: list[str] | None = None,
         sucursales: list[str] | None = None
     ) -> pd.DataFrame:
         """
         Obtiene cobertura agregada por sucursal y marca.
 
         Args:
-            periodo_desde: Periodo inicio formato 'YYYY-MM-DD'
-            periodo_hasta: Periodo fin formato 'YYYY-MM-DD'
-            sucursales: Lista de sucursales a filtrar. Si es None, trae todas.
-
-        Returns:
-            DataFrame con columnas: periodo, sucursal, marca,
-            clientes_compradores, volumen_total
+            periodo_desde: Periodo inicio formato 'YYYY-MM-DD' (rango)
+            periodo_hasta: Periodo fin formato 'YYYY-MM-DD' (rango)
+            periodos: Lista de periodos especificos ['2025-02-01', '2026-01-01']
+            sucursales: Lista de sucursales a filtrar.
         """
-        filtro_suc = ""
-        params = {"desde": periodo_desde, "hasta": periodo_hasta}
-
-        if sucursales:
-            placeholders = ", ".join([f":suc_{i}" for i in range(len(sucursales))])
-            filtro_suc = f"AND csm.ds_sucursal IN ({placeholders})"
-            params.update({f"suc_{i}": s for i, s in enumerate(sucursales)})
+        filtro_per, params = self._filtro_periodos("csm", periodos, periodo_desde, periodo_hasta)
+        filtro_suc, params_suc = self._filtro_sucursales("csm", sucursales)
+        params.update(params_suc)
 
         query = f"""
         SELECT
@@ -310,9 +325,46 @@ class DataLoader:
             csm.clientes_compradores,
             csm.volumen_total
         FROM gold.cob_sucursal_marca csm
-        WHERE csm.periodo BETWEEN :desde AND :hasta
+        WHERE {filtro_per}
         {filtro_suc}
         ORDER BY csm.periodo, csm.ds_sucursal, csm.marca
+        """
+        return self.execute_query(query, params)
+
+    def get_cobertura_sucursal_generico(
+        self,
+        periodo_desde: str | None = None,
+        periodo_hasta: str | None = None,
+        periodos: list[str] | None = None,
+        sucursales: list[str] | None = None
+    ) -> pd.DataFrame:
+        """
+        Obtiene cobertura agregada por sucursal y generico.
+
+        Agrega datos de cob_preventista_generico agrupando por sucursal.
+
+        Args:
+            periodo_desde: Periodo inicio formato 'YYYY-MM-DD' (rango)
+            periodo_hasta: Periodo fin formato 'YYYY-MM-DD' (rango)
+            periodos: Lista de periodos especificos ['2025-02-01', '2026-01-01']
+            sucursales: Lista de sucursales a filtrar.
+        """
+        filtro_per, params = self._filtro_periodos("cpg", periodos, periodo_desde, periodo_hasta)
+        filtro_suc, params_suc = self._filtro_sucursales("cpg", sucursales)
+        params.update(params_suc)
+
+        query = f"""
+        SELECT
+            cpg.periodo,
+            cpg.ds_sucursal AS sucursal,
+            cpg.generico,
+            SUM(cpg.clientes_compradores) AS clientes_compradores,
+            SUM(cpg.volumen_total) AS volumen_total
+        FROM gold.cob_preventista_generico cpg
+        WHERE {filtro_per}
+        {filtro_suc}
+        GROUP BY cpg.periodo, cpg.ds_sucursal, cpg.generico
+        ORDER BY cpg.periodo, cpg.ds_sucursal, cpg.generico
         """
         return self.execute_query(query, params)
 

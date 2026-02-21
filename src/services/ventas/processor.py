@@ -10,7 +10,7 @@ from config.settings import COLUMN_NAMES, DIAS_SEMANA
 from src.core.base_processor import calcular_factor_tendencia, completar_combinaciones as base_completar
 
 
-def completar_combinaciones(df_ventas: pd.DataFrame, df_sucursales: pd.DataFrame, df_articulos: pd.DataFrame) -> pd.DataFrame:
+def completar_combinaciones(df_ventas: pd.DataFrame, df_sucursales: pd.DataFrame, df_articulos: pd.DataFrame, col_cantidad: str = "cantidad") -> pd.DataFrame:
     """
     Completa el DataFrame de ventas con todas las combinaciones sucursal-generico-marca.
     Las combinaciones sin ventas se rellenan con 0.
@@ -19,6 +19,7 @@ def completar_combinaciones(df_ventas: pd.DataFrame, df_sucursales: pd.DataFrame
         df_ventas: DataFrame con ventas (sucursal, generico, marca, cantidad, monto)
         df_sucursales: DataFrame con todas las sucursales
         df_articulos: DataFrame con todas las combinaciones generico-marca
+        col_cantidad: Nombre de la columna de cantidad a usar
 
     Returns:
         DataFrame con todas las combinaciones, ventas faltantes en 0
@@ -28,7 +29,7 @@ def completar_combinaciones(df_ventas: pd.DataFrame, df_sucursales: pd.DataFrame
         df_dimension1=df_sucursales,
         df_dimension2=df_articulos,
         cols_join=["sucursal", "generico", "marca"],
-        cols_fill=["cantidad", "monto"]
+        cols_fill=[col_cantidad, "monto"]
     )
 
 
@@ -51,7 +52,8 @@ def procesar_ventas_diarias(
     fecha_desde: str,
     fecha_hasta: str,
     df_sucursales: pd.DataFrame | None = None,
-    df_articulos: pd.DataFrame | None = None
+    df_articulos: pd.DataFrame | None = None,
+    col_cantidad: str = "cantidad"
 ) -> pd.DataFrame:
     """
     Procesa las ventas diarias para generar tabla con columnas por dia.
@@ -65,6 +67,7 @@ def procesar_ventas_diarias(
         fecha_hasta: Fecha fin formato 'YYYY-MM-DD'
         df_sucursales: DataFrame con todas las sucursales (para completar combinaciones)
         df_articulos: DataFrame con todas las combinaciones generico-marca
+        col_cantidad: Columna de cantidad a usar ('cantidad' para bultos, 'cantidad_htls' para htls)
 
     Returns:
         DataFrame con formato incluyendo dias como columnas
@@ -101,7 +104,7 @@ def procesar_ventas_diarias(
         )
 
         # Rellenar NaN con 0
-        df["cantidad"] = df["cantidad"].fillna(0)
+        df[col_cantidad] = df[col_cantidad].fillna(0)
         df["monto"] = df["monto"].fillna(0)
 
     # Factor de tendencia
@@ -115,7 +118,7 @@ def procesar_ventas_diarias(
     pivot_dias = df.pivot_table(
         index=["sucursal", "generico", "marca"],
         columns="fecha",
-        values="cantidad",
+        values=col_cantidad,
         aggfunc="sum",
         fill_value=0
     ).reset_index()
@@ -128,7 +131,7 @@ def procesar_ventas_diarias(
 
     # Calcular totales por marca (suma de cantidad y monto)
     totales_marca = df.groupby(["sucursal", "generico", "marca"]).agg({
-        "cantidad": "sum",
+        col_cantidad: "sum",
         "monto": "sum"
     }).reset_index()
     totales_marca.columns = ["sucursal", "generico", "marca", "total_marca", "monto_marca"]

@@ -2,7 +2,7 @@
 Modulo de servicio de cobertura.
 
 Proporciona funcionalidad para generar reportes de cobertura
-por preventista/sucursal y generico/marca.
+por preventista/ruta y generico/marca.
 """
 from src.services.cobertura.service import (
     CoberturaService,

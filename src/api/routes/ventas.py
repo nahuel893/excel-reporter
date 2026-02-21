@@ -28,6 +28,7 @@ class ReporteVentasResponse(BaseModel):
     registros_procesados: int
     sucursales: int
     genericos_incluidos: list[str]
+    hojas: list[str]
     slicers_agregados: bool
 
 
@@ -55,6 +56,7 @@ def generar_reporte(request: ReporteVentasRequest):
             registros_procesados=result.registros_procesados,
             sucursales=result.sucursales,
             genericos_incluidos=result.genericos_incluidos,
+            hojas=result.hojas,
             slicers_agregados=result.slicers_agregados
         )
     except Exception as e:

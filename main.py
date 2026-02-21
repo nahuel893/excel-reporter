@@ -63,6 +63,7 @@ def cmd_ventas(args) -> int:
     # Mostrar resultado
     print(f"Reporte generado exitosamente:")
     print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Hojas: {', '.join(result.hojas)}")
     print(f"  - Registros de ventas: {result.registros_ventas}")
     print(f"  - Registros procesados: {result.registros_procesados}")
     print(f"  - Sucursales: {result.sucursales}")

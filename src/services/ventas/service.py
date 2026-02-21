@@ -10,7 +10,7 @@ import pandas as pd
 from config.settings import COLUMN_NAMES
 from src.core.base_processor import calcular_info_dias
 from src.core.data_loader import DataLoader
-from src.core.excel_writer import generar_excel, SheetStyle, ColumnFormat, ColumnGroup
+from src.core.excel_writer import ExcelWriter, SheetStyle, ColumnFormat, ColumnGroup
 from src.core.excel_slicers import agregar_slicers, slicers_disponibles
 from src.services.base_service import BaseService
 from src.services.ventas.processor import completar_combinaciones, procesar_ventas, procesar_ventas_diarias
@@ -65,6 +65,17 @@ def _crear_estilo_ventas(
     )
 
 
+# Unidades disponibles
+UNIDAD_BULTOS = "bultos"
+UNIDAD_HTLS = "htls"
+
+# Mapeo unidad -> columna de cantidad en el DataFrame
+_COL_CANTIDAD = {
+    UNIDAD_BULTOS: "cantidad",
+    UNIDAD_HTLS: "cantidad_htls",
+}
+
+
 @dataclass
 class ReporteVentasConfig:
     """Configuracion para generar un reporte de ventas."""
@@ -72,7 +83,7 @@ class ReporteVentasConfig:
     fecha_hasta: str
     genericos: list[str] | None = None
     nombre_archivo: str | None = None
-    con_slicers: bool = True  # Agregar slicers si esta disponible (solo Windows)
+    con_slicers: bool = True
 
     def __post_init__(self):
         if self.nombre_archivo is None:
@@ -87,7 +98,8 @@ class ReporteVentasResult:
     registros_procesados: int
     sucursales: int
     genericos_incluidos: list[str]
-    slicers_agregados: bool = False  # True si se agregaron slicers exitosamente
+    hojas: list[str] = None
+    slicers_agregados: bool = False
 
 
 class VentasService(BaseService):
@@ -100,6 +112,8 @@ class VentasService(BaseService):
     def generar_reporte(self, config: ReporteVentasConfig) -> ReporteVentasResult:
         """
         Genera un reporte de ventas completo con desglose diario.
+
+        Genera un archivo Excel con dos hojas: Ventas Bultos y Ventas HTLs.
 
         Args:
             config: Configuracion del reporte.
@@ -116,45 +130,61 @@ class VentasService(BaseService):
         df_sucursales = self.data_loader.get_sucursales()
         df_articulos = self.data_loader.get_articulos(config.genericos)
 
-        # 2. Procesar datos (formato final con dias como columnas)
-        df_procesado = procesar_ventas_diarias(
-            df_ventas,
-            config.fecha_desde,
-            config.fecha_hasta,
-            df_sucursales,
-            df_articulos
-        )
-
-        # 3. Detectar columnas de dias (entre Marca y Total)
-        columnas = list(df_procesado.columns)
-        idx_marca = columnas.index(COLUMN_NAMES["marca"])
-        idx_total = columnas.index(COLUMN_NAMES["total_marca"])
-        columnas_dias = columnas[idx_marca + 1:idx_total]
-
-        # 4. Calcular info de dias habiles
+        # 2. Calcular info de dias habiles (comun a ambas hojas)
         info_dias = calcular_info_dias(config.fecha_desde, config.fecha_hasta)
 
-        # 5. Crear estilo con grupo de dias e info de resumen
-        style = _crear_estilo_ventas(columnas_dias, info_dias)
+        # 3. Crear workbook con ambas hojas
+        writer = ExcelWriter(config.nombre_archivo)
+        unidades = [
+            (UNIDAD_BULTOS, "Ventas Bultos"),
+            (UNIDAD_HTLS, "Ventas HTLs"),
+        ]
 
-        # 6. Generar Excel
-        ruta = generar_excel(df_procesado, config.nombre_archivo, sheet_name="Ventas", style=style)
+        total_procesados = 0
+        for unidad, sheet_label in unidades:
+            col_cantidad = _COL_CANTIDAD[unidad]
+            df_procesado = procesar_ventas_diarias(
+                df_ventas,
+                config.fecha_desde,
+                config.fecha_hasta,
+                df_sucursales,
+                df_articulos,
+                col_cantidad=col_cantidad
+            )
 
-        # 7. Agregar slicers (solo en Windows con Excel instalado)
+            # Detectar columnas de dias (entre Marca y Total)
+            columnas = list(df_procesado.columns)
+            idx_marca = columnas.index(COLUMN_NAMES["marca"])
+            idx_total = columnas.index(COLUMN_NAMES["total_marca"])
+            columnas_dias = columnas[idx_marca + 1:idx_total]
+
+            # Crear estilo con grupo de dias e info de resumen
+            style = _crear_estilo_ventas(columnas_dias, info_dias)
+
+            writer.add_sheet(df_procesado, sheet_name=sheet_label, style=style)
+            total_procesados += len(df_procesado)
+
+        # 4. Guardar archivo
+        ruta = writer.save()
+
+        # 5. Agregar slicers (solo en Windows con Excel instalado)
         slicers_ok = False
         if config.con_slicers and slicers_disponibles():
-            nombre_tabla = "Tabla_Ventas"  # Coincide con sheet_name en generar_excel
-            slicers_ok = agregar_slicers(ruta, nombre_tabla, SLICER_COLUMNS)
+            for _, sheet_label in unidades:
+                nombre_tabla = f"Tabla_{sheet_label.replace(' ', '_')}"
+                agregar_slicers(ruta, nombre_tabla, SLICER_COLUMNS)
+            slicers_ok = True
 
-        # 8. Construir resultado
+        # 6. Construir resultado
         genericos_incluidos = df_articulos["generico"].unique().tolist() if not df_articulos.empty else []
 
         return ReporteVentasResult(
             ruta_archivo=ruta,
             registros_ventas=len(df_ventas),
-            registros_procesados=len(df_procesado),
+            registros_procesados=total_procesados,
             sucursales=len(df_sucursales),
             genericos_incluidos=genericos_incluidos,
+            hojas=[label for _, label in unidades],
             slicers_agregados=slicers_ok
         )
 
