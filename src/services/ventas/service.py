@@ -107,8 +107,7 @@ class ReporteVentasConfig:
     con_cobertura: bool = True
 
     def __post_init__(self):
-        if self.nombre_archivo is None:
-            self.nombre_archivo = f"ventas_{self.fecha_desde}_{self.fecha_hasta}"
+        pass  # El nombre se genera en el servicio a partir de la ultima fecha real de ventas
 
 
 @dataclass
@@ -122,6 +121,37 @@ class ReporteVentasResult:
     hojas: list[str] = None
     slicers_agregados: bool = False
     supervisor: str | None = None
+
+
+def _nombre_reporte(
+    df_ventas: pd.DataFrame,
+    fecha_hasta: str,
+    supervisor: str | None = None,
+    nombre_explicito: str | None = None,
+) -> str:
+    """
+    Genera el nombre de archivo para el reporte.
+
+    Formato: 'Ventas {supervisor} - {dd-mm-yyyy}' o 'Ventas - {dd-mm-yyyy}'.
+    La fecha es la ultima fecha con ventas reales; si no hay datos, usa fecha_hasta.
+
+    Args:
+        df_ventas: DataFrame con columna 'fecha' de las ventas
+        fecha_hasta: Fecha limite del rango (fallback si df_ventas esta vacio)
+        supervisor: Nombre del supervisor (None para reporte global)
+        nombre_explicito: Si el usuario especifico un nombre custom, lo usa tal cual.
+    """
+    if nombre_explicito:
+        return nombre_explicito
+
+    if not df_ventas.empty and "fecha" in df_ventas.columns:
+        ultima_fecha = pd.to_datetime(df_ventas["fecha"]).max().strftime("%d-%m-%Y")
+    else:
+        ultima_fecha = pd.to_datetime(fecha_hasta).strftime("%d-%m-%Y")
+
+    if supervisor:
+        return f"Ventas {supervisor} - {ultima_fecha}"
+    return f"Ventas - {ultima_fecha}"
 
 
 class VentasService(BaseService):
@@ -249,8 +279,10 @@ class VentasService(BaseService):
             self._fetch_data(config)
         )
 
+        nombre = _nombre_reporte(df_ventas, config.fecha_hasta, nombre_explicito=config.nombre_archivo)
+
         ruta, total_procesados, slicers_ok = self._build_workbook(
-            config.nombre_archivo,
+            nombre,
             config.fecha_desde,
             config.fecha_hasta,
             df_ventas,
@@ -312,9 +344,8 @@ class VentasService(BaseService):
             if df_cob_marca is not None:
                 df_cob_marca_sup = df_cob_marca[df_cob_marca["sucursal"].isin(sucursales_list)]
 
-            # Nombre de archivo: ventas_DESDE_HASTA_supervisor
-            sup_slug = supervisor.lower().replace(" ", "_")
-            nombre = f"{config.nombre_archivo}_{sup_slug}"
+            # Nombre de archivo: "Ventas {supervisor} - {ultima_fecha}"
+            nombre = _nombre_reporte(df_ventas_sup, config.fecha_hasta, supervisor=supervisor)
 
             ruta, total_procesados, slicers_ok = self._build_workbook(
                 nombre,

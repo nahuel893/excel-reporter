@@ -10,13 +10,13 @@ from src.core.data_loader import DataLoader
 class TestReporteVentasConfig:
     """Tests para ReporteVentasConfig."""
 
-    def test_nombre_archivo_por_defecto(self):
-        """Si no se especifica nombre, se genera automaticamente."""
+    def test_nombre_archivo_none_por_defecto(self):
+        """Si no se especifica nombre, queda None (el servicio lo genera con la fecha real)."""
         config = ReporteVentasConfig(
             fecha_desde="2026-01-01",
             fecha_hasta="2026-01-31"
         )
-        assert config.nombre_archivo == "ventas_2026-01-01_2026-01-31"
+        assert config.nombre_archivo is None
 
     def test_sin_unidad(self):
         """Config ya no tiene campo unidad (se generan ambas hojas)."""
