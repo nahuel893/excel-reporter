@@ -46,11 +46,13 @@ COLUMN_NAMES = {
     "cant_generico": "Cantidad (Generico)",
     "tend_generico": "Tendencia (Generico)",
     "monto_generico": "Monto (Generico)",
+    "cob_generico": "Cobertura (Generico)",
     "marca": "Marca",
     # Columnas dinamicas de dias van aqui (generadas en processor)
     "total_marca": "Total",
     "tend_marca": "Tendencia (Marca)",
     "monto_marca": "Monto (Marca)",
+    "cob_marca": "Cobertura (Marca)",
 }
 
 # Nombres de dias en espanol

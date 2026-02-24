@@ -166,8 +166,9 @@ class TestProcesarVentas:
         })
         resultado = procesar_ventas(df, "2026-01-01", "2026-01-31")
 
-        expected_columns = list(COLUMN_NAMES.values())
-        assert list(resultado.columns) == expected_columns
+        # procesar_ventas es la version legacy sin columnas de cobertura
+        cols_sin_cobertura = [v for k, v in COLUMN_NAMES.items() if k not in ("cob_generico", "cob_marca")]
+        assert list(resultado.columns) == cols_sin_cobertura
 
     @patch("src.core.base_processor.FERIADOS", [])
     def test_totales_generico_en_primera_fila(self):

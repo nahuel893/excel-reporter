@@ -9,8 +9,10 @@ Subcomandos disponibles:
     ventas    - Reporte de ventas por sucursal, generico y marca
 """
 import argparse
+import json
 import sys
 from datetime import datetime
+from pathlib import Path
 
 from src.services import VentasService
 from src.services.ventas import ReporteVentasConfig
@@ -54,13 +56,31 @@ def cmd_ventas(args) -> int:
     if genericos:
         print(f"Filtrando por genericos: {genericos}")
 
-    # Ejecutar servicio
-    print(f"Generando reporte de ventas desde {args.desde} hasta {args.hasta}...")
-
     service = VentasService()
-    result = service.generar_reporte(config)
 
-    # Mostrar resultado
+    # Modo supervisores: genera un archivo por supervisor
+    if args.supervisores:
+        ruta_json = Path(args.supervisores)
+        if not ruta_json.exists():
+            print(f"Error: archivo de supervisores no encontrado: {ruta_json}")
+            return 1
+        supervisores = json.loads(ruta_json.read_text(encoding="utf-8"))
+        print(f"Generando reportes por supervisor: {list(supervisores.keys())}")
+        results = service.generar_reporte_supervisores(config, supervisores)
+        for result in results:
+            print(f"\nSupervisor: {result.supervisor}")
+            _imprimir_resultado(result, args.slicers)
+        return 0
+
+    # Modo normal: un archivo con todas las sucursales
+    print(f"Generando reporte de ventas desde {args.desde} hasta {args.hasta}...")
+    result = service.generar_reporte(config)
+    _imprimir_resultado(result, args.slicers)
+    return 0
+
+
+def _imprimir_resultado(result, con_slicers: bool):
+    """Imprime el resultado de un reporte generado."""
     print(f"Reporte generado exitosamente:")
     print(f"  - Archivo: {result.ruta_archivo}")
     print(f"  - Hojas: {', '.join(result.hojas)}")
@@ -70,10 +90,8 @@ def cmd_ventas(args) -> int:
     print(f"  - Genericos: {len(result.genericos_incluidos)}")
     if result.slicers_agregados:
         print(f"  - Slicers: Agregados (Sucursal, Generico, Marca)")
-    elif args.slicers:
+    elif con_slicers:
         print(f"  - Slicers: No disponibles (requiere Windows + Excel)")
-
-    return 0
 
 
 def add_date_arguments(parser):
@@ -134,6 +152,12 @@ Ejemplos:
         action="store_false",
         dest="slicers",
         help="No agregar slicers"
+    )
+    ventas_parser.add_argument(
+        "--supervisores",
+        default=None,
+        metavar="ARCHIVO.json",
+        help="JSON con mapeo supervisor->sucursales. Genera un archivo por supervisor."
     )
     ventas_parser.set_defaults(func=cmd_ventas)
 

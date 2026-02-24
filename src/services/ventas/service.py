@@ -27,10 +27,20 @@ VENTAS_COLUMN_FORMATS = {
     COLUMN_NAMES["cant_generico"]: ColumnFormat(number_format='#,##0', width=15, font_bold=True),
     COLUMN_NAMES["tend_generico"]: ColumnFormat(number_format='#,##0', width=15, font_bold=True),
     COLUMN_NAMES["monto_generico"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True),
+    COLUMN_NAMES["cob_generico"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True),
     COLUMN_NAMES["total_marca"]: ColumnFormat(number_format='#,##0', width=11, font_bold=True),
     COLUMN_NAMES["tend_marca"]: ColumnFormat(number_format='#,##0', width=11, font_bold=True),
     COLUMN_NAMES["monto_marca"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True),
+    COLUMN_NAMES["cob_marca"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True),
 }
+
+
+def _fechas_a_periodos(fecha_desde: str, fecha_hasta: str) -> list[str]:
+    """Convierte un rango de fechas en lista de primeros dias de mes cubiertos."""
+    desde = pd.to_datetime(fecha_desde).replace(day=1)
+    hasta = pd.to_datetime(fecha_hasta)
+    periodos = pd.date_range(desde, hasta, freq="MS")
+    return [p.strftime("%Y-%m-%d") for p in periodos]
 
 
 def _crear_estilo_ventas(
@@ -58,8 +68,13 @@ def _crear_estilo_ventas(
         end_col = columnas_dias[-(dias_visibles + 1)]
         groups.append(ColumnGroup(start_col=start_col, end_col=end_col, collapsed=True))
 
+    # Formato de columnas: base + dias con ancho fijo
+    column_formats = dict(VENTAS_COLUMN_FORMATS)
+    for col_dia in columnas_dias:
+        column_formats[col_dia] = ColumnFormat(number_format='#,##0', width=9.3)
+
     return SheetStyle(
-        column_formats=VENTAS_COLUMN_FORMATS,
+        column_formats=column_formats,
         column_groups=groups,
         summary_rows=info_dias
     )
@@ -75,6 +90,11 @@ _COL_CANTIDAD = {
     UNIDAD_HTLS: "cantidad_htls",
 }
 
+_UNIDADES = [
+    (UNIDAD_BULTOS, "Ventas Bultos"),
+    (UNIDAD_HTLS, "Ventas HTLs"),
+]
+
 
 @dataclass
 class ReporteVentasConfig:
@@ -84,6 +104,7 @@ class ReporteVentasConfig:
     genericos: list[str] | None = None
     nombre_archivo: str | None = None
     con_slicers: bool = True
+    con_cobertura: bool = True
 
     def __post_init__(self):
         if self.nombre_archivo is None:
@@ -100,6 +121,7 @@ class ReporteVentasResult:
     genericos_incluidos: list[str]
     hojas: list[str] = None
     slicers_agregados: bool = False
+    supervisor: str | None = None
 
 
 class VentasService(BaseService):
@@ -109,19 +131,13 @@ class VentasService(BaseService):
     Orquesta el flujo completo: extraccion, procesamiento y generacion de Excel.
     """
 
-    def generar_reporte(self, config: ReporteVentasConfig) -> ReporteVentasResult:
+    def _fetch_data(self, config: ReporteVentasConfig) -> tuple:
         """
-        Genera un reporte de ventas completo con desglose diario.
-
-        Genera un archivo Excel con dos hojas: Ventas Bultos y Ventas HTLs.
-
-        Args:
-            config: Configuracion del reporte.
+        Extrae todos los datos necesarios para el reporte.
 
         Returns:
-            ReporteVentasResult con informacion del reporte generado.
+            (df_ventas, df_sucursales, df_articulos, df_cob_generico, df_cob_marca, info_dias)
         """
-        # 1. Extraer datos diarios
         df_ventas = self.data_loader.get_ventas_diarias(
             config.fecha_desde,
             config.fecha_hasta,
@@ -129,27 +145,70 @@ class VentasService(BaseService):
         )
         df_sucursales = self.data_loader.get_sucursales()
         df_articulos = self.data_loader.get_articulos(config.genericos)
-
-        # 2. Calcular info de dias habiles (comun a ambas hojas)
         info_dias = calcular_info_dias(config.fecha_desde, config.fecha_hasta)
 
-        # 3. Crear workbook con ambas hojas
-        writer = ExcelWriter(config.nombre_archivo)
-        unidades = [
-            (UNIDAD_BULTOS, "Ventas Bultos"),
-            (UNIDAD_HTLS, "Ventas HTLs"),
-        ]
+        df_cob_generico = None
+        df_cob_marca = None
 
+        if config.con_cobertura:
+            periodos = _fechas_a_periodos(config.fecha_desde, config.fecha_hasta)
+            try:
+                df_cg = self.data_loader.get_cobertura_sucursal_generico(periodos=periodos)
+                if not df_cg.empty:
+                    df_cob_generico = (
+                        df_cg.groupby(["sucursal", "generico"])["clientes_compradores"]
+                        .sum()
+                        .reset_index()
+                    )
+            except Exception:
+                pass
+
+            try:
+                df_cm = self.data_loader.get_cobertura_sucursal_marca(periodos=periodos)
+                if not df_cm.empty:
+                    df_cob_marca = (
+                        df_cm.groupby(["sucursal", "marca"])["clientes_compradores"]
+                        .sum()
+                        .reset_index()
+                    )
+            except Exception:
+                pass
+
+        return df_ventas, df_sucursales, df_articulos, df_cob_generico, df_cob_marca, info_dias
+
+    def _build_workbook(
+        self,
+        nombre_archivo: str,
+        fecha_desde: str,
+        fecha_hasta: str,
+        df_ventas: pd.DataFrame,
+        df_sucursales: pd.DataFrame,
+        df_articulos: pd.DataFrame,
+        df_cob_generico: pd.DataFrame | None,
+        df_cob_marca: pd.DataFrame | None,
+        info_dias: dict,
+        con_slicers: bool,
+    ) -> tuple[Path, int, bool]:
+        """
+        Genera el archivo Excel con ambas hojas (Bultos y HTLs).
+
+        Returns:
+            (ruta_archivo, total_procesados, slicers_ok)
+        """
+        writer = ExcelWriter(nombre_archivo)
         total_procesados = 0
-        for unidad, sheet_label in unidades:
+
+        for unidad, sheet_label in _UNIDADES:
             col_cantidad = _COL_CANTIDAD[unidad]
             df_procesado = procesar_ventas_diarias(
                 df_ventas,
-                config.fecha_desde,
-                config.fecha_hasta,
+                fecha_desde,
+                fecha_hasta,
                 df_sucursales,
                 df_articulos,
-                col_cantidad=col_cantidad
+                col_cantidad=col_cantidad,
+                df_cob_generico=df_cob_generico,
+                df_cob_marca=df_cob_marca,
             )
 
             # Detectar columnas de dias (entre Marca y Total)
@@ -158,25 +217,54 @@ class VentasService(BaseService):
             idx_total = columnas.index(COLUMN_NAMES["total_marca"])
             columnas_dias = columnas[idx_marca + 1:idx_total]
 
-            # Crear estilo con grupo de dias e info de resumen
             style = _crear_estilo_ventas(columnas_dias, info_dias)
-
             writer.add_sheet(df_procesado, sheet_name=sheet_label, style=style)
             total_procesados += len(df_procesado)
 
-        # 4. Guardar archivo
         ruta = writer.save()
 
-        # 5. Agregar slicers (solo en Windows con Excel instalado)
         slicers_ok = False
-        if config.con_slicers and slicers_disponibles():
-            for _, sheet_label in unidades:
+        if con_slicers and slicers_disponibles():
+            for _, sheet_label in _UNIDADES:
                 nombre_tabla = f"Tabla_{sheet_label.replace(' ', '_')}"
                 agregar_slicers(ruta, nombre_tabla, SLICER_COLUMNS)
             slicers_ok = True
 
-        # 6. Construir resultado
-        genericos_incluidos = df_articulos["generico"].unique().tolist() if not df_articulos.empty else []
+        return ruta, total_procesados, slicers_ok
+
+    def generar_reporte(self, config: ReporteVentasConfig) -> ReporteVentasResult:
+        """
+        Genera un reporte de ventas completo con desglose diario.
+
+        Genera un archivo Excel con dos hojas: Ventas Bultos y Ventas HTLs.
+        Incluye columnas de cobertura (Generico y Marca) cruzando con tablas de cobertura.
+
+        Args:
+            config: Configuracion del reporte.
+
+        Returns:
+            ReporteVentasResult con informacion del reporte generado.
+        """
+        df_ventas, df_sucursales, df_articulos, df_cob_gen, df_cob_marca, info_dias = (
+            self._fetch_data(config)
+        )
+
+        ruta, total_procesados, slicers_ok = self._build_workbook(
+            config.nombre_archivo,
+            config.fecha_desde,
+            config.fecha_hasta,
+            df_ventas,
+            df_sucursales,
+            df_articulos,
+            df_cob_gen,
+            df_cob_marca,
+            info_dias,
+            config.con_slicers,
+        )
+
+        genericos_incluidos = (
+            df_articulos["generico"].unique().tolist() if not df_articulos.empty else []
+        )
 
         return ReporteVentasResult(
             ruta_archivo=ruta,
@@ -184,9 +272,79 @@ class VentasService(BaseService):
             registros_procesados=total_procesados,
             sucursales=len(df_sucursales),
             genericos_incluidos=genericos_incluidos,
-            hojas=[label for _, label in unidades],
-            slicers_agregados=slicers_ok
+            hojas=[label for _, label in _UNIDADES],
+            slicers_agregados=slicers_ok,
         )
+
+    def generar_reporte_supervisores(
+        self,
+        config: ReporteVentasConfig,
+        supervisores: dict[str, list[str]],
+    ) -> list[ReporteVentasResult]:
+        """
+        Genera un archivo Excel por supervisor, filtrado por sus sucursales.
+
+        Realiza una sola consulta a BD y luego filtra los datos por supervisor.
+
+        Args:
+            config: Configuracion base del reporte (fechas, genericos, etc.)
+            supervisores: Mapeo {nombre_supervisor: [lista_de_sucursales]}
+
+        Returns:
+            Lista de ReporteVentasResult, uno por supervisor.
+        """
+        # Una sola consulta para todos los supervisores
+        df_ventas, _, df_articulos, df_cob_gen, df_cob_marca, info_dias = (
+            self._fetch_data(config)
+        )
+
+        results = []
+        for supervisor, sucursales_list in supervisores.items():
+            # Filtrar datos al universo de este supervisor
+            df_ventas_sup = df_ventas[df_ventas["sucursal"].isin(sucursales_list)]
+            df_sucursales_sup = pd.DataFrame({"sucursal": sucursales_list})
+
+            df_cob_gen_sup = None
+            if df_cob_gen is not None:
+                df_cob_gen_sup = df_cob_gen[df_cob_gen["sucursal"].isin(sucursales_list)]
+
+            df_cob_marca_sup = None
+            if df_cob_marca is not None:
+                df_cob_marca_sup = df_cob_marca[df_cob_marca["sucursal"].isin(sucursales_list)]
+
+            # Nombre de archivo: ventas_DESDE_HASTA_supervisor
+            sup_slug = supervisor.lower().replace(" ", "_")
+            nombre = f"{config.nombre_archivo}_{sup_slug}"
+
+            ruta, total_procesados, slicers_ok = self._build_workbook(
+                nombre,
+                config.fecha_desde,
+                config.fecha_hasta,
+                df_ventas_sup,
+                df_sucursales_sup,
+                df_articulos,
+                df_cob_gen_sup,
+                df_cob_marca_sup,
+                info_dias,
+                config.con_slicers,
+            )
+
+            genericos_incluidos = (
+                df_articulos["generico"].unique().tolist() if not df_articulos.empty else []
+            )
+
+            results.append(ReporteVentasResult(
+                ruta_archivo=ruta,
+                registros_ventas=len(df_ventas_sup),
+                registros_procesados=total_procesados,
+                sucursales=len(sucursales_list),
+                genericos_incluidos=genericos_incluidos,
+                hojas=[label for _, label in _UNIDADES],
+                slicers_agregados=slicers_ok,
+                supervisor=supervisor,
+            ))
+
+        return results
 
     def obtener_ventas(
         self,
@@ -196,8 +354,6 @@ class VentasService(BaseService):
     ) -> pd.DataFrame:
         """
         Obtiene datos de ventas procesados sin generar Excel.
-
-        util para analisis programatico o integracion con otros sistemas.
 
         Args:
             fecha_desde: Fecha inicio formato 'YYYY-MM-DD'

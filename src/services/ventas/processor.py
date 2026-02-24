@@ -53,13 +53,15 @@ def procesar_ventas_diarias(
     fecha_hasta: str,
     df_sucursales: pd.DataFrame | None = None,
     df_articulos: pd.DataFrame | None = None,
-    col_cantidad: str = "cantidad"
+    col_cantidad: str = "cantidad",
+    df_cob_generico: pd.DataFrame | None = None,
+    df_cob_marca: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Procesa las ventas diarias para generar tabla con columnas por dia.
 
     Formato de salida:
-    Sucursal | Generico | Cant(Gen) | Tend(Gen) | Monto(Gen) | Marca | 01-01 Jueves | ... | Total | Tend | Monto
+    Sucursal | Generico | Cant(Gen) | Tend(Gen) | Monto(Gen) | Cob(Gen) | Marca | dias... | Total | Tend | Monto | Cob(Marca)
 
     Args:
         df: DataFrame con columnas: sucursal, generico, marca, fecha, cantidad, monto
@@ -68,12 +70,29 @@ def procesar_ventas_diarias(
         df_sucursales: DataFrame con todas las sucursales (para completar combinaciones)
         df_articulos: DataFrame con todas las combinaciones generico-marca
         col_cantidad: Columna de cantidad a usar ('cantidad' para bultos, 'cantidad_htls' para htls)
+        df_cob_generico: DataFrame con cobertura por (sucursal, generico, clientes_compradores)
+        df_cob_marca: DataFrame con cobertura por (sucursal, marca, clientes_compradores)
 
     Returns:
-        DataFrame con formato incluyendo dias como columnas
+        DataFrame con formato incluyendo dias como columnas y columnas de cobertura
     """
     if df.empty:
         return pd.DataFrame(columns=list(COLUMN_NAMES.values()))
+
+    # Construir dicts de lookup para cobertura (acceso O(1) en el loop)
+    cob_gen_dict = {}
+    if df_cob_generico is not None and not df_cob_generico.empty:
+        cob_gen_dict = {
+            (r["sucursal"], r["generico"]): r["clientes_compradores"]
+            for _, r in df_cob_generico.iterrows()
+        }
+
+    cob_marca_dict = {}
+    if df_cob_marca is not None and not df_cob_marca.empty:
+        cob_marca_dict = {
+            (r["sucursal"], r["marca"]): r["clientes_compradores"]
+            for _, r in df_cob_marca.iterrows()
+        }
 
     # Asegurar que fecha sea datetime
     df = df.copy()
@@ -173,6 +192,7 @@ def procesar_ventas_diarias(
                 COLUMN_NAMES["cant_generico"]: totales["cant_generico"] if i == 0 else None,
                 COLUMN_NAMES["tend_generico"]: round(totales["tend_generico"]) if i == 0 else None,
                 COLUMN_NAMES["monto_generico"]: totales["monto_generico"] if i == 0 else None,
+                COLUMN_NAMES["cob_generico"]: cob_gen_dict.get((sucursal, generico)) if i == 0 else None,
                 COLUMN_NAMES["marca"]: fila["marca"],
             }
 
@@ -184,6 +204,7 @@ def procesar_ventas_diarias(
             row[COLUMN_NAMES["total_marca"]] = fila["total_marca"]
             row[COLUMN_NAMES["tend_marca"]] = round(fila["tend_marca"])
             row[COLUMN_NAMES["monto_marca"]] = fila["monto_marca"]
+            row[COLUMN_NAMES["cob_marca"]] = cob_marca_dict.get((sucursal, fila["marca"]))
 
             rows.append(row)
 
