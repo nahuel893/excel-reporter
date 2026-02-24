@@ -1,12 +1,12 @@
 {
     "fecha_desde": "2026-01-01",
     "fecha_hasta": "2026-01-31",
-    "genericos": ["CERVEZAS", "AGUAS"],
-    "output": "ventas_enero_2026",
+    "genericos": ["CERVEZAS", "AGUAS", "VINOS"],
+    "nombre_archivo": null,
     "con_slicers": true,
     "con_cobertura": true,
     "supervisores": {
-        "Juan Perez": ["Sucursal Norte", "Sucursal Sur"],
-        "Maria Garcia": ["Sucursal Este", "Sucursal Oeste", "Sucursal Centro"]
+        "Juan Perez": ["Sucursal Norte", "Sucursal Sur", "Sucursal Centro"],
+        "Maria Garcia": ["Sucursal Este", "Sucursal Oeste"]
     }
 }
