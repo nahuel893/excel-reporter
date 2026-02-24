@@ -1,9 +1,26 @@
 """
 CLI para generacion de reportes CCU.
 
-Uso:
+Uso basico (args individuales):
     python main.py ventas --desde 2026-01-01 --hasta 2026-01-31
     python main.py ventas --desde 2026-01-01 --hasta 2026-01-31 --genericos "CERVEZAS,AGUAS"
+
+Uso con archivo de configuracion (recomendado):
+    python main.py ventas --config config.json
+
+Formato del JSON de configuracion:
+    {
+        "fecha_desde": "2026-01-01",
+        "fecha_hasta": "2026-01-31",
+        "genericos": ["CERVEZAS", "AGUAS"],
+        "output": "mi_reporte",
+        "con_slicers": true,
+        "con_cobertura": true,
+        "supervisores": {
+            "Juan Perez": ["Sucursal Norte", "Sucursal Sur"],
+            "Maria Garcia": ["Sucursal Este"]
+        }
+    }
 
 Subcomandos disponibles:
     ventas    - Reporte de ventas por sucursal, generico y marca
@@ -34,23 +51,48 @@ def parsear_genericos(genericos_str: str | None) -> list[str] | None:
     return [g.strip() for g in genericos_str.split(",")]
 
 
+def _cargar_config_json(ruta: str) -> dict:
+    """Lee y parsea el archivo JSON de configuracion."""
+    path = Path(ruta)
+    if not path.exists():
+        print(f"Error: archivo de configuracion no encontrado: {path}")
+        sys.exit(1)
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def cmd_ventas(args) -> int:
     """Ejecuta el comando de reporte de ventas."""
-    # Validar fechas
-    if not validar_fecha(args.desde) or not validar_fecha(args.hasta):
+
+    # Cargar configuracion desde JSON si se provee --config
+    cfg = _cargar_config_json(args.config) if args.config else {}
+
+    # Resolver parametros: JSON tiene precedencia sobre args individuales
+    fecha_desde = cfg.get("fecha_desde") or args.desde
+    fecha_hasta = cfg.get("fecha_hasta") or args.hasta
+    genericos = cfg.get("genericos") or parsear_genericos(args.genericos)
+    nombre_archivo = cfg.get("output") or args.output
+    con_slicers = cfg.get("con_slicers", args.slicers)
+    con_cobertura = cfg.get("con_cobertura", True)
+    supervisores = cfg.get("supervisores")  # Solo disponible via JSON
+
+    # Validar campos requeridos
+    if not fecha_desde or not fecha_hasta:
+        print("Error: fecha_desde y fecha_hasta son requeridos.")
+        print("       Usa --desde/--hasta o definelos en --config config.json")
+        return 1
+
+    if not validar_fecha(fecha_desde) or not validar_fecha(fecha_hasta):
         print("Error: Las fechas deben tener formato YYYY-MM-DD")
         return 1
 
-    # Parsear genericos
-    genericos = parsear_genericos(args.genericos)
-
-    # Crear configuracion
+    # Crear configuracion del servicio
     config = ReporteVentasConfig(
-        fecha_desde=args.desde,
-        fecha_hasta=args.hasta,
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
         genericos=genericos,
-        nombre_archivo=args.output,
-        con_slicers=args.slicers
+        nombre_archivo=nombre_archivo,
+        con_slicers=con_slicers,
+        con_cobertura=con_cobertura,
     )
 
     if genericos:
@@ -59,29 +101,24 @@ def cmd_ventas(args) -> int:
     service = VentasService()
 
     # Modo supervisores: genera un archivo por supervisor
-    if args.supervisores:
-        ruta_json = Path(args.supervisores)
-        if not ruta_json.exists():
-            print(f"Error: archivo de supervisores no encontrado: {ruta_json}")
-            return 1
-        supervisores = json.loads(ruta_json.read_text(encoding="utf-8"))
+    if supervisores:
         print(f"Generando reportes por supervisor: {list(supervisores.keys())}")
         results = service.generar_reporte_supervisores(config, supervisores)
         for result in results:
             print(f"\nSupervisor: {result.supervisor}")
-            _imprimir_resultado(result, args.slicers)
+            _imprimir_resultado(result, con_slicers)
         return 0
 
     # Modo normal: un archivo con todas las sucursales
-    print(f"Generando reporte de ventas desde {args.desde} hasta {args.hasta}...")
+    print(f"Generando reporte de ventas desde {fecha_desde} hasta {fecha_hasta}...")
     result = service.generar_reporte(config)
-    _imprimir_resultado(result, args.slicers)
+    _imprimir_resultado(result, con_slicers)
     return 0
 
 
 def _imprimir_resultado(result, con_slicers: bool):
     """Imprime el resultado de un reporte generado."""
-    print(f"Reporte generado exitosamente:")
+    print("Reporte generado exitosamente:")
     print(f"  - Archivo: {result.ruta_archivo}")
     print(f"  - Hojas: {', '.join(result.hojas)}")
     print(f"  - Registros de ventas: {result.registros_ventas}")
@@ -89,28 +126,9 @@ def _imprimir_resultado(result, con_slicers: bool):
     print(f"  - Sucursales: {result.sucursales}")
     print(f"  - Genericos: {len(result.genericos_incluidos)}")
     if result.slicers_agregados:
-        print(f"  - Slicers: Agregados (Sucursal, Generico, Marca)")
+        print("  - Slicers: Agregados (Sucursal, Generico, Marca)")
     elif con_slicers:
-        print(f"  - Slicers: No disponibles (requiere Windows + Excel)")
-
-
-def add_date_arguments(parser):
-    """Agrega argumentos de fecha comunes a un parser."""
-    parser.add_argument(
-        "--desde",
-        required=True,
-        help="Fecha inicio (YYYY-MM-DD)"
-    )
-    parser.add_argument(
-        "--hasta",
-        required=True,
-        help="Fecha fin (YYYY-MM-DD)"
-    )
-    parser.add_argument(
-        "--output",
-        default=None,
-        help="Nombre del archivo de salida (sin extension)"
-    )
+        print("  - Slicers: No disponibles (requiere Windows + Excel)")
 
 
 def main():
@@ -119,8 +137,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Ejemplos:
+  # Con args individuales
   python main.py ventas --desde 2026-01-01 --hasta 2026-01-31
   python main.py ventas --desde 2026-01-01 --hasta 2026-01-31 --genericos "CERVEZAS,AGUAS"
+
+  # Con archivo de configuracion (recomendado)
+  python main.py ventas --config config.json
 """
     )
 
@@ -133,13 +155,43 @@ Ejemplos:
     # Subcomando: ventas
     ventas_parser = subparsers.add_parser(
         "ventas",
-        help="Reporte de ventas por sucursal, generico y marca"
+        help="Reporte de ventas por sucursal, generico y marca",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    add_date_arguments(ventas_parser)
+
+    # Grupo: configuracion via JSON (alternativa a args individuales)
+    ventas_parser.add_argument(
+        "--config",
+        default=None,
+        metavar="config.json",
+        help=(
+            "Archivo JSON con todos los parametros del reporte. "
+            "Tiene precedencia sobre los args individuales. "
+            "Soporta: fecha_desde, fecha_hasta, genericos, output, "
+            "con_slicers, con_cobertura, supervisores."
+        )
+    )
+
+    # Args individuales (opcionales si se usa --config)
+    ventas_parser.add_argument(
+        "--desde",
+        default=None,
+        help="Fecha inicio (YYYY-MM-DD)"
+    )
+    ventas_parser.add_argument(
+        "--hasta",
+        default=None,
+        help="Fecha fin (YYYY-MM-DD)"
+    )
     ventas_parser.add_argument(
         "--genericos",
         default=None,
         help="Genericos a incluir, separados por coma (ej: CERVEZAS,AGUAS,VINOS)"
+    )
+    ventas_parser.add_argument(
+        "--output",
+        default=None,
+        help="Nombre del archivo de salida (sin extension)"
     )
     ventas_parser.add_argument(
         "--slicers",
@@ -153,23 +205,15 @@ Ejemplos:
         dest="slicers",
         help="No agregar slicers"
     )
-    ventas_parser.add_argument(
-        "--supervisores",
-        default=None,
-        metavar="ARCHIVO.json",
-        help="JSON con mapeo supervisor->sucursales. Genera un archivo por supervisor."
-    )
     ventas_parser.set_defaults(func=cmd_ventas)
 
     # Parsear argumentos
     args = parser.parse_args()
 
-    # Si no se especifico comando, mostrar ayuda
     if args.comando is None:
         parser.print_help()
         return 1
 
-    # Ejecutar el comando
     return args.func(args)
 
 
