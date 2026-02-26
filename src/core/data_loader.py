@@ -138,6 +138,56 @@ class DataLoader:
 
         return self.execute_query(query, params)
 
+    def get_ventas_diarias_con_ruta(self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None) -> pd.DataFrame:
+        """
+        Obtiene ventas diarias incluyendo id_ruta para split de zonas virtuales.
+
+        Igual a get_ventas_diarias pero agrega fv.id_ruta al GROUP BY.
+        """
+        if genericos:
+            placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
+            query = f"""
+            SELECT
+                ds.descripcion AS sucursal,
+                da.generico,
+                da.marca,
+                fv.fecha_comprobante AS fecha,
+                fv.id_ruta,
+                SUM(fv.cantidades_total) AS cantidad,
+                SUM(fv.cantidad_total_htls) AS cantidad_htls,
+                SUM(fv.subtotal_neto) AS monto
+            FROM gold.fact_ventas fv
+            LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+            LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+            WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
+            AND da.generico IN ({placeholders})
+            GROUP BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante, fv.id_ruta
+            ORDER BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante
+            """
+            params = {"desde": fecha_desde, "hasta": fecha_hasta}
+            params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
+        else:
+            query = """
+            SELECT
+                ds.descripcion AS sucursal,
+                da.generico,
+                da.marca,
+                fv.fecha_comprobante AS fecha,
+                fv.id_ruta,
+                SUM(fv.cantidades_total) AS cantidad,
+                SUM(fv.cantidad_total_htls) AS cantidad_htls,
+                SUM(fv.subtotal_neto) AS monto
+            FROM gold.fact_ventas fv
+            LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+            LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+            WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
+            GROUP BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante, fv.id_ruta
+            ORDER BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante
+            """
+            params = {"desde": fecha_desde, "hasta": fecha_hasta}
+
+        return self.execute_query(query, params)
+
     def get_ventas(self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None) -> pd.DataFrame:
         """
         Obtiene ventas agrupadas por sucursal, generico y marca.

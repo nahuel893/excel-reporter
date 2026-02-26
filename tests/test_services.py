@@ -72,6 +72,17 @@ class TestVentasServiceUnit:
             "monto": [5000]
         })
 
+        loader.get_ventas_diarias_con_ruta.return_value = pd.DataFrame({
+            "sucursal": ["SUC1"],
+            "generico": ["CERVEZAS"],
+            "marca": ["CORONA"],
+            "fecha": pd.to_datetime(["2026-01-15"]),
+            "id_ruta": [1],
+            "cantidad": [100],
+            "cantidad_htls": [50],
+            "monto": [5000]
+        })
+
         loader.get_ventas.return_value = pd.DataFrame({
             "sucursal": ["SUC1"],
             "generico": ["CERVEZAS"],
@@ -157,7 +168,7 @@ class TestVentasServiceUnit:
         service.generar_reporte(config)
 
         # Verificar que los genericos se pasaron
-        mock_loader.get_ventas_diarias.assert_called_once_with(
+        mock_loader.get_ventas_diarias_con_ruta.assert_called_once_with(
             "2026-01-01", "2026-01-31", ["CERVEZAS", "AGUAS"]
         )
         mock_loader.get_articulos.assert_called_once_with(["CERVEZAS", "AGUAS"])

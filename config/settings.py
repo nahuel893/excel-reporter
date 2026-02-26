@@ -56,6 +56,13 @@ COLUMN_NAMES = {
 }
 
 # Nombres de dias en espanol
+ZONAS_VIRTUALES = {
+    "VALLE SALTA": {
+        "sucursal_real": "CASA CENTRAL",
+        "rutas": [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 118, 119, 120, 122],
+    }
+}
+
 DIAS_SEMANA = {
     0: "Lunes",
     1: "Martes",

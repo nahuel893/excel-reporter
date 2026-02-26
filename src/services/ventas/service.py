@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import pandas as pd
 
-from config.settings import COLUMN_NAMES
+from config.settings import COLUMN_NAMES, ZONAS_VIRTUALES
 from src.core.base_processor import calcular_info_dias
 from src.core.data_loader import DataLoader
 from src.core.excel_writer import ExcelWriter, SheetStyle, ColumnFormat, ColumnGroup
@@ -41,6 +41,58 @@ def _fechas_a_periodos(fecha_desde: str, fecha_hasta: str) -> list[str]:
     hasta = pd.to_datetime(fecha_hasta)
     periodos = pd.date_range(desde, hasta, freq="MS")
     return [p.strftime("%Y-%m-%d") for p in periodos]
+
+
+def _aplicar_zonas_virtuales(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Renombra sucursal en filas que pertenecen a zonas virtuales según id_ruta.
+
+    Para cada zona virtual definida en ZONAS_VIRTUALES, las filas cuya sucursal
+    coincide con sucursal_real y cuyo id_ruta está en la lista de rutas se renombran.
+    Luego elimina la columna id_ruta y reagrupa los datos.
+
+    Args:
+        df: DataFrame con columnas 'sucursal' e 'id_ruta'
+
+    Returns:
+        DataFrame sin columna id_ruta, con sucursales renombradas
+    """
+    if "id_ruta" not in df.columns:
+        return df
+
+    df = df.copy()
+    for zona_nombre, zona_config in ZONAS_VIRTUALES.items():
+        mask = (
+            (df["sucursal"] == zona_config["sucursal_real"])
+            & (df["id_ruta"].isin(zona_config["rutas"]))
+        )
+        df.loc[mask, "sucursal"] = zona_nombre
+
+    df = df.drop(columns=["id_ruta"])
+
+    # Reagrupar porque una misma (sucursal, generico, marca, fecha) puede tener
+    # multiples filas de distintas rutas que ahora comparten la misma sucursal
+    cols_grupo = [c for c in df.columns if c not in ("cantidad", "cantidad_htls", "monto")]
+    if all(c in df.columns for c in ("cantidad", "cantidad_htls", "monto")):
+        df = df.groupby(cols_grupo, as_index=False, dropna=False).sum()
+    elif "clientes_compradores" in df.columns:
+        cols_grupo = [c for c in df.columns if c not in ("clientes_compradores", "volumen_total")]
+        df = df.groupby(cols_grupo, as_index=False, dropna=False).sum()
+
+    return df
+
+
+def _expandir_sucursales(sucursales_list: list[str]) -> list[str]:
+    """
+    Expande sucursales reales a incluir sus zonas virtuales.
+
+    Si un supervisor tiene 'CASA CENTRAL', se agrega 'VALLE SALTA' automáticamente.
+    """
+    expandidas = list(sucursales_list)
+    for zona_nombre, zona_config in ZONAS_VIRTUALES.items():
+        if zona_config["sucursal_real"] in expandidas and zona_nombre not in expandidas:
+            expandidas.append(zona_nombre)
+    return expandidas
 
 
 def _crear_estilo_ventas(
@@ -165,15 +217,31 @@ class VentasService(BaseService):
         """
         Extrae todos los datos necesarios para el reporte.
 
+        Usa get_ventas_diarias_con_ruta() para incluir id_ruta y poder splitear
+        zonas virtuales (ej: CASA CENTRAL → CASA CENTRAL + VALLE SALTA).
+
         Returns:
             (df_ventas, df_sucursales, df_articulos, df_cob_generico, df_cob_marca, info_dias)
         """
-        df_ventas = self.data_loader.get_ventas_diarias(
+        df_ventas = self.data_loader.get_ventas_diarias_con_ruta(
             config.fecha_desde,
             config.fecha_hasta,
             config.genericos
         )
+        df_ventas = _aplicar_zonas_virtuales(df_ventas)
+
         df_sucursales = self.data_loader.get_sucursales()
+        # Agregar zonas virtuales a la lista de sucursales (solo si la sucursal real existe)
+        for zona_nombre, zona_config in ZONAS_VIRTUALES.items():
+            if (
+                zona_config["sucursal_real"] in df_sucursales["sucursal"].values
+                and zona_nombre not in df_sucursales["sucursal"].values
+            ):
+                df_sucursales = pd.concat(
+                    [df_sucursales, pd.DataFrame({"sucursal": [zona_nombre]})],
+                    ignore_index=True,
+                )
+
         df_articulos = self.data_loader.get_articulos(config.genericos)
         info_dias = calcular_info_dias(config.fecha_desde, config.fecha_hasta)
 
@@ -183,8 +251,9 @@ class VentasService(BaseService):
         if config.con_cobertura:
             periodos = _fechas_a_periodos(config.fecha_desde, config.fecha_hasta)
             try:
-                df_cg = self.data_loader.get_cobertura_sucursal_generico(periodos=periodos)
+                df_cg = self.data_loader.get_cobertura_preventista_generico(periodos=periodos)
                 if not df_cg.empty:
+                    df_cg = _aplicar_zonas_virtuales(df_cg)
                     df_cob_generico = (
                         df_cg.groupby(["sucursal", "generico"])["clientes_compradores"]
                         .sum()
@@ -194,8 +263,9 @@ class VentasService(BaseService):
                 pass
 
             try:
-                df_cm = self.data_loader.get_cobertura_sucursal_marca(periodos=periodos)
+                df_cm = self.data_loader.get_cobertura_preventista_marca(periodos=periodos)
                 if not df_cm.empty:
+                    df_cm = _aplicar_zonas_virtuales(df_cm)
                     df_cob_marca = (
                         df_cm.groupby(["sucursal", "marca"])["clientes_compradores"]
                         .sum()
@@ -332,17 +402,20 @@ class VentasService(BaseService):
 
         results = []
         for supervisor, sucursales_list in supervisores.items():
+            # Expandir zonas virtuales (CASA CENTRAL → CASA CENTRAL + VALLE SALTA)
+            sucursales_expandidas = _expandir_sucursales(sucursales_list)
+
             # Filtrar datos al universo de este supervisor
-            df_ventas_sup = df_ventas[df_ventas["sucursal"].isin(sucursales_list)]
-            df_sucursales_sup = pd.DataFrame({"sucursal": sucursales_list})
+            df_ventas_sup = df_ventas[df_ventas["sucursal"].isin(sucursales_expandidas)]
+            df_sucursales_sup = pd.DataFrame({"sucursal": sucursales_expandidas})
 
             df_cob_gen_sup = None
             if df_cob_gen is not None:
-                df_cob_gen_sup = df_cob_gen[df_cob_gen["sucursal"].isin(sucursales_list)]
+                df_cob_gen_sup = df_cob_gen[df_cob_gen["sucursal"].isin(sucursales_expandidas)]
 
             df_cob_marca_sup = None
             if df_cob_marca is not None:
-                df_cob_marca_sup = df_cob_marca[df_cob_marca["sucursal"].isin(sucursales_list)]
+                df_cob_marca_sup = df_cob_marca[df_cob_marca["sucursal"].isin(sucursales_expandidas)]
 
             # Nombre de archivo: "Ventas {supervisor} - {ultima_fecha}"
             nombre = _nombre_reporte(df_ventas_sup, config.fecha_hasta, supervisor=supervisor)
@@ -368,7 +441,7 @@ class VentasService(BaseService):
                 ruta_archivo=ruta,
                 registros_ventas=len(df_ventas_sup),
                 registros_procesados=total_procesados,
-                sucursales=len(sucursales_list),
+                sucursales=len(sucursales_expandidas),
                 genericos_incluidos=genericos_incluidos,
                 hojas=[label for _, label in _UNIDADES],
                 slicers_agregados=slicers_ok,
