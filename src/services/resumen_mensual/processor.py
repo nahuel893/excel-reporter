@@ -170,8 +170,8 @@ def procesar_resumen_mensual(
     df_resultado = pd.DataFrame({
         "Sucursal":            df_base["sucursal"],
         "Generico":            df_base["generico"],
-        col_n1:                df_base["vtas_n1"].astype(int),
         col_n2:                df_base["vtas_n2"].astype(int),
+        col_n1:                df_base["vtas_n1"].astype(int),
         "Total Ventas":        df_base["total_ventas"].astype(int),
         "Tendencia":           df_base["tendencia"],
         "Ventas Mes Anterior": df_base["ventas_ma"].astype(int),

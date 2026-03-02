@@ -275,14 +275,14 @@ class TestResumenMensual:
             )
 
         fila = resultado.iloc[0]
-        col_n1 = resultado.columns[2]
-        col_n2 = resultado.columns[3]
-        # N-1 es el mas reciente (2026-02-26 Jueves con cantidad 30)
-        assert "26-02" in col_n1
-        assert fila[col_n1] == 30
+        col_n2 = resultado.columns[2]  # mas antiguo, columna izquierda
+        col_n1 = resultado.columns[3]  # mas reciente, columna derecha
         # N-2 es el penultimo (2026-02-25 Miercoles con cantidad 20)
         assert "25-02" in col_n2
         assert fila[col_n2] == 20
+        # N-1 es el mas reciente (2026-02-26 Jueves con cantidad 30)
+        assert "26-02" in col_n1
+        assert fila[col_n1] == 30
 
     # -----------------------------------------------------------------------
     # RF-011: Total Ventas es la suma del periodo
