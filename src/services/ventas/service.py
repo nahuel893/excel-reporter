@@ -12,6 +12,7 @@ from src.core.base_processor import calcular_info_dias
 from src.core.data_loader import DataLoader
 from src.core.excel_writer import ExcelWriter, SheetStyle, ColumnFormat, ColumnGroup
 from src.core.excel_slicers import agregar_slicers, slicers_disponibles
+from src.core.zonas import aplicar_zonas_virtuales as _aplicar_zonas_virtuales, expandir_sucursales as _expandir_sucursales
 from src.services.base_service import BaseService
 from src.services.ventas.processor import completar_combinaciones, procesar_ventas, procesar_ventas_diarias
 
@@ -41,58 +42,6 @@ def _fechas_a_periodos(fecha_desde: str, fecha_hasta: str) -> list[str]:
     hasta = pd.to_datetime(fecha_hasta)
     periodos = pd.date_range(desde, hasta, freq="MS")
     return [p.strftime("%Y-%m-%d") for p in periodos]
-
-
-def _aplicar_zonas_virtuales(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Renombra sucursal en filas que pertenecen a zonas virtuales según id_ruta.
-
-    Para cada zona virtual definida en ZONAS_VIRTUALES, las filas cuya sucursal
-    coincide con sucursal_real y cuyo id_ruta está en la lista de rutas se renombran.
-    Luego elimina la columna id_ruta y reagrupa los datos.
-
-    Args:
-        df: DataFrame con columnas 'sucursal' e 'id_ruta'
-
-    Returns:
-        DataFrame sin columna id_ruta, con sucursales renombradas
-    """
-    if "id_ruta" not in df.columns:
-        return df
-
-    df = df.copy()
-    for zona_nombre, zona_config in ZONAS_VIRTUALES.items():
-        mask = (
-            (df["sucursal"] == zona_config["sucursal_real"])
-            & (df["id_ruta"].isin(zona_config["rutas"]))
-        )
-        df.loc[mask, "sucursal"] = zona_nombre
-
-    df = df.drop(columns=["id_ruta"])
-
-    # Reagrupar porque una misma (sucursal, generico, marca, fecha) puede tener
-    # multiples filas de distintas rutas que ahora comparten la misma sucursal
-    cols_grupo = [c for c in df.columns if c not in ("cantidad", "cantidad_htls", "monto")]
-    if all(c in df.columns for c in ("cantidad", "cantidad_htls", "monto")):
-        df = df.groupby(cols_grupo, as_index=False, dropna=False).sum()
-    elif "clientes_compradores" in df.columns:
-        cols_grupo = [c for c in df.columns if c not in ("clientes_compradores", "volumen_total")]
-        df = df.groupby(cols_grupo, as_index=False, dropna=False).sum()
-
-    return df
-
-
-def _expandir_sucursales(sucursales_list: list[str]) -> list[str]:
-    """
-    Expande sucursales reales a incluir sus zonas virtuales.
-
-    Si un supervisor tiene 'CASA CENTRAL', se agrega 'VALLE SALTA' automáticamente.
-    """
-    expandidas = list(sucursales_list)
-    for zona_nombre, zona_config in ZONAS_VIRTUALES.items():
-        if zona_config["sucursal_real"] in expandidas and zona_nombre not in expandidas:
-            expandidas.append(zona_nombre)
-    return expandidas
 
 
 def _crear_estilo_ventas(
