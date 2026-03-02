@@ -1,6 +1,6 @@
 # Spec: Resumen Mensual
 
-> **Estado:** APROBADA
+> **Estado:** IMPLEMENTADA
 > **Fecha:** 2026-03-02
 > **Autor:** nahuel
 
