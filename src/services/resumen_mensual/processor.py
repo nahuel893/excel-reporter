@@ -7,8 +7,13 @@ para el reporte de resumen mensual por sucursal y generico.
 import pandas as pd
 from datetime import date, datetime
 
-from config.settings import FERIADOS
+from config.settings import FERIADOS, DIAS_SEMANA
 from src.core.base_processor import calcular_factor_tendencia
+
+
+def _formatear_dia(d) -> str:
+    """Formatea una fecha como 'dd-mm DiaSemana', ej: '28-02 Sabado'."""
+    return f"{d.strftime('%d-%m')} {DIAS_SEMANA[d.weekday()]}"
 
 
 def _detectar_dias_habiles_con_ventas(df: pd.DataFrame, n: int = 2) -> list:
@@ -69,6 +74,9 @@ def procesar_resumen_mensual(
     fechas_nd = _detectar_dias_habiles_con_ventas(df_dias, n=2) if not df_dias.empty else []
     fecha_n1 = fechas_nd[0] if len(fechas_nd) >= 1 else None
     fecha_n2 = fechas_nd[1] if len(fechas_nd) >= 2 else None
+
+    col_n1 = _formatear_dia(fecha_n1) if fecha_n1 else "Vtas Dia N-1"
+    col_n2 = _formatear_dia(fecha_n2) if fecha_n2 else "Vtas Dia N-2"
 
     # -------------------------------------------------------------------------
     # 2. Extraer ventas de N-1 y N-2
@@ -162,8 +170,8 @@ def procesar_resumen_mensual(
     df_resultado = pd.DataFrame({
         "Sucursal":            df_base["sucursal"],
         "Generico":            df_base["generico"],
-        "Vtas Dia N-1":        df_base["vtas_n1"].astype(int),
-        "Vtas Dia N-2":        df_base["vtas_n2"].astype(int),
+        col_n1:                df_base["vtas_n1"].astype(int),
+        col_n2:                df_base["vtas_n2"].astype(int),
         "Total Ventas":        df_base["total_ventas"].astype(int),
         "Tendencia":           df_base["tendencia"],
         "Ventas Mes Anterior": df_base["ventas_ma"].astype(int),

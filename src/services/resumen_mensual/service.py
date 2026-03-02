@@ -56,11 +56,13 @@ def _nombre_reporte(df_dias: pd.DataFrame, fecha_hasta: str) -> str:
     return f"Resumen - {ultima_fecha}"
 
 
-def _crear_estilo_resumen(info_dias: dict) -> SheetStyle:
+def _crear_estilo_resumen(info_dias: dict, col_n1: str, col_n2: str) -> SheetStyle:
     """Crea el SheetStyle para las hojas del reporte de resumen mensual.
 
     Args:
         info_dias: Diccionario con Dias Habiles, Dias Transcurridos, Dias Faltantes.
+        col_n1: Nombre de la columna del ultimo dia con ventas (ej: '28-02 Sabado').
+        col_n2: Nombre de la columna del penultimo dia con ventas (ej: '27-02 Viernes').
 
     Returns:
         SheetStyle configurado para el reporte de resumen mensual.
@@ -70,8 +72,8 @@ def _crear_estilo_resumen(info_dias: dict) -> SheetStyle:
         column_formats={
             "Sucursal":            ColumnFormat(width=22),
             "Generico":            ColumnFormat(width=20),
-            "Vtas Dia N-1":        ColumnFormat(number_format="#,##0", width=12, font_bold=True),
-            "Vtas Dia N-2":        ColumnFormat(number_format="#,##0", width=12, font_bold=True),
+            col_n1:                ColumnFormat(number_format="#,##0", width=12, font_bold=True),
+            col_n2:                ColumnFormat(number_format="#,##0", width=12, font_bold=True),
             "Total Ventas":        ColumnFormat(number_format="#,##0", width=13, font_bold=True),
             "Tendencia":           ColumnFormat(number_format="#,##0", width=13, font_bold=True),
             "Ventas Mes Anterior": ColumnFormat(number_format="#,##0", width=15, font_bold=True),
@@ -191,7 +193,12 @@ class ResumenMensualService(BaseService):
             df_resultado["Generico"].unique().tolist() if not df_resultado.empty else []
         )
 
-        style = _crear_estilo_resumen(info_dias)
+        # Detectar nombres dinámicos de columnas N-1 y N-2 (posiciones 2 y 3)
+        cols = list(df_resultado.columns)
+        col_n1 = cols[2] if len(cols) > 2 else "Vtas Dia N-1"
+        col_n2 = cols[3] if len(cols) > 3 else "Vtas Dia N-2"
+
+        style = _crear_estilo_resumen(info_dias, col_n1, col_n2)
 
         for generico in genericos_resultado:
             df_hoja = df_resultado[df_resultado["Generico"] == generico].copy()

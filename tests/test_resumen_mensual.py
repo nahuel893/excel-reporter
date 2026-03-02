@@ -180,12 +180,18 @@ class TestResumenMensual:
                 "2026-02-01", "2026-02-28"
             )
 
-        columnas_esperadas = [
-            "Sucursal", "Generico", "Vtas Dia N-1", "Vtas Dia N-2",
-            "Total Ventas", "Tendencia", "Ventas Mes Anterior",
-            "Ventas Mismo Mes AA", "Objetivo", "Tend vs Obj (%)",
-        ]
-        assert list(resultado.columns) == columnas_esperadas
+        # Las columnas N-1 y N-2 tienen nombres dinámicos (fecha real), verificamos estructura
+        cols = list(resultado.columns)
+        assert len(cols) == 10
+        assert cols[0] == "Sucursal"
+        assert cols[1] == "Generico"
+        # cols[2] y cols[3] son los dias dinamicos (ej: "28-02 Sabado")
+        assert cols[4] == "Total Ventas"
+        assert cols[5] == "Tendencia"
+        assert cols[6] == "Ventas Mes Anterior"
+        assert cols[7] == "Ventas Mismo Mes AA"
+        assert cols[8] == "Objetivo"
+        assert cols[9] == "Tend vs Obj (%)"
 
     # -----------------------------------------------------------------------
     # RF-005: Objetivo y Tend vs Obj (%) son None cuando con_objetivo=False
@@ -269,10 +275,14 @@ class TestResumenMensual:
             )
 
         fila = resultado.iloc[0]
-        # N-1 es el mas reciente (2026-02-26 con cantidad 30)
-        assert fila["Vtas Dia N-1"] == 30
-        # N-2 es el penultimo (2026-02-25 con cantidad 20)
-        assert fila["Vtas Dia N-2"] == 20
+        col_n1 = resultado.columns[2]
+        col_n2 = resultado.columns[3]
+        # N-1 es el mas reciente (2026-02-26 Jueves con cantidad 30)
+        assert "26-02" in col_n1
+        assert fila[col_n1] == 30
+        # N-2 es el penultimo (2026-02-25 Miercoles con cantidad 20)
+        assert "25-02" in col_n2
+        assert fila[col_n2] == 20
 
     # -----------------------------------------------------------------------
     # RF-011: Total Ventas es la suma del periodo
@@ -457,7 +467,7 @@ class TestResumenMensual:
                 "Dias Transcurridos": 15,
                 "Dias Faltantes": 5,
             }
-            style = _crear_estilo_resumen(mock_info.return_value)
+            style = _crear_estilo_resumen(mock_info.return_value, "28-02 Sabado", "27-02 Viernes")
 
         assert "Dias Habiles" in style.summary_rows
         assert "Dias Transcurridos" in style.summary_rows
