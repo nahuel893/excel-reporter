@@ -23,7 +23,8 @@ Formato del JSON de configuracion:
     }
 
 Subcomandos disponibles:
-    ventas    - Reporte de ventas por sucursal, generico y marca
+    ventas           - Reporte de ventas por sucursal, generico y marca
+    resumen-mensual  - Resumen mensual por generico (ultimos dias, tendencia, anio anterior)
 """
 import argparse
 import json
@@ -31,7 +32,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from src.services import VentasService
+from src.services import VentasService, ResumenMensualService, ResumenMensualConfig
 from src.services.ventas import ReporteVentasConfig
 
 
@@ -131,6 +132,56 @@ def _imprimir_resultado(result, con_slicers: bool):
         print("  - Slicers: No disponibles (requiere Windows + Excel)")
 
 
+def cmd_resumen_mensual(args) -> int:
+    """Ejecuta el comando de resumen mensual."""
+
+    # Cargar configuracion desde JSON si se provee --config
+    cfg = _cargar_config_json(args.config) if args.config else {}
+
+    # Resolver parametros: JSON tiene precedencia sobre args individuales
+    fecha_desde = cfg.get("fecha_desde") or args.desde
+    fecha_hasta = cfg.get("fecha_hasta") or args.hasta
+    genericos_raw = cfg.get("genericos") or parsear_genericos(args.genericos)
+    nombre_archivo = cfg.get("output") or args.output
+    con_objetivo = cfg.get("con_objetivo", False)
+
+    # Tratar lista vacia como None (trae todos los genericos)
+    genericos = genericos_raw if genericos_raw else None
+
+    # Validar campos requeridos
+    if not fecha_desde or not fecha_hasta:
+        print("Error: fecha_desde y fecha_hasta son requeridos.")
+        print("       Usa --desde/--hasta o definelos en --config config.json")
+        return 1
+
+    if not validar_fecha(fecha_desde) or not validar_fecha(fecha_hasta):
+        print("Error: Las fechas deben tener formato YYYY-MM-DD")
+        return 1
+
+    # Crear configuracion del servicio
+    config = ResumenMensualConfig(
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        genericos=genericos,
+        nombre_archivo=nombre_archivo,
+        con_objetivo=con_objetivo,
+    )
+
+    if genericos:
+        print(f"Filtrando por genericos: {genericos}")
+
+    print(f"Generando resumen mensual desde {fecha_desde} hasta {fecha_hasta}...")
+    result = ResumenMensualService().generar_reporte(config)
+
+    print("Resumen mensual generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Hojas: {', '.join(result.hojas)}")
+    print(f"  - Registros procesados: {result.registros_procesados}")
+    print(f"  - Sucursales: {result.sucursales}")
+    print(f"  - Genericos: {len(result.genericos_incluidos)}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generador de reportes CCU",
@@ -143,6 +194,10 @@ Ejemplos:
 
   # Con archivo de configuracion (recomendado)
   python main.py ventas --config config.json
+
+  # Resumen mensual
+  python main.py resumen-mensual --desde 2026-02-01 --hasta 2026-02-28
+  python main.py resumen-mensual --config config_resumen.json
 """
     )
 
@@ -206,6 +261,48 @@ Ejemplos:
         help="No agregar slicers"
     )
     ventas_parser.set_defaults(func=cmd_ventas)
+
+    # Subcomando: resumen-mensual
+    resumen_parser = subparsers.add_parser(
+        "resumen-mensual",
+        help="Resumen mensual por generico (ultimos dias, tendencia, anio anterior)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    # Grupo: configuracion via JSON (alternativa a args individuales)
+    resumen_parser.add_argument(
+        "--config",
+        default=None,
+        metavar="config.json",
+        help=(
+            "Archivo JSON con todos los parametros del reporte. "
+            "Tiene precedencia sobre los args individuales. "
+            "Soporta: fecha_desde, fecha_hasta, genericos, output, con_objetivo."
+        )
+    )
+
+    # Args individuales (opcionales si se usa --config)
+    resumen_parser.add_argument(
+        "--desde",
+        default=None,
+        help="Fecha inicio (YYYY-MM-DD)"
+    )
+    resumen_parser.add_argument(
+        "--hasta",
+        default=None,
+        help="Fecha fin (YYYY-MM-DD)"
+    )
+    resumen_parser.add_argument(
+        "--genericos",
+        default=None,
+        help="Genericos a incluir, separados por coma (ej: CERVEZAS,AGUAS,VINOS)"
+    )
+    resumen_parser.add_argument(
+        "--output",
+        default=None,
+        help="Nombre del archivo de salida (sin extension)"
+    )
+    resumen_parser.set_defaults(func=cmd_resumen_mensual)
 
     # Parsear argumentos
     args = parser.parse_args()
