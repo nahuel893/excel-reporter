@@ -11,7 +11,7 @@ Documentacion interactiva:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routes import ventas_router
+from src.api.routes import ventas_router, resumen_mensual_router
 from src.core.data_loader import DataLoader
 
 app = FastAPI(
@@ -25,9 +25,12 @@ app = FastAPI(
         "3. Para reportes por supervisor, incluir el campo `supervisores` en el body.\n\n"
         "## Reportes por supervisor\n"
         "Si se incluye `supervisores` en el request, se genera un archivo por supervisor "
-        "y `/download` retorna un ZIP con todos los archivos."
+        "y `/download` retorna un ZIP con todos los archivos.\n\n"
+        "## Resumen Mensual\n"
+        "Genera un reporte ejecutivo por generico con ventas de los ultimos dos dias habiles, "
+        "total acumulado, tendencia al cierre, ventas del mes anterior y del mismo mes del ano anterior."
     ),
-    version="2.0.0",
+    version="2.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -41,6 +44,7 @@ app.add_middleware(
 )
 
 app.include_router(ventas_router)
+app.include_router(resumen_mensual_router)
 
 
 @app.get("/", tags=["Health"], summary="Estado del servicio")
@@ -49,7 +53,7 @@ def root():
     return {
         "status": "ok",
         "service": "Excel Reporter API",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "docs": "/docs",
     }
 
