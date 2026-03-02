@@ -4,8 +4,12 @@ DataLoader - Acceso a datos del Data Warehouse.
 Proporciona acceso centralizado a la base de datos PostgreSQL
 usando SQLAlchemy con soporte para inyección de dependencias.
 """
+from datetime import timedelta, datetime
+
 import pandas as pd
+from dateutil.relativedelta import relativedelta
 from sqlalchemy import create_engine, text, Engine
+
 from config.settings import DB_CONFIG
 
 
@@ -142,7 +146,8 @@ class DataLoader:
         """
         Obtiene ventas diarias incluyendo id_ruta para split de zonas virtuales.
 
-        Igual a get_ventas_diarias pero agrega fv.id_ruta al GROUP BY.
+        Igual a get_ventas_diarias pero agrega id_ruta_fv1 de dim_cliente al GROUP BY.
+        id_ruta se obtiene via: fact_ventas.id_cliente -> dim_cliente.id_ruta_fv1
         """
         if genericos:
             placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
@@ -152,16 +157,17 @@ class DataLoader:
                 da.generico,
                 da.marca,
                 fv.fecha_comprobante AS fecha,
-                fv.id_ruta,
+                dc.id_ruta_fv1 AS id_ruta,
                 SUM(fv.cantidades_total) AS cantidad,
                 SUM(fv.cantidad_total_htls) AS cantidad_htls,
                 SUM(fv.subtotal_neto) AS monto
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+            LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente
             WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
             AND da.generico IN ({placeholders})
-            GROUP BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante, fv.id_ruta
+            GROUP BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante, dc.id_ruta_fv1
             ORDER BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante
             """
             params = {"desde": fecha_desde, "hasta": fecha_hasta}
@@ -173,15 +179,16 @@ class DataLoader:
                 da.generico,
                 da.marca,
                 fv.fecha_comprobante AS fecha,
-                fv.id_ruta,
+                dc.id_ruta_fv1 AS id_ruta,
                 SUM(fv.cantidades_total) AS cantidad,
                 SUM(fv.cantidad_total_htls) AS cantidad_htls,
                 SUM(fv.subtotal_neto) AS monto
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+            LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente
             WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
-            GROUP BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante, fv.id_ruta
+            GROUP BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante, dc.id_ruta_fv1
             ORDER BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante
             """
             params = {"desde": fecha_desde, "hasta": fecha_hasta}
@@ -239,6 +246,158 @@ class DataLoader:
             params = {"desde": fecha_desde, "hasta": fecha_hasta}
 
         return self.execute_query(query, params)
+
+    # ── Resumen Mensual ─────────────────────────────────────────
+
+    def get_ventas_resumen_mensual(self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None) -> pd.DataFrame:
+        """
+        Obtiene ventas mensuales agrupadas por sucursal, generico e id_ruta.
+
+        Args:
+            fecha_desde: Fecha inicio formato 'YYYY-MM-DD'
+            fecha_hasta: Fecha fin formato 'YYYY-MM-DD'
+            genericos: Lista de genericos a filtrar. Si es None, trae todos.
+
+        Returns:
+            DataFrame con columnas: sucursal, generico, id_ruta, cantidad
+        """
+        if genericos:
+            placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
+            query = f"""
+            SELECT
+                ds.descripcion          AS sucursal,
+                da.generico,
+                dc.id_ruta_fv1          AS id_ruta,
+                SUM(fv.cantidades_total) AS cantidad
+            FROM gold.fact_ventas fv
+            LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
+            LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
+            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+            WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
+              AND da.generico IS NOT NULL
+              AND da.generico IN ({placeholders})
+            GROUP BY ds.descripcion, da.generico, dc.id_ruta_fv1
+            ORDER BY ds.descripcion, da.generico
+            """
+            params = {"desde": fecha_desde, "hasta": fecha_hasta}
+            params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
+        else:
+            query = """
+            SELECT
+                ds.descripcion          AS sucursal,
+                da.generico,
+                dc.id_ruta_fv1          AS id_ruta,
+                SUM(fv.cantidades_total) AS cantidad
+            FROM gold.fact_ventas fv
+            LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
+            LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
+            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+            WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
+              AND da.generico IS NOT NULL
+            GROUP BY ds.descripcion, da.generico, dc.id_ruta_fv1
+            ORDER BY ds.descripcion, da.generico
+            """
+            params = {"desde": fecha_desde, "hasta": fecha_hasta}
+
+        return self.execute_query(query, params)
+
+    def get_ventas_ultimos_dias_habiles(self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None) -> pd.DataFrame:
+        """
+        Obtiene ventas diarias de los ultimos dias habiles con desglose por fecha e id_ruta.
+
+        La ventana de consulta usa fecha_hasta - 6 dias como inicio efectivo (7 dias
+        calendario garantizan al menos 2 dias habiles). El parametro fecha_desde se
+        acepta por firma uniforme pero se ignora internamente.
+
+        Args:
+            fecha_desde: Ignorado internamente; la query arranca en fecha_hasta - 6 dias.
+            fecha_hasta: Fecha fin formato 'YYYY-MM-DD'
+            genericos: Lista de genericos a filtrar. Si es None, trae todos.
+
+        Returns:
+            DataFrame con columnas: sucursal, generico, fecha, id_ruta, cantidad
+        """
+        fecha_hasta_dt = datetime.strptime(fecha_hasta, "%Y-%m-%d").date()
+        fecha_inicio_ventana = (fecha_hasta_dt - timedelta(days=6)).strftime("%Y-%m-%d")
+
+        if genericos:
+            placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
+            query = f"""
+            SELECT
+                ds.descripcion           AS sucursal,
+                da.generico,
+                fv.fecha_comprobante     AS fecha,
+                dc.id_ruta_fv1           AS id_ruta,
+                SUM(fv.cantidades_total) AS cantidad
+            FROM gold.fact_ventas fv
+            LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
+            LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
+            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+            WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
+              AND da.generico IS NOT NULL
+              AND da.generico IN ({placeholders})
+            GROUP BY ds.descripcion, da.generico, fv.fecha_comprobante, dc.id_ruta_fv1
+            ORDER BY ds.descripcion, da.generico, fv.fecha_comprobante
+            """
+            params = {"desde": fecha_inicio_ventana, "hasta": fecha_hasta}
+            params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
+        else:
+            query = """
+            SELECT
+                ds.descripcion           AS sucursal,
+                da.generico,
+                fv.fecha_comprobante     AS fecha,
+                dc.id_ruta_fv1           AS id_ruta,
+                SUM(fv.cantidades_total) AS cantidad
+            FROM gold.fact_ventas fv
+            LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
+            LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
+            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+            WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
+              AND da.generico IS NOT NULL
+            GROUP BY ds.descripcion, da.generico, fv.fecha_comprobante, dc.id_ruta_fv1
+            ORDER BY ds.descripcion, da.generico, fv.fecha_comprobante
+            """
+            params = {"desde": fecha_inicio_ventana, "hasta": fecha_hasta}
+
+        return self.execute_query(query, params)
+
+    def get_ventas_mes_anterior(self, fecha_desde: str, genericos: list[str] | None = None) -> pd.DataFrame:
+        """
+        Obtiene ventas del mes calendario completo anterior a fecha_desde.
+
+        Args:
+            fecha_desde: Fecha de referencia formato 'YYYY-MM-DD'. El mes anterior
+                         se calcula como el mes calendario que precede a esta fecha.
+            genericos: Lista de genericos a filtrar. Si es None, trae todos.
+
+        Returns:
+            DataFrame con columnas: sucursal, generico, id_ruta, cantidad
+        """
+        fecha_dt = datetime.strptime(fecha_desde, "%Y-%m-%d").date()
+        primer_dia = (fecha_dt.replace(day=1) - relativedelta(months=1))
+        ultimo_dia = fecha_dt.replace(day=1) - timedelta(days=1)
+        return self.get_ventas_resumen_mensual(
+            primer_dia.strftime("%Y-%m-%d"),
+            ultimo_dia.strftime("%Y-%m-%d"),
+            genericos,
+        )
+
+    def get_ventas_mismo_mes_anio_anterior(self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None) -> pd.DataFrame:
+        """
+        Obtiene ventas del mismo rango de fechas pero del anio anterior.
+
+        Args:
+            fecha_desde: Fecha inicio formato 'YYYY-MM-DD'
+            fecha_hasta: Fecha fin formato 'YYYY-MM-DD'
+            genericos: Lista de genericos a filtrar. Si es None, trae todos.
+
+        Returns:
+            DataFrame con columnas: sucursal, generico, id_ruta, cantidad
+        """
+        fecha_desde_aa = f"{int(fecha_desde[:4]) - 1}{fecha_desde[4:]}"
+        fecha_hasta_aa = f"{int(fecha_hasta[:4]) - 1}{fecha_hasta[4:]}"
+        return self.get_ventas_resumen_mensual(fecha_desde_aa, fecha_hasta_aa, genericos)
 
     # ── Cobertura ──────────────────────────────────────────────
 
