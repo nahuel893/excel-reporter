@@ -303,23 +303,19 @@ class DataLoader:
 
     def get_ventas_ultimos_dias_habiles(self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None) -> pd.DataFrame:
         """
-        Obtiene ventas diarias de los ultimos dias habiles con desglose por fecha e id_ruta.
+        Obtiene ventas diarias del rango completo del mes, con desglose por fecha e id_ruta.
 
-        La ventana de consulta usa fecha_hasta - 6 dias como inicio efectivo (7 dias
-        calendario garantizan al menos 2 dias habiles). El parametro fecha_desde se
-        acepta por firma uniforme pero se ignora internamente.
+        Trae todos los dias del mes para que el procesador pueda detectar los
+        ultimos 2 dias con ventas reales en la BD (sin usar la fecha de hoy como referencia).
 
         Args:
-            fecha_desde: Ignorado internamente; la query arranca en fecha_hasta - 6 dias.
-            fecha_hasta: Fecha fin formato 'YYYY-MM-DD'
+            fecha_desde: Primer dia del mes formato 'YYYY-MM-DD'
+            fecha_hasta: Ultimo dia del rango formato 'YYYY-MM-DD'
             genericos: Lista de genericos a filtrar. Si es None, trae todos.
 
         Returns:
             DataFrame con columnas: sucursal, generico, fecha, id_ruta, cantidad
         """
-        fecha_hasta_dt = datetime.strptime(fecha_hasta, "%Y-%m-%d").date()
-        fecha_inicio_ventana = (fecha_hasta_dt - timedelta(days=6)).strftime("%Y-%m-%d")
-
         if genericos:
             placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
             query = f"""
@@ -339,7 +335,7 @@ class DataLoader:
             GROUP BY ds.descripcion, da.generico, fv.fecha_comprobante, dc.id_ruta_fv1
             ORDER BY ds.descripcion, da.generico, fv.fecha_comprobante
             """
-            params = {"desde": fecha_inicio_ventana, "hasta": fecha_hasta}
+            params = {"desde": fecha_desde, "hasta": fecha_hasta}
             params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
         else:
             query = """
@@ -358,7 +354,7 @@ class DataLoader:
             GROUP BY ds.descripcion, da.generico, fv.fecha_comprobante, dc.id_ruta_fv1
             ORDER BY ds.descripcion, da.generico, fv.fecha_comprobante
             """
-            params = {"desde": fecha_inicio_ventana, "hasta": fecha_hasta}
+            params = {"desde": fecha_desde, "hasta": fecha_hasta}
 
         return self.execute_query(query, params)
 
