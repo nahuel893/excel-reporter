@@ -33,6 +33,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.services import VentasService, ResumenMensualService, ResumenMensualConfig
+from src.services import MisionPosibleService, MisionPosibleConfig
 from src.services.ventas import ReporteVentasConfig
 
 
@@ -182,6 +183,59 @@ def cmd_resumen_mensual(args) -> int:
     return 0
 
 
+def cmd_mision_posible(args) -> int:
+    """Ejecuta el comando de reporte Mision Posible."""
+
+    cfg = _cargar_config_json(args.config) if args.config else {}
+
+    periodo = cfg.get("periodo") or args.periodo
+    marcas_raw = cfg.get("marcas") or (
+        [m.strip() for m in args.marcas.split(",")] if args.marcas else None
+    )
+    nombre_archivo = cfg.get("nombre_archivo") or args.output
+    objetivos = cfg.get("objetivos", {})
+    porcentajes_sucursal = cfg.get("porcentajes_sucursal", {})
+    supervisores = cfg.get("supervisores")
+
+    if not periodo:
+        print("Error: periodo es requerido.")
+        print("       Usa --periodo o definelo en --config config.json")
+        return 1
+
+    if not marcas_raw:
+        print("Error: marcas es requerido.")
+        print("       Usa --marcas o definelo en --config config.json")
+        return 1
+
+    config = MisionPosibleConfig(
+        periodo=periodo,
+        marcas=marcas_raw,
+        objetivos=objetivos,
+        porcentajes_sucursal=porcentajes_sucursal,
+        nombre_archivo=nombre_archivo,
+    )
+
+    print(f"Generando reporte Mision Posible para {periodo}...")
+    print(f"  Marcas: {', '.join(marcas_raw)}")
+
+    service = MisionPosibleService()
+
+    if supervisores:
+        print(f"  Supervisores: {list(supervisores.keys())}")
+        results = service.generar_reporte_supervisores(config, supervisores)
+        for result in results:
+            print(f"\n  Supervisor: {result.supervisor}")
+            for ruta in result.ruta_archivos:
+                print(f"    Archivo: {ruta}")
+    else:
+        result = service.generar_reporte(config)
+        for ruta in result.ruta_archivos:
+            print(f"  Archivo: {ruta}")
+        print(f"  Hojas: {', '.join(result.hojas)}")
+
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generador de reportes CCU",
@@ -303,6 +357,39 @@ Ejemplos:
         help="Nombre del archivo de salida (sin extension)"
     )
     resumen_parser.set_defaults(func=cmd_resumen_mensual)
+
+    # Subcomando: mision-posible
+    mision_parser = subparsers.add_parser(
+        "mision-posible",
+        help="Reporte de cobertura Mision Posible por marca",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    mision_parser.add_argument(
+        "--config",
+        default=None,
+        metavar="config.json",
+        help=(
+            "Archivo JSON con todos los parametros del reporte. "
+            "Soporta: periodo, marcas, objetivos, porcentajes_sucursal, "
+            "nombre_archivo, supervisores."
+        )
+    )
+    mision_parser.add_argument(
+        "--periodo",
+        default=None,
+        help="Periodo del reporte (YYYY-MM-DD, primer dia del mes)"
+    )
+    mision_parser.add_argument(
+        "--marcas",
+        default=None,
+        help="Marcas a incluir, separadas por coma (ej: Imperial,Levite)"
+    )
+    mision_parser.add_argument(
+        "--output",
+        default=None,
+        help="Nombre del archivo de salida (sin extension)"
+    )
+    mision_parser.set_defaults(func=cmd_mision_posible)
 
     # Parsear argumentos
     args = parser.parse_args()

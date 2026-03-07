@@ -1,0 +1,20 @@
+{
+    "periodo": "2026-03-01",
+    "marcas": ["Imperial", "Levite", "Villa del Sur"],
+    "objetivos": {
+        "Imperial": 500,
+        "Levite": 300,
+        "Villa del Sur": 200
+    },
+    "porcentajes_sucursal": {
+        "CASA CENTRAL": 30,
+        "VALLE SALTA": 15,
+        "SUCURSAL CAFAYATE": 10,
+        "SUCURSAL METAN": 10,
+        "SUCURSAL ABRA PAMPA": 10,
+        "SUCURSAL PERICO": 10,
+        "SUCURSAL TARTAGAL": 15
+    },
+    "nombre_archivo": null,
+    "supervisores": null
+}

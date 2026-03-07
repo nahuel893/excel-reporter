@@ -573,6 +573,18 @@ class DataLoader:
         """
         return self.execute_query(query, params)
 
+    def get_ultima_fecha_venta(self):
+        """Obtiene la fecha mas reciente de venta en fact_ventas.
+
+        Returns:
+            date o None si no hay datos.
+        """
+        query = "SELECT MAX(fv.fecha_comprobante) AS ultima_venta FROM gold.fact_ventas fv"
+        df = self.execute_query(query)
+        if df.empty or df["ultima_venta"].iloc[0] is None:
+            return None
+        return pd.to_datetime(df["ultima_venta"].iloc[0]).date()
+
 
 # Instancia por defecto para compatibilidad
 _default_loader = None
