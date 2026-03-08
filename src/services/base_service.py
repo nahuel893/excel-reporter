@@ -1,6 +1,5 @@
 """
 BaseService - Clase base para servicios de reportes.
-
 Proporciona funcionalidad comun para todos los servicios:
 - Inyeccion de dependencias (DataLoader)
 - Metodos utilitarios compartidos
