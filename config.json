@@ -1,0 +1,47 @@
+{
+    "fecha_desde": "2026-02-01",
+    "fecha_hasta": "2026-02-28",
+    "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
+    "nombre_archivo": null,
+    "con_slicers": true,
+    "con_cobertura": true,
+    "supervisores": {
+        "Walter Vilte": [
+            "SUCURSAL CAFAYATE",
+            "SUCURSAL ABRA PAMPA",
+            "SUCURSAL SAN PEDRO",
+            "SUCURSAL JOAQUIN V GONZALEZ",
+            "SUCURSAL LA QUIACA",
+            "SUCURSAL METAN",
+            "SUCURSAL HUMAHUACA",
+            "SUCURSAL ORAN",
+            "SUCURSAL TARTAGAL",
+            "SUCURSAL MAIMARA",
+            "SUCURSAL GUEMES",
+            "SUCURSAL LIBERTADOR",
+            "SUCURSAL PERICO",
+            "CASA CENTRAL"
+        ],
+        "Antonio Cabrerizo": [
+            "CASA CENTRAL"
+        ],
+        "Adrian Garcia": [
+            "SUCURSAL CAFAYATE",
+            "SUCURSAL JOAQUIN V GONZALEZ",
+            "SUCURSAL METAN",
+            "SUCURSAL GUEMES"
+        ],
+        "Hernan Yapura": [
+            "SUCURSAL ABRA PAMPA",
+            "SUCURSAL SAN PEDRO",
+            "SUCURSAL LA QUIACA",
+            "SUCURSAL HUMAHUACA",
+            "SUCURSAL ORAN",
+            "SUCURSAL TARTAGAL",
+            "SUCURSAL MAIMARA",
+            "SUCURSAL LIBERTADOR",
+            "SUCURSAL PERICO"
+        ]
+    }
+}
+

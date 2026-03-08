@@ -1,0 +1,7 @@
+{
+    "fecha_desde": "2026-02-01",
+    "fecha_hasta": "2026-02-28",
+    "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
+    "nombre_archivo": null,
+    "con_objetivo": false
+}
