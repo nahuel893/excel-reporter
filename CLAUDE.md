@@ -16,11 +16,11 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 
 ```
 ├── config/
-│   └── settings.py          # DB_CONFIG, FERIADOS, COLUMN_NAMES, DIAS_SEMANA
+│   └── settings.py          # DB_CONFIG, FERIADOS, COLUMN_NAMES, ZONAS_VIRTUALES, DIAS_SEMANA
 ├── src/
 │   ├── core/                 # Codigo compartido
-│   │   ├── data_loader.py    # DataLoader (acceso BD, get_ventas_diarias)
-│   │   ├── excel_writer.py   # generar_excel, SheetStyle, ColumnFormat, ColumnGroup, summary_rows, as_table
+│   │   ├── data_loader.py    # DataLoader (acceso BD, get_ventas_diarias, get_ventas_diarias_con_ruta)
+│   │   ├── excel_writer.py   # ExcelWriter, SheetStyle, ColumnFormat, ColumnGroup, summary_rows, as_table
 │   │   ├── excel_slicers.py  # agregar_slicers, slicers_disponibles (solo Windows)
 │   │   └── base_processor.py # calcular_dias_habiles, calcular_info_dias, calcular_factor_tendencia
 │   ├── api/                  # API REST (FastAPI)
@@ -30,28 +30,50 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 │   └── services/
 │       ├── base_service.py   # BaseService (clase abstracta)
 │       └── ventas/           # Reporte de ventas
-│           ├── service.py    # VentasService, _crear_estilo_ventas, VENTAS_COLUMN_FORMATS
+│           ├── service.py    # VentasService, _aplicar_zonas_virtuales, _expandir_sucursales
 │           └── processor.py  # procesar_ventas_diarias, formatear_nombre_dia
 ├── tests/
-├── main.py                   # CLI con subcomandos
-├── api.py                    # FastAPI application
+├── main.py                   # CLI con subcomandos (soporta --config JSON)
+├── api.py                    # FastAPI application (v2.0.0)
+├── config.json               # Config de produccion (fechas, genericos, supervisores)
 └── data/output/              # Archivos generados
+```
+
+## Setup en Linux
+
+```bash
+# Clonar y crear entorno virtual
+git clone <repo-url>
+cd excel-reporter
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Instalar dependencias
+pip install -r requirements.txt
+
+# Configurar conexion a BD
+cp .env.example .env
+# Editar .env con: DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 ```
 
 ## Comandos
 
 ```bash
 # Activar entorno virtual
-.venv\Scripts\activate
+source .venv/bin/activate          # Linux/Mac
+# .venv\Scripts\activate           # Windows
 
-# Generar reporte (con slicers en Windows)
-python main.py ventas --desde 2026-01-01 --hasta 2026-01-31
+# Generar reporte con config JSON (metodo preferido)
+python main.py ventas --config config.json
+
+# Generar reporte con parametros individuales
+python main.py ventas --desde 2026-02-01 --hasta 2026-02-28
 
 # Con filtro de genericos
-python main.py ventas --desde 2026-01-01 --hasta 2026-01-31 --genericos "CERVEZAS,AGUAS"
+python main.py ventas --desde 2026-02-01 --hasta 2026-02-28 --genericos "CERVEZAS,AGUAS DANONE"
 
-# Sin slicers (mas rapido, compatible con todos los OS)
-python main.py ventas --desde 2026-01-01 --hasta 2026-01-31 --no-slicers
+# Sin slicers (necesario en Linux, donde no hay Excel/pywin32)
+python main.py ventas --desde 2026-02-01 --hasta 2026-02-28 --no-slicers
 
 # Tests
 pytest -v
@@ -60,20 +82,46 @@ pytest -v
 uvicorn api:app --reload --port 8000
 ```
 
+## Config JSON (config.json)
+
+Metodo preferido para ejecutar reportes. Contiene todos los parametros:
+
+```json
+{
+    "fecha_desde": "2026-02-01",
+    "fecha_hasta": "2026-02-28",
+    "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
+    "nombre_archivo": null,
+    "con_slicers": true,
+    "con_cobertura": true,
+    "supervisores": {
+        "Walter Vilte": ["SUCURSAL CAFAYATE", "SUCURSAL ABRA PAMPA", "CASA CENTRAL"],
+        "Antonio Cabrerizo": ["CASA CENTRAL"],
+        "Adrian Garcia": ["SUCURSAL CAFAYATE", "SUCURSAL METAN"],
+        "Hernan Yapura": ["SUCURSAL ABRA PAMPA", "SUCURSAL PERICO"]
+    }
+}
+```
+
+- `con_slicers`: Poner `false` en Linux (pywin32 no disponible)
+- `supervisores`: Genera un archivo por supervisor. Las sucursales van con **descripcion** (no ID)
+- Si no se especifica `supervisores`, genera un solo archivo global
+
 ## API REST
 
-La API expone los servicios via HTTP. Documentacion interactiva en:
+Documentacion interactiva en:
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
-### Endpoints de Ventas
+### Endpoints
 
 | Metodo | Endpoint | Descripcion |
 |--------|----------|-------------|
 | POST | `/ventas/reporte` | Genera reporte y retorna metadata |
-| POST | `/ventas/reporte/download` | Genera reporte y lo descarga |
+| POST | `/ventas/reporte/download` | Genera reporte y lo descarga (xlsx o ZIP si hay supervisores) |
 | GET | `/ventas/genericos` | Lista genericos disponibles |
 | GET | `/ventas/sucursales` | Lista sucursales disponibles |
+| GET | `/health` | Verifica conectividad BD |
 
 ### Ejemplo de Request
 
@@ -81,123 +129,79 @@ La API expone los servicios via HTTP. Documentacion interactiva en:
 curl -X POST "http://localhost:8000/ventas/reporte" \
   -H "Content-Type: application/json" \
   -d '{
-    "fecha_desde": "2026-01-01",
-    "fecha_hasta": "2026-01-31",
-    "genericos": ["CERVEZAS", "AGUAS"],
-    "con_slicers": true
+    "fecha_desde": "2026-02-01",
+    "fecha_hasta": "2026-02-28",
+    "genericos": ["CERVEZAS", "AGUAS DANONE"],
+    "con_slicers": false,
+    "con_cobertura": true,
+    "supervisores": {
+        "Walter Vilte": ["SUCURSAL CAFAYATE", "CASA CENTRAL"]
+    }
   }'
 ```
 
 ## Formato del Reporte de Ventas
 
+Dos hojas por archivo: **Ventas Bultos** y **Ventas HTLs**.
+
 ```
-Sucursal | Generico | Cant(Gen) | Tend(Gen) | Monto(Gen) | Marca | 01-01 Jueves | ... | Total | Tend(Marca) | Monto(Marca)
+Sucursal | Generico | Cant(Gen) | Tend(Gen) | Monto(Gen) | Cob(Gen) | Marca | 01-02 Lunes | ... | Total | Tend(Marca) | Monto(Marca) | Cob(Marca)
 ```
 
 - **Totales de generico**: Solo aparecen en la primera fila de cada grupo sucursal-generico
-- **Columnas de dias**: Formato `dd-mm DiaSemana`, valores 0 si no hay venta
+- **Cobertura (Generico/Marca)**: Cruce con tablas cob_preventista_generico/marca
+- **Columnas de dias**: Formato `dd-mm DiaSemana`, valores 0 si no hay venta, ancho 9.3
 - **Tendencia**: `cantidad * (dias_totales_mes / dias_transcurridos_hasta_hoy)`
 - **Dias habiles**: Excluyen domingos y feriados (config/settings.py)
+- **Nombre archivo**: `Ventas {supervisor} - {dd-mm-yyyy}.xlsx` (fecha = ultima venta real)
+
+## Zonas Virtuales (CASA CENTRAL / VALLE SALTA)
+
+CASA CENTRAL se divide automaticamente en dos zonas segun `id_ruta` de `fact_ventas`:
+
+```python
+# config/settings.py
+ZONAS_VIRTUALES = {
+    "VALLE SALTA": {
+        "sucursal_real": "CASA CENTRAL",
+        "rutas": [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 118, 119, 120, 122],
+    }
+}
+```
+
+- Los supervisores que tienen "CASA CENTRAL" reciben **ambas zonas** automaticamente
+- No hace falta poner "VALLE SALTA" en el JSON; se expande solo
+- La cobertura tambien se divide por ruta (usa tablas `cob_preventista_*` que tienen `id_ruta`)
+- `_aplicar_zonas_virtuales()` renombra sucursal segun ruta y reagrupa
+- `_expandir_sucursales()` agrega zonas virtuales a la lista del supervisor
 
 ## Sistema de Formatos Excel
 
 ```python
-# Estilos modulares en excel_writer.py
 SheetStyle(
-    numeric_format="#,##0",           # Formato numerico por defecto (sin decimales)
-    column_formats={                   # Formatos especificos por columna
+    numeric_format="#,##0",
+    column_formats={
         "Monto (Generico)": ColumnFormat(number_format='$ #,##0'),
-        "Monto (Marca)": ColumnFormat(number_format='$ #,##0'),
+        "Cobertura (Generico)": ColumnFormat(number_format='#,##0', width=13),
     },
-    column_groups=[                    # Grupos colapsables
-        ColumnGroup(start_col="01-01 Jueves", end_col="29-01 Jueves", collapsed=True)
-    ],
-    summary_rows={                     # Filas de resumen al inicio
-        "Dias Habiles": 26,
-        "Dias Transcurridos": 15,
-        "Dias Faltantes": 11,
-    },
-    as_table=True,                     # Convertir a tabla Excel nativa
-    table_style="TableStyleMedium9"    # Estilo de tabla
+    column_groups=[ColumnGroup(start_col="01-02 Lunes", end_col="25-02 Miercoles", collapsed=True)],
+    summary_rows={"Dias Habiles": 20, "Dias Transcurridos": 15, "Dias Faltantes": 5},
+    as_table=True,
+    table_style="TableStyleMedium9"
 )
 ```
 
-### Agrupacion de Columnas (Column Groups)
-
-Las columnas de dias se agrupan automaticamente en Excel (colapsables), dejando visibles los ultimos 2 dias:
-
-```python
-# service.py - _crear_estilo_ventas()
-def _crear_estilo_ventas(columnas_dias: list[str], info_dias: dict, dias_visibles: int = 2) -> SheetStyle:
-    # Agrupa columnas_dias[0] hasta columnas_dias[-(dias_visibles + 1)]
-    # Los ultimos 2 dias quedan fuera del grupo (siempre visibles)
-```
-
-### Filas de Resumen (Summary Rows)
-
-Las primeras 3 filas del Excel muestran info de dias habiles:
-
-```
-| Dias Habiles        | 26 |
-| Dias Transcurridos  | 15 |
-| Dias Faltantes      | 11 |
-|                     |    |  <- fila vacia
-| Sucursal | Generico | ...   <- encabezados de tabla
-```
-
-Calculadas por `calcular_info_dias()` en base_processor.py
-
-### Formato de Tabla Excel (as_table)
-
-Los datos se convierten automaticamente a tabla Excel nativa:
-- Filtros en cada columna
-- Ordenamiento interactivo
-- Filas alternadas (row stripes)
-- Estilo configurable via `table_style` (ej: TableStyleMedium1-28, TableStyleLight1-21)
-
-### Formato de Encabezados
-
-La primera fila de la tabla tiene formato especial:
-- Texto blanco (color FFFFFF)
-- Negrita
-- Centrado horizontal y vertical
-- Texto distribuido (wrap_text)
-
-### Formato de Columnas Numericas
-
-Las celdas con valores numericos tienen:
-- Formato numerico sin decimales (`#,##0`)
-- Texto centrado horizontalmente
-
 ### Slicers (Segmentadores)
 
-Los slicers permiten filtrar datos visualmente. Solo disponibles en Windows con Excel instalado.
+Solo disponibles en Windows con Excel instalado. En Linux se omiten silenciosamente.
 
-```python
-# excel_slicers.py
-from src.core.excel_slicers import agregar_slicers, slicers_disponibles
-
-# Verificar disponibilidad
-if slicers_disponibles():
-    agregar_slicers(
-        archivo_excel=Path("reporte.xlsx"),
-        nombre_tabla="Tabla_Ventas",
-        columnas_slicer=["Sucursal", "Generico", "Marca"]
-    )
-```
-
-**CLI**:
 ```bash
-# Con slicers (por defecto en Windows)
-python main.py ventas --desde 2026-01-01 --hasta 2026-01-31
+# Con slicers (Windows)
+python main.py ventas --config config.json
 
-# Sin slicers
-python main.py ventas --desde 2026-01-01 --hasta 2026-01-31 --no-slicers
+# Sin slicers (Linux o mas rapido)
+# Poner "con_slicers": false en config.json
 ```
-
-**Compatibilidad**:
-- Windows: Slicers agregados automaticamente si Excel esta instalado
-- Linux/Mac: Slicers no disponibles, el reporte se genera sin ellos
 
 ## Patrones de Diseno
 
@@ -216,18 +220,27 @@ python main.py ventas --desde 2026-01-01 --hasta 2026-01-31 --no-slicers
 ## Base de Datos
 
 - **Esquema**: gold (Data Warehouse - capa Gold)
-- **Tablas**: fact_ventas, dim_articulo, dim_sucursal
+- **Tablas principales**: fact_ventas, dim_articulo, dim_sucursal, dim_vendedor
+- **Tablas cobertura**: cob_preventista_generico, cob_preventista_marca, cob_sucursal_generico, cob_sucursal_marca
 - **Conexion**: Variables en `.env` (DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
 
 ### Metodos de DataLoader
 
 - `get_ventas_diarias()`: Ventas agrupadas por fecha (para columnas de dias)
+- `get_ventas_diarias_con_ruta()`: Igual pero con `id_ruta` para split de zonas virtuales
 - `get_ventas()`: Ventas totales sin desglose diario (compatibilidad)
-- `get_sucursales()`: Lista de sucursales
+- `get_sucursales()`: Lista de sucursales (usa `descripcion`, no ID)
 - `get_articulos()`: Combinaciones generico-marca
+- `get_cobertura_preventista_generico()`: Cobertura por preventista y generico (tiene `id_ruta`)
+- `get_cobertura_preventista_marca()`: Cobertura por preventista y marca (tiene `id_ruta`)
+- `get_cobertura_sucursal_generico()`: Cobertura agregada por sucursal y generico
+- `get_cobertura_sucursal_marca()`: Cobertura agregada por sucursal y marca
 
 ## Notas Importantes
 
 - Los imports usan paths completos: `from src.core.data_loader import DataLoader`
-- Los tests unitarios usan mocks para aislar la BD
+- Los tests unitarios usan mocks para aislar la BD (mockean `ExcelWriter`, no `generar_excel`)
 - El archivo `.env` no se commitea (esta en .gitignore)
+- Sucursales van con **descripcion** (texto), no con ID numerico
+- Cobertura se fetchea con try/except: si falla, las columnas quedan en blanco (no rompe el reporte)
+- En Linux: poner `con_slicers: false` en config.json (pywin32 no disponible)
