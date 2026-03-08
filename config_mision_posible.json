@@ -1,19 +1,28 @@
 {
     "periodo": "2026-03-01",
-    "marcas": ["Imperial", "Levite", "Villa del Sur"],
+    "marcas": ["IMPERIAL", "LEVITE", "VILLA DEL SUR"],
     "objetivos": {
-        "Imperial": 500,
-        "Levite": 300,
-        "Villa del Sur": 200
+        "IMPERIAL": 5245,
+        "LEVITE": 5256,
+        "VILLA DEL SUR": 4475,
+        "SAENZ BRIONES": 383 
     },
     "porcentajes_sucursal": {
-        "CASA CENTRAL": 30,
-        "VALLE SALTA": 15,
-        "SUCURSAL CAFAYATE": 10,
-        "SUCURSAL METAN": 10,
-        "SUCURSAL ABRA PAMPA": 10,
-        "SUCURSAL PERICO": 10,
-        "SUCURSAL TARTAGAL": 15
+        "CASA CENTRAL": 6.67,
+        "VALLE SALTA": 6.67,
+        "SUCURSAL CAFAYATE": 6.67,
+        "SUCURSAL ABRA PAMPA": 6.67,
+        "SUCURSAL SAN PEDRO": 6.67,
+        "SUCURSAL JOAQUIN V GONZALEZ": 6.67,
+        "SUCURSAL LA QUIACA": 6.67,
+        "SUCURSAL METAN": 6.67,
+        "SUCURSAL HUMAHUACA": 6.67,
+        "SUCURSAL ORAN": 6.67,
+        "SUCURSAL TARTAGAL": 6.67,
+        "SUCURSAL MAIMARA": 6.67,
+        "SUCURSAL GUEMES": 6.67,
+        "SUCURSAL LIBERTADOR": 6.67,
+        "SUCURSAL PERICO": 6.62
     },
     "nombre_archivo": null,
     "supervisores": null

@@ -24,6 +24,7 @@ def procesar_cobertura_sucursal(
     Returns:
         DataFrame con columnas [Sucursal, Cobertura, Objetivo, Faltante, %].
     """
+    marca = marca.upper()
     df_marca = df_cob[df_cob["marca"] == marca] if not df_cob.empty else df_cob
 
     # Agrupar cobertura por sucursal
@@ -57,7 +58,7 @@ def procesar_cobertura_sucursal(
         axis=1,
     )
     df_result["%"] = df_result.apply(
-        lambda r: round(r["Cobertura"] / r["Objetivo"] * 100, 1)
+        lambda r: round(r["Cobertura"] / r["Objetivo"], 4)
         if r["Objetivo"] is not None and r["Objetivo"] != 0
         else None,
         axis=1,
@@ -85,6 +86,7 @@ def procesar_cobertura_vendedor(
     Returns:
         DataFrame con columnas [Vendedor, Sucursal, Cobertura, Objetivo, Faltante, %].
     """
+    marca = marca.upper()
     df_marca = df_cob[df_cob["marca"] == marca] if not df_cob.empty else df_cob
 
     if df_marca.empty:
@@ -119,7 +121,7 @@ def procesar_cobertura_vendedor(
         axis=1,
     )
     df_vend["%"] = df_vend.apply(
-        lambda r: round(r["Cobertura"] / r["Objetivo"] * 100, 1)
+        lambda r: round(r["Cobertura"] / r["Objetivo"], 4)
         if r["Objetivo"] is not None and r["Objetivo"] != 0
         else None,
         axis=1,
