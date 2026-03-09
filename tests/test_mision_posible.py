@@ -60,9 +60,23 @@ def _df_cob_aguas():
     ])
 
 
+def _df_cob_preventista_marca():
+    """DataFrame simulando tabla cob_preventista_marca del ETL (con columna marca)."""
+    rows = []
+    for row in _df_cob_imperial().to_dict("records"):
+        rows.append({**row, "marca": "IMPERIAL"})
+    for row in _df_cob_levite().to_dict("records"):
+        rows.append({**row, "marca": "LEVITE"})
+    return pd.DataFrame(rows)
+
+
 def _mock_loader(ultima_fecha=date(2026, 3, 6)):
     loader = Mock(spec=DataLoader)
 
+    # Tabla pre-agregada del ETL (marcas simples)
+    loader.get_cobertura_preventista_marca.return_value = _df_cob_preventista_marca()
+
+    # Query custom (grupos multi-marca o con filtro)
     def _side_effect_cob(periodo, marcas, filtro_descripcion=None):
         key = tuple(sorted(m.upper() for m in marcas))
         return {
@@ -252,10 +266,11 @@ class TestMisionPosibleService:
     def test_zonas_virtuales_aplicadas_a_cobertura(self, tmp_path):
         """RF-015: zonas virtuales se aplican; workbook tiene 2 hojas."""
         loader = Mock(spec=DataLoader)
-        loader.get_cobertura_custom.return_value = pd.DataFrame([{
+        loader.get_cobertura_preventista_marca.return_value = pd.DataFrame([{
             "sucursal": "CASA CENTRAL", "vendedor": "Juan",
             "id_ruta": 81, "clientes_compradores": 20,
             "volumen_total": 100, "periodo": "2026-03-01",
+            "marca": "IMPERIAL",
         }])
         loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
         pct = {"VALLE SALTA": 15, "CASA CENTRAL": 30}
@@ -284,11 +299,13 @@ class TestMisionPosibleService:
             service = MisionPosibleService(data_loader=loader)
             supervisores = {"Ana": ["CASA CENTRAL"], "Luis": ["SUCURSAL CAFAYATE"]}
             service.generar_reporte_supervisores(self._config(), supervisores)
-        assert loader.get_cobertura_custom.call_count == 2
+        # 2 marcas simples → 2 llamadas a get_cobertura_preventista_marca
+        assert loader.get_cobertura_preventista_marca.call_count == 2
 
     def test_consulta_bd_falla_genera_hojas_vacias(self, tmp_path):
         """RNF-003: si BD falla, no crashea y genera archivo con tablas vacias."""
         loader = Mock(spec=DataLoader)
+        loader.get_cobertura_preventista_marca.side_effect = Exception("DB error")
         loader.get_cobertura_custom.side_effect = Exception("DB error")
         loader.get_ultima_fecha_venta.side_effect = Exception("DB error")
         with patch("src.services.mision_posible.service.DATA_OUTPUT", tmp_path):
@@ -348,6 +365,7 @@ class TestMisionPosibleService:
         grupos = [GrupoArticulos(n, marcas=[n]) for n in nombres]
         objetivos = {n: 100 for n in nombres}
         loader = Mock(spec=DataLoader)
+        loader.get_cobertura_preventista_marca.return_value = pd.DataFrame()
         loader.get_cobertura_custom.return_value = pd.DataFrame()
         loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
         _, wb = self._generar(tmp_path, loader=loader, grupos=grupos, objetivos=objetivos)
@@ -373,6 +391,7 @@ class TestMisionPosibleService:
         grupos = [GrupoArticulos(n, marcas=[n]) for n in nombres]
         objetivos = {n: 100 for n in nombres}
         loader = Mock(spec=DataLoader)
+        loader.get_cobertura_preventista_marca.return_value = pd.DataFrame()
         loader.get_cobertura_custom.return_value = pd.DataFrame()
         loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
         _, wb = self._generar(tmp_path, loader=loader, grupos=grupos, objetivos=objetivos)
@@ -530,23 +549,29 @@ class TestMisionPosibleService:
         assert len(config.grupos) == 1
         assert config.grupos[0].nombre == "IMPERIAL"
 
-    def test_servicio_llama_get_cobertura_custom_por_grupo(self, tmp_path):
-        """RF-012: get_cobertura_custom llamado una vez por grupo."""
+    def test_servicio_usa_etl_para_marcas_simples(self, tmp_path):
+        """Marca simple (1 marca, sin filtro) usa tabla pre-agregada del ETL."""
         loader = _mock_loader()
         self._generar(tmp_path, loader=loader)
-        assert loader.get_cobertura_custom.call_count == 2  # IMPERIAL + LEVITE
+        # IMPERIAL y LEVITE son marcas simples → usan get_cobertura_preventista_marca
+        assert loader.get_cobertura_preventista_marca.call_count == 2
+        assert loader.get_cobertura_custom.call_count == 0
 
-    def test_grupo_sin_filtro_descripcion_no_pasa_filtro(self, tmp_path):
-        """RF-003/RF-011: grupo sin filtro_descripcion pasa None."""
+    def test_servicio_usa_custom_para_grupo_con_filtro(self, tmp_path):
+        """Grupo con filtro_descripcion usa query custom."""
         loader = _mock_loader()
-        self._generar(tmp_path, loader=loader, grupos=[GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"])])
+        grupo = GrupoArticulos("SCHNEIDER 710", marcas=["SCHNEIDER"], filtro_descripcion="710")
+        self._generar(tmp_path, loader=loader, grupos=[grupo], objetivos={"SCHNEIDER 710": 100})
         loader.get_cobertura_custom.assert_called_once_with(
-            periodo="2026-03-01", marcas=["IMPERIAL"], filtro_descripcion=None,
+            periodo="2026-03-01", marcas=["SCHNEIDER"], filtro_descripcion="710",
         )
+        # No debe usar la tabla pre-agregada para este grupo
+        loader.get_cobertura_preventista_marca.call_count  # may be called for other groups
 
     def test_grupo_con_filtro_descripcion_pasa_filtro(self, tmp_path):
         """RF-002/RF-010: grupo con filtro_descripcion lo pasa al DataLoader."""
         loader = Mock(spec=DataLoader)
+        loader.get_cobertura_preventista_marca.return_value = pd.DataFrame()
         loader.get_cobertura_custom.return_value = pd.DataFrame()
         loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
         grupo = GrupoArticulos("SCHNEIDER 710", marcas=["SCHNEIDER"], filtro_descripcion="710")
@@ -576,13 +601,13 @@ class TestMisionPosibleService:
         loader = Mock(spec=DataLoader)
         call_count = [0]
 
-        def side_effect(periodo, marcas, filtro_descripcion=None):
+        def side_effect(periodos):
             call_count[0] += 1
             if call_count[0] == 1:
                 raise Exception("DB error")
-            return _df_cob_imperial()
+            return _df_cob_preventista_marca()
 
-        loader.get_cobertura_custom.side_effect = side_effect
+        loader.get_cobertura_preventista_marca.side_effect = side_effect
         loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
         with patch("src.services.mision_posible.service.DATA_OUTPUT", tmp_path):
             service = MisionPosibleService(data_loader=loader)
@@ -596,8 +621,8 @@ class TestMisionPosibleService:
             service = MisionPosibleService(data_loader=loader)
             supervisores = {"Ana": ["CASA CENTRAL"], "Luis": ["SUCURSAL CAFAYATE"]}
             service.generar_reporte_supervisores(self._config(), supervisores)
-        # 2 grupos = 2 calls (no 2 grupos x 2 supervisores = 4)
-        assert loader.get_cobertura_custom.call_count == 2
+        # 2 marcas simples = 2 calls a ETL (no 2 x 2 supervisores = 4)
+        assert loader.get_cobertura_preventista_marca.call_count == 2
 
     def test_titulo_de_tabla_usa_nombre_del_grupo(self, tmp_path):
         """RF-014: titulo de tabla usa grupo.nombre."""

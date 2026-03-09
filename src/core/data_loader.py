@@ -557,7 +557,7 @@ class DataLoader:
                 fv.id_cliente,
                 SUM(fv.cantidades_total)                        AS total_qty
             FROM gold.fact_ventas fv
-            JOIN      gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente
+            LEFT JOIN gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente
                                           AND fv.id_sucursal = dc.id_sucursal
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
@@ -581,7 +581,7 @@ class DataLoader:
                 fv.id_cliente,
                 SUM(fv.cantidades_total)                        AS total_qty
             FROM gold.fact_ventas fv
-            JOIN      gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente
+            LEFT JOIN gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente
                                           AND fv.id_sucursal = dc.id_sucursal
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo

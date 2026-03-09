@@ -372,19 +372,35 @@ class MisionPosibleService(BaseService):
             # Empty separator row between marca blocks
             current_row += 1
 
+    def _es_grupo_simple(self, grupo: GrupoArticulos) -> bool:
+        """True si el grupo tiene una sola marca y sin filtro_descripcion."""
+        return len(grupo.marcas) == 1 and grupo.filtro_descripcion is None
+
     def _fetch_data_grupo(self, periodo: str, grupo: GrupoArticulos) -> pd.DataFrame:
-        """Fetches cobertura for a single grupo via get_cobertura_custom.
+        """Fetches cobertura for a single grupo.
+
+        Marca simple (1 marca, sin filtro) → tabla pre-agregada del ETL.
+        Grupo/subgrupo (multi-marca o con filtro) → query custom.
 
         Returns:
             DataFrame post zonas virtuales, or empty DataFrame on error.
         """
         df_cob = pd.DataFrame()
         try:
-            df_cob_raw = self.data_loader.get_cobertura_custom(
-                periodo=periodo,
-                marcas=grupo.marcas,
-                filtro_descripcion=grupo.filtro_descripcion,
-            )
+            if self._es_grupo_simple(grupo):
+                df_cob_raw = self.data_loader.get_cobertura_preventista_marca(
+                    periodos=[periodo],
+                )
+                if not df_cob_raw.empty:
+                    marca = grupo.marcas[0].upper()
+                    df_cob_raw = df_cob_raw[df_cob_raw["marca"].str.upper() == marca]
+                    df_cob_raw = df_cob_raw.drop(columns=["marca"], errors="ignore")
+            else:
+                df_cob_raw = self.data_loader.get_cobertura_custom(
+                    periodo=periodo,
+                    marcas=grupo.marcas,
+                    filtro_descripcion=grupo.filtro_descripcion,
+                )
             if not df_cob_raw.empty:
                 df_cob = aplicar_zonas_virtuales(df_cob_raw)
         except Exception as e:
