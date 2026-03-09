@@ -33,6 +33,7 @@ class GrupoArticulos:
     nombre: str
     marcas: list[str]
     filtro_descripcion: str | None = None
+    requiere_todas_marcas: bool = False
 
     def __post_init__(self):
         if not self.marcas:
@@ -400,6 +401,7 @@ class MisionPosibleService(BaseService):
                     periodo=periodo,
                     marcas=grupo.marcas,
                     filtro_descripcion=grupo.filtro_descripcion,
+                    requiere_todas_marcas=grupo.requiere_todas_marcas,
                 )
             if not df_cob_raw.empty:
                 df_cob = aplicar_zonas_virtuales(df_cob_raw)
