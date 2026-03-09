@@ -52,12 +52,26 @@ def _df_cob_levite():
     ])
 
 
+def _df_cob_aguas():
+    """DataFrame para grupo AGUAS (union LEVITE+VILLAVICENCIO)."""
+    return pd.DataFrame([
+        {"sucursal": "CASA CENTRAL", "vendedor": "Juan", "id_vendedor": 1, "id_ruta": 1, "clientes_compradores": 30, "volumen_total": 200, "periodo": "2026-03-01"},
+        {"sucursal": "SUCURSAL CAFAYATE", "vendedor": "Pedro", "id_vendedor": 3, "id_ruta": 10, "clientes_compradores": 12, "volumen_total": 60, "periodo": "2026-03-01"},
+    ])
+
+
 def _mock_loader(ultima_fecha=date(2026, 3, 6)):
     loader = Mock(spec=DataLoader)
-    loader.get_cobertura_custom.side_effect = lambda periodo, marca, filtro_descripcion=None: {
-        "IMPERIAL": _df_cob_imperial(),
-        "LEVITE": _df_cob_levite(),
-    }.get(marca.upper(), pd.DataFrame())
+
+    def _side_effect_cob(periodo, marcas, filtro_descripcion=None):
+        key = tuple(sorted(m.upper() for m in marcas))
+        return {
+            ("IMPERIAL",): _df_cob_imperial(),
+            ("LEVITE",): _df_cob_levite(),
+            ("LEVITE", "VILLAVICENCIO"): _df_cob_aguas(),
+        }.get(key, pd.DataFrame())
+
+    loader.get_cobertura_custom.side_effect = _side_effect_cob
     loader.get_ultima_fecha_venta.return_value = ultima_fecha
     return loader
 
@@ -208,7 +222,7 @@ class TestMisionPosibleService:
     def _config(self, **overrides):
         defaults = {
             "periodo": "2026-03-01",
-            "grupos": [GrupoArticulos("IMPERIAL", "IMPERIAL"), GrupoArticulos("LEVITE", "LEVITE")],
+            "grupos": [GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"]), GrupoArticulos("LEVITE", marcas=["LEVITE"])],
             "objetivos": {"IMPERIAL": 500, "LEVITE": 300},
             "porcentajes_sucursal": PORCENTAJES,
         }
@@ -248,7 +262,7 @@ class TestMisionPosibleService:
         result, wb = self._generar(
             tmp_path,
             loader=loader,
-            grupos=[GrupoArticulos("IMPERIAL", "IMPERIAL")],
+            grupos=[GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"])],
             porcentajes_sucursal=pct,
         )
         assert wb.sheetnames == ["Sucursales", "Por Vendedor"]
@@ -279,7 +293,7 @@ class TestMisionPosibleService:
         loader.get_ultima_fecha_venta.side_effect = Exception("DB error")
         with patch("src.services.mision_posible.service.DATA_OUTPUT", tmp_path):
             service = MisionPosibleService(data_loader=loader)
-            result = service.generar_reporte(self._config(grupos=[GrupoArticulos("IMPERIAL", "IMPERIAL")]))
+            result = service.generar_reporte(self._config(grupos=[GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"])]))
         assert result.ruta_archivos[0].exists()
 
     def test_error_grupos_vacio(self):
@@ -316,7 +330,7 @@ class TestMisionPosibleService:
 
     def test_primera_tabla_en_posicion_correcta(self, tmp_path):
         """RF-005/RF-007: con 1 grupo, titulo en fila 3 col 1."""
-        _, wb = self._generar(tmp_path, grupos=[GrupoArticulos("IMPERIAL", "IMPERIAL")], objetivos={"IMPERIAL": 500})
+        _, wb = self._generar(tmp_path, grupos=[GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"])], objetivos={"IMPERIAL": 500})
         ws = wb["Sucursales"]
         # fila 1 = resumen, fila 2 = vacia, fila 3 = titulo primera tabla
         assert ws.cell(row=3, column=1).value == "IMPERIAL"
@@ -331,7 +345,7 @@ class TestMisionPosibleService:
     def test_quinta_marca_inicia_nueva_fila_de_tablas(self, tmp_path):
         """RF-006: con 5 grupos, titulo de 5o grupo esta en fila mayor que los 4 primeros."""
         nombres = ["M1", "M2", "M3", "M4", "M5"]
-        grupos = [GrupoArticulos(n, n) for n in nombres]
+        grupos = [GrupoArticulos(n, marcas=[n]) for n in nombres]
         objetivos = {n: 100 for n in nombres}
         loader = Mock(spec=DataLoader)
         loader.get_cobertura_custom.return_value = pd.DataFrame()
@@ -356,7 +370,7 @@ class TestMisionPosibleService:
     def test_fila_separadora_tiene_altura_reducida(self, tmp_path):
         """RF-006: con 5 grupos, la fila separadora entre grupos tiene height=6."""
         nombres = ["M1", "M2", "M3", "M4", "M5"]
-        grupos = [GrupoArticulos(n, n) for n in nombres]
+        grupos = [GrupoArticulos(n, marcas=[n]) for n in nombres]
         objetivos = {n: 100 for n in nombres}
         loader = Mock(spec=DataLoader)
         loader.get_cobertura_custom.return_value = pd.DataFrame()
@@ -377,7 +391,7 @@ class TestMisionPosibleService:
 
     def test_titulo_marca_mergeado(self, tmp_path):
         """RF-007: el titulo de la marca cubre las 5 columnas de la tabla."""
-        _, wb = self._generar(tmp_path, grupos=[GrupoArticulos("IMPERIAL", "IMPERIAL")], objetivos={"IMPERIAL": 500})
+        _, wb = self._generar(tmp_path, grupos=[GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"])], objetivos={"IMPERIAL": 500})
         ws = wb["Sucursales"]
         # titulo en fila 3 col 1; debe haber merge C3:G3 (col 1 a col 5)
         merged_ranges = [str(r) for r in ws.merged_cells.ranges]
@@ -452,7 +466,7 @@ class TestMisionPosibleService:
         """
         _, wb = self._generar(
             tmp_path,
-            grupos=[GrupoArticulos("IMPERIAL", "IMPERIAL")],
+            grupos=[GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"])],
             objetivos={"IMPERIAL": 500},
             porcentajes_sucursal={},  # sin sucursales configuradas → df_suc vacio
         )
@@ -468,12 +482,12 @@ class TestMisionPosibleService:
         en la fila correcta (determinada por el grupo con mas sucursales del grupo 0)."""
         pct_grande = {"SUC_A": 10, "SUC_B": 10, "SUC_C": 10}
         nombres = ["M1", "M2", "M3", "M4", "M5"]
-        grupos = [GrupoArticulos(n, n) for n in nombres]
+        grupos = [GrupoArticulos(n, marcas=[n]) for n in nombres]
         objetivos = {n: 100 for n in nombres}
 
         loader = Mock(spec=DataLoader)
         loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
-        loader.get_cobertura_custom.side_effect = lambda periodo, marca, filtro_descripcion=None: pd.DataFrame([
+        loader.get_cobertura_custom.side_effect = lambda periodo, marcas, filtro_descripcion=None: pd.DataFrame([
             {"sucursal": "SUC_A", "vendedor": "V1", "id_vendedor": 1, "id_ruta": 1, "clientes_compradores": 5, "volumen_total": 50, "periodo": "2026-03-01"},
         ])
 
@@ -511,7 +525,7 @@ class TestMisionPosibleService:
         """RF-001: MisionPosibleConfig acepta grupos=[GrupoArticulos(...)]."""
         config = MisionPosibleConfig(
             periodo="2026-03-01",
-            grupos=[GrupoArticulos("IMPERIAL", "IMPERIAL")],
+            grupos=[GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"])],
         )
         assert len(config.grupos) == 1
         assert config.grupos[0].nombre == "IMPERIAL"
@@ -525,9 +539,9 @@ class TestMisionPosibleService:
     def test_grupo_sin_filtro_descripcion_no_pasa_filtro(self, tmp_path):
         """RF-003/RF-011: grupo sin filtro_descripcion pasa None."""
         loader = _mock_loader()
-        self._generar(tmp_path, loader=loader, grupos=[GrupoArticulos("IMPERIAL", "IMPERIAL")])
+        self._generar(tmp_path, loader=loader, grupos=[GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"])])
         loader.get_cobertura_custom.assert_called_once_with(
-            periodo="2026-03-01", marca="IMPERIAL", filtro_descripcion=None,
+            periodo="2026-03-01", marcas=["IMPERIAL"], filtro_descripcion=None,
         )
 
     def test_grupo_con_filtro_descripcion_pasa_filtro(self, tmp_path):
@@ -535,10 +549,10 @@ class TestMisionPosibleService:
         loader = Mock(spec=DataLoader)
         loader.get_cobertura_custom.return_value = pd.DataFrame()
         loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
-        grupo = GrupoArticulos("SCHNEIDER 710", "SCHNEIDER", "710")
+        grupo = GrupoArticulos("SCHNEIDER 710", marcas=["SCHNEIDER"], filtro_descripcion="710")
         self._generar(tmp_path, loader=loader, grupos=[grupo], objetivos={"SCHNEIDER 710": 100})
         loader.get_cobertura_custom.assert_called_once_with(
-            periodo="2026-03-01", marca="SCHNEIDER", filtro_descripcion="710",
+            periodo="2026-03-01", marcas=["SCHNEIDER"], filtro_descripcion="710",
         )
 
     def test_objetivos_usan_nombre_del_grupo(self, tmp_path):
@@ -546,7 +560,7 @@ class TestMisionPosibleService:
         loader = Mock(spec=DataLoader)
         loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
         loader.get_cobertura_custom.return_value = pd.DataFrame()
-        grupo = GrupoArticulos("SCHNEIDER 710", "SCHNEIDER", "710")
+        grupo = GrupoArticulos("SCHNEIDER 710", marcas=["SCHNEIDER"], filtro_descripcion="710")
         _, wb = self._generar(tmp_path, loader=loader, grupos=[grupo], objetivos={"SCHNEIDER 710": 100})
         ws = wb["Sucursales"]
         # Row 3 = titulo "SCHNEIDER 710"
@@ -562,7 +576,7 @@ class TestMisionPosibleService:
         loader = Mock(spec=DataLoader)
         call_count = [0]
 
-        def side_effect(periodo, marca, filtro_descripcion=None):
+        def side_effect(periodo, marcas, filtro_descripcion=None):
             call_count[0] += 1
             if call_count[0] == 1:
                 raise Exception("DB error")
@@ -590,10 +604,65 @@ class TestMisionPosibleService:
         loader = Mock(spec=DataLoader)
         loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
         loader.get_cobertura_custom.return_value = pd.DataFrame()
-        grupo = GrupoArticulos("SCHNEIDER 710", "SCHNEIDER", "710")
+        grupo = GrupoArticulos("SCHNEIDER 710", marcas=["SCHNEIDER"], filtro_descripcion="710")
         _, wb = self._generar(tmp_path, loader=loader, grupos=[grupo], objetivos={"SCHNEIDER 710": 100})
         ws = wb["Sucursales"]
         assert ws.cell(row=3, column=1).value == "SCHNEIDER 710"
+
+    def test_grupo_articulos_acepta_marcas_lista(self):
+        """RF-001: GrupoArticulos acepta marcas como lista."""
+        g = GrupoArticulos("AGUAS", marcas=["LEVITE", "VILLAVICENCIO"])
+        assert g.marcas == ["LEVITE", "VILLAVICENCIO"]
+        assert g.nombre == "AGUAS"
+
+    def test_grupo_articulos_rechaza_lista_vacia(self):
+        """RF-004: GrupoArticulos rechaza marcas=[]."""
+        with pytest.raises(ValueError, match="vacia"):
+            GrupoArticulos("X", marcas=[])
+
+    def test_fetch_data_grupo_pasa_lista_de_marcas(self, tmp_path):
+        """RF-013: _fetch_data_grupo pasa marcas como lista."""
+        loader = _mock_loader()
+        self._generar(
+            tmp_path,
+            loader=loader,
+            grupos=[GrupoArticulos("AGUAS", marcas=["LEVITE", "VILLAVICENCIO"])],
+            objetivos={"AGUAS": 500},
+        )
+        loader.get_cobertura_custom.assert_called_once_with(
+            periodo="2026-03-01", marcas=["LEVITE", "VILLAVICENCIO"], filtro_descripcion=None,
+        )
+
+    def test_grupo_multimarca_resultado_marcas_incluidas_usa_nombre(self, tmp_path):
+        """RF-014: marcas_incluidas contiene grupo.nombre, no las marcas individuales."""
+        result, _ = self._generar(
+            tmp_path,
+            grupos=[GrupoArticulos("AGUAS", marcas=["LEVITE", "VILLAVICENCIO"]), GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"])],
+            objetivos={"AGUAS": 500, "IMPERIAL": 300},
+        )
+        assert result.marcas_incluidas == ["AGUAS", "IMPERIAL"]
+        assert "LEVITE" not in result.marcas_incluidas
+        assert "VILLAVICENCIO" not in result.marcas_incluidas
+
+    def test_fallo_en_grupo_multimarca_no_cancela_otros(self, tmp_path):
+        """RNF-003: fallo en grupo multi-marca no cancela los demas."""
+        loader = Mock(spec=DataLoader)
+
+        def side_effect(periodo, marcas, filtro_descripcion=None):
+            key = tuple(sorted(m.upper() for m in marcas))
+            if key == ("LEVITE", "VILLAVICENCIO"):
+                raise Exception("DB error")
+            return _df_cob_imperial()
+
+        loader.get_cobertura_custom.side_effect = side_effect
+        loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
+        with patch("src.services.mision_posible.service.DATA_OUTPUT", tmp_path):
+            service = MisionPosibleService(data_loader=loader)
+            result = service.generar_reporte(self._config(
+                grupos=[GrupoArticulos("AGUAS", marcas=["LEVITE", "VILLAVICENCIO"]), GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"])],
+                objetivos={"AGUAS": 500, "IMPERIAL": 300},
+            ))
+        assert result.ruta_archivos[0].exists()
 
 
 class TestNombreReporte:
