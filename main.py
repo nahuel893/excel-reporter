@@ -204,16 +204,21 @@ def cmd_mision_posible(args) -> int:
         if cfg.get("marcas"):
             print("Error: el formato 'marcas' ya no es soportado.")
             print("       Usa 'grupos' en su lugar. Ejemplo:")
-            print('       "grupos": [{"nombre": "IMPERIAL", "marca": "IMPERIAL"}]')
+            print('       "grupos": [{"nombre": "IMPERIAL", "marcas": ["IMPERIAL"]}]')
             return 1
         print("Error: grupos es requerido.")
         print("       Definelo en --config config.json")
         return 1
 
+    if any("marca" in g and "marcas" not in g for g in grupos_raw):
+        raise ValueError(
+            "El formato de grupos cambió: usar 'marcas': ['X'] en lugar de 'marca': 'X'"
+        )
+
     grupos = [
         GrupoArticulos(
             nombre=g["nombre"],
-            marca=g["marca"],
+            marcas=g["marcas"],
             filtro_descripcion=g.get("filtro_descripcion"),
         )
         for g in grupos_raw

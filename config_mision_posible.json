@@ -1,9 +1,9 @@
 {
     "periodo": "2026-03-01",
     "grupos": [
-        {"nombre": "IMPERIAL", "marca": "IMPERIAL"},
-        {"nombre": "LEVITE", "marca": "LEVITE"},
-        {"nombre": "VILLA DEL SUR", "marca": "VILLA DEL SUR"}
+        {"nombre": "IMPERIAL", "marcas": ["IMPERIAL"]},
+        {"nombre": "LEVITE", "marcas": ["LEVITE"]},
+        {"nombre": "VILLA DEL SUR", "marcas": ["VILLA DEL SUR"]}
     ],
     "objetivos": {
         "IMPERIAL": 5245,
