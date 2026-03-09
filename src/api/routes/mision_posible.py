@@ -21,8 +21,8 @@ router = APIRouter(prefix="/mision-posible", tags=["Mision Posible"])
 class GrupoArticulosSchema(BaseModel):
     """Define un grupo de articulos."""
     nombre: str = Field(..., description="Nombre de display del grupo")
-    marca: str = Field(..., description="Marca en dim_articulo")
-    filtro_descripcion: Optional[str] = Field(None, description="Substring para filtrar des_articulo con ILIKE")
+    marcas: list[str] = Field(..., min_length=1, description="Marcas en dim_articulo")
+    filtro_descripcion: Optional[str] = Field(None, description="Substring ILIKE sobre des_articulo")
 
 
 class MisionPosibleRequest(BaseModel):
@@ -50,7 +50,7 @@ def _build_config(request: MisionPosibleRequest) -> MisionPosibleConfig:
     grupos = [
         GrupoArticulos(
             nombre=g.nombre,
-            marca=g.marca,
+            marcas=g.marcas,
             filtro_descripcion=g.filtro_descripcion,
         )
         for g in request.grupos
