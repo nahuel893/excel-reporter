@@ -502,6 +502,105 @@ class DataLoader:
         """
         return self.execute_query(query, params)
 
+    def get_cobertura_custom(
+        self,
+        periodo: str,
+        marca: str,
+        filtro_descripcion: str | None = None,
+    ) -> pd.DataFrame:
+        """
+        Calcula cobertura desde fact_ventas para una marca y filtro de descripcion opcional.
+
+        Args:
+            periodo: Primer dia del mes, formato 'YYYY-MM-DD' (ej: '2026-03-01').
+            marca: Nombre de marca exacto en dim_articulo (se usa UPPER para normalizar).
+            filtro_descripcion: Substring para filtrar des_articulo con ILIKE.
+                                Si es None, incluye todos los articulos de la marca.
+
+        Returns:
+            DataFrame con columnas:
+                periodo, id_fuerza_ventas, id_sucursal, sucursal, id_vendedor, vendedor,
+                id_ruta, clientes_compradores, volumen_total
+        """
+        marca = marca.upper()
+        if filtro_descripcion is not None and filtro_descripcion.strip() == "":
+            filtro_descripcion = None
+
+        params: dict = {"periodo": periodo, "marca": marca}
+
+        if filtro_descripcion is not None:
+            escaped = filtro_descripcion.replace("%", r"\%").replace("_", r"\_")
+            filtro_desc_clause = "AND da.des_articulo ILIKE :filtro"
+            params["filtro"] = f"%{escaped}%"
+        else:
+            filtro_desc_clause = ""
+
+        query = f"""
+        WITH vendedor_cliente AS (
+            -- Rama FV1
+            SELECT
+                DATE_TRUNC('month', fv.fecha_comprobante)::date AS periodo,
+                1                                               AS id_fuerza_ventas,
+                dc.id_personal_fv1                              AS id_vendedor,
+                dc.id_ruta_fv1                                  AS id_ruta,
+                fv.id_sucursal,
+                ds.descripcion                                  AS sucursal,
+                fv.id_cliente,
+                SUM(fv.cantidades_total)                        AS total_qty
+            FROM gold.fact_ventas fv
+            JOIN      gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente
+                                          AND fv.id_sucursal = dc.id_sucursal
+            LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
+            LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
+            WHERE dc.id_personal_fv1 IS NOT NULL
+              AND da.marca = :marca
+              {filtro_desc_clause}
+              AND DATE_TRUNC('month', fv.fecha_comprobante) = :periodo
+            GROUP BY 1, 2, 3, 4, 5, 6, fv.id_cliente
+            HAVING SUM(fv.cantidades_total) > 0
+
+            UNION ALL
+
+            -- Rama FV4
+            SELECT
+                DATE_TRUNC('month', fv.fecha_comprobante)::date AS periodo,
+                4                                               AS id_fuerza_ventas,
+                dc.id_personal_fv4                              AS id_vendedor,
+                dc.id_ruta_fv4                                  AS id_ruta,
+                fv.id_sucursal,
+                ds.descripcion                                  AS sucursal,
+                fv.id_cliente,
+                SUM(fv.cantidades_total)                        AS total_qty
+            FROM gold.fact_ventas fv
+            JOIN      gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente
+                                          AND fv.id_sucursal = dc.id_sucursal
+            LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
+            LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
+            WHERE dc.id_personal_fv4 IS NOT NULL
+              AND da.marca = :marca
+              {filtro_desc_clause}
+              AND DATE_TRUNC('month', fv.fecha_comprobante) = :periodo
+            GROUP BY 1, 2, 3, 4, 5, 6, fv.id_cliente
+            HAVING SUM(fv.cantidades_total) > 0
+        )
+        SELECT
+            vc.periodo,
+            vc.id_fuerza_ventas,
+            vc.id_sucursal,
+            vc.sucursal,
+            vc.id_vendedor,
+            dv.des_vendedor                  AS vendedor,
+            vc.id_ruta,
+            COUNT(DISTINCT vc.id_cliente)    AS clientes_compradores,
+            SUM(vc.total_qty)                AS volumen_total
+        FROM vendedor_cliente vc
+        LEFT JOIN gold.dim_vendedor dv ON vc.id_vendedor = dv.id_vendedor
+        GROUP BY vc.periodo, vc.id_fuerza_ventas, vc.id_sucursal, vc.sucursal,
+                 vc.id_vendedor, dv.des_vendedor, vc.id_ruta
+        ORDER BY vc.sucursal, dv.des_vendedor
+        """
+        return self.execute_query(query, params)
+
     def get_cobertura_sucursal_marca(
         self,
         periodo_desde: str | None = None,
