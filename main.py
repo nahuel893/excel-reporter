@@ -33,7 +33,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.services import VentasService, ResumenMensualService, ResumenMensualConfig
-from src.services import MisionPosibleService, MisionPosibleConfig
+from src.services import MisionPosibleService, MisionPosibleConfig, GrupoArticulos
 from src.services.ventas import ReporteVentasConfig
 
 
@@ -189,9 +189,7 @@ def cmd_mision_posible(args) -> int:
     cfg = _cargar_config_json(args.config) if args.config else {}
 
     periodo = cfg.get("periodo") or args.periodo
-    marcas_raw = cfg.get("marcas") or (
-        [m.strip() for m in args.marcas.split(",")] if args.marcas else None
-    )
+    grupos_raw = cfg.get("grupos")
     nombre_archivo = cfg.get("nombre_archivo") or args.output
     objetivos = cfg.get("objetivos", {})
     porcentajes_sucursal = cfg.get("porcentajes_sucursal", {})
@@ -202,21 +200,35 @@ def cmd_mision_posible(args) -> int:
         print("       Usa --periodo o definelo en --config config.json")
         return 1
 
-    if not marcas_raw:
-        print("Error: marcas es requerido.")
-        print("       Usa --marcas o definelo en --config config.json")
+    if not grupos_raw:
+        if cfg.get("marcas"):
+            print("Error: el formato 'marcas' ya no es soportado.")
+            print("       Usa 'grupos' en su lugar. Ejemplo:")
+            print('       "grupos": [{"nombre": "IMPERIAL", "marca": "IMPERIAL"}]')
+            return 1
+        print("Error: grupos es requerido.")
+        print("       Definelo en --config config.json")
         return 1
+
+    grupos = [
+        GrupoArticulos(
+            nombre=g["nombre"],
+            marca=g["marca"],
+            filtro_descripcion=g.get("filtro_descripcion"),
+        )
+        for g in grupos_raw
+    ]
 
     config = MisionPosibleConfig(
         periodo=periodo,
-        marcas=marcas_raw,
+        grupos=grupos,
         objetivos=objetivos,
         porcentajes_sucursal=porcentajes_sucursal,
         nombre_archivo=nombre_archivo,
     )
 
     print(f"Generando reporte Mision Posible para {periodo}...")
-    print(f"  Marcas: {', '.join(marcas_raw)}")
+    print(f"  Grupos: {', '.join(g.nombre for g in grupos)}")
 
     service = MisionPosibleService()
 

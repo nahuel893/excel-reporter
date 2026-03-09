@@ -9,11 +9,11 @@ Contains specialized services for each report type:
 from src.services.ventas import VentasService, ReporteVentasConfig, ReporteVentasResult
 from src.services.cobertura import CoberturaService, ReporteCoberturaConfig, ReporteCoberturaResult
 from src.services.resumen_mensual import ResumenMensualService, ResumenMensualConfig, ResumenMensualResult
-from src.services.mision_posible import MisionPosibleService, MisionPosibleConfig, MisionPosibleResult
+from src.services.mision_posible import MisionPosibleService, MisionPosibleConfig, MisionPosibleResult, GrupoArticulos
 
 __all__ = [
     "VentasService", "ReporteVentasConfig", "ReporteVentasResult",
     "CoberturaService", "ReporteCoberturaConfig", "ReporteCoberturaResult",
     "ResumenMensualService", "ResumenMensualConfig", "ResumenMensualResult",
-    "MisionPosibleService", "MisionPosibleConfig", "MisionPosibleResult",
+    "MisionPosibleService", "MisionPosibleConfig", "MisionPosibleResult", "GrupoArticulos",
 ]

@@ -11,18 +11,25 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from src.services.mision_posible import MisionPosibleService, MisionPosibleConfig
+from src.services.mision_posible import MisionPosibleService, MisionPosibleConfig, GrupoArticulos
 
 router = APIRouter(prefix="/mision-posible", tags=["Mision Posible"])
 
 
 # ── Modelos de request ──────────────────────────────────────────────────────
 
+class GrupoArticulosSchema(BaseModel):
+    """Define un grupo de articulos."""
+    nombre: str = Field(..., description="Nombre de display del grupo")
+    marca: str = Field(..., description="Marca en dim_articulo")
+    filtro_descripcion: Optional[str] = Field(None, description="Substring para filtrar des_articulo con ILIKE")
+
+
 class MisionPosibleRequest(BaseModel):
     """Parametros para generar un reporte Mision Posible."""
     periodo: str = Field(..., description="Periodo (YYYY-MM-DD, primer dia del mes)", examples=["2026-03-01"])
-    marcas: list[str] = Field(..., description="Marcas a incluir", examples=[["Imperial", "Levite"]])
-    objetivos: dict[str, int] = Field(default_factory=dict, description="Objetivo total empresa por marca")
+    grupos: list[GrupoArticulosSchema] = Field(..., description="Grupos de articulos a incluir")
+    objetivos: dict[str, int] = Field(default_factory=dict, description="Objetivo total empresa por grupo")
     porcentajes_sucursal: dict[str, float] = Field(default_factory=dict, description="Porcentaje de cada sucursal")
     nombre_archivo: Optional[str] = Field(None, description="Nombre base del archivo (sin extension)")
     supervisores: Optional[dict[str, list[str]]] = Field(None, description="Supervisores y sus sucursales")
@@ -40,9 +47,17 @@ class MisionPosibleResponse(BaseModel):
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 def _build_config(request: MisionPosibleRequest) -> MisionPosibleConfig:
+    grupos = [
+        GrupoArticulos(
+            nombre=g.nombre,
+            marca=g.marca,
+            filtro_descripcion=g.filtro_descripcion,
+        )
+        for g in request.grupos
+    ]
     return MisionPosibleConfig(
         periodo=request.periodo,
-        marcas=request.marcas,
+        grupos=grupos,
         objetivos=request.objetivos,
         porcentajes_sucursal=request.porcentajes_sucursal,
         nombre_archivo=request.nombre_archivo,
