@@ -1,11 +1,15 @@
 {
     "periodo": "2026-03-01",
-    "marcas": ["IMPERIAL", "LEVITE", "VILLA DEL SUR"],
+    "grupos": [
+        {"nombre": "IMPERIAL", "marca": "IMPERIAL"},
+        {"nombre": "LEVITE", "marca": "LEVITE"},
+        {"nombre": "VILLA DEL SUR", "marca": "VILLA DEL SUR"}
+    ],
     "objetivos": {
         "IMPERIAL": 5245,
         "LEVITE": 5256,
         "VILLA DEL SUR": 4475,
-        "SAENZ BRIONES": 383 
+        "SAENZ BRIONES": 383
     },
     "porcentajes_sucursal": {
         "CASA CENTRAL": 6.67,
