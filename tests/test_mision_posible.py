@@ -699,3 +699,219 @@ class TestNombreReporte:
 
     def test_con_supervisor(self):
         assert _nombre_reporte("2026-03-01", "Ana") == "Mision Posible Ana 03-2026"
+
+
+# ── Tests: requiere_todas_marcas feature (spec 2026-03-09-mision-posible-cobertura-todas-marcas.md) ──
+
+
+class TestRequiereTodosMarcasService:
+    """Tests unitarios del servicio para el campo requiere_todas_marcas."""
+
+    def _config(self, grupos, **overrides):
+        defaults = {
+            "periodo": "2026-03-01",
+            "grupos": grupos,
+            "objetivos": {g.nombre: 100 for g in grupos},
+            "porcentajes_sucursal": PORCENTAJES,
+        }
+        defaults.update(overrides)
+        return MisionPosibleConfig(**defaults)
+
+    def _generar(self, tmp_path, loader=None, grupos=None, **config_overrides):
+        """Helper: genera reporte y retorna (result, workbook)."""
+        if grupos is None:
+            grupos = [GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"])]
+        with patch("src.services.mision_posible.service.DATA_OUTPUT", tmp_path):
+            service = MisionPosibleService(data_loader=loader or _mock_loader())
+            result = service.generar_reporte(self._config(grupos, **config_overrides))
+        from openpyxl import load_workbook
+        wb = load_workbook(result.ruta_archivos[0])
+        return result, wb
+
+    # ── RF-001: GrupoArticulos acepta requiere_todas_marcas ─────────────────
+
+    def test_grupo_articulos_acepta_requiere_todas_marcas(self):
+        """RF-001: GrupoArticulos acepta requiere_todas_marcas=True sin errores."""
+        g = GrupoArticulos("VINOS", marcas=["LA CELIA", "GRAFFIGNIA"], requiere_todas_marcas=True)
+        assert g.requiere_todas_marcas is True
+        assert g.nombre == "VINOS"
+        assert g.marcas == ["LA CELIA", "GRAFFIGNIA"]
+
+    def test_grupo_articulos_default_requiere_todas_marcas_es_false(self):
+        """RF-001: GrupoArticulos con requiere_todas_marcas omitido usa False por defecto."""
+        g = GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"])
+        assert g.requiere_todas_marcas is False
+
+    # ── RF-012: _fetch_data_grupo pasa requiere_todas_marcas al loader ───────
+
+    def test_fetch_data_grupo_pasa_requiere_todas_marcas_al_loader(self, tmp_path):
+        """RF-012: con grupo.requiere_todas_marcas=True y multi-marca, get_cobertura_custom
+        recibe requiere_todas_marcas=True."""
+        loader = Mock(spec=DataLoader)
+        loader.get_cobertura_custom.return_value = pd.DataFrame()
+        loader.get_cobertura_preventista_marca.return_value = pd.DataFrame()
+        loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
+
+        grupo = GrupoArticulos(
+            "VINOS",
+            marcas=["LA CELIA", "GRAFFIGNIA", "O-61"],
+            requiere_todas_marcas=True,
+        )
+        self._generar(tmp_path, loader=loader, grupos=[grupo])
+
+        loader.get_cobertura_custom.assert_called_once_with(
+            periodo="2026-03-01",
+            marcas=["LA CELIA", "GRAFFIGNIA", "O-61"],
+            filtro_descripcion=None,
+            requiere_todas_marcas=True,
+        )
+
+    def test_fetch_data_grupo_false_no_pasa_flag_diferente(self, tmp_path):
+        """RF-002/RF-012: con requiere_todas_marcas=False, get_cobertura_custom recibe False."""
+        loader = Mock(spec=DataLoader)
+        loader.get_cobertura_custom.return_value = pd.DataFrame()
+        loader.get_cobertura_preventista_marca.return_value = pd.DataFrame()
+        loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
+
+        grupo = GrupoArticulos(
+            "AGUAS",
+            marcas=["LEVITE", "VILLAVICENCIO"],
+            requiere_todas_marcas=False,
+        )
+        self._generar(tmp_path, loader=loader, grupos=[grupo])
+
+        loader.get_cobertura_custom.assert_called_once_with(
+            periodo="2026-03-01",
+            marcas=["LEVITE", "VILLAVICENCIO"],
+            filtro_descripcion=None,
+            requiere_todas_marcas=False,
+        )
+
+    # ── RF-005/RF-013: grupos simples no afectados por la flag ───────────────
+
+    def test_es_grupo_simple_no_afectado_por_flag(self):
+        """RF-005/RF-013: GrupoArticulos con 1 marca y requiere_todas_marcas=True sigue
+        siendo simple (_es_grupo_simple retorna True)."""
+        grupo = GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"], requiere_todas_marcas=True)
+        service = MisionPosibleService(data_loader=_mock_loader())
+        assert service._es_grupo_simple(grupo) is True
+
+    def test_grupo_simple_con_flag_true_usa_etl_no_custom(self, tmp_path):
+        """RF-005/RF-013: grupo con 1 marca y requiere_todas_marcas=True usa la tabla ETL,
+        NO llama a get_cobertura_custom."""
+        loader = _mock_loader()
+        grupo = GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"], requiere_todas_marcas=True)
+        self._generar(tmp_path, loader=loader, grupos=[grupo])
+
+        loader.get_cobertura_custom.assert_not_called()
+        assert loader.get_cobertura_preventista_marca.call_count == 1
+
+    # ── RNF-003: fallo en grupo con flag no cancela otros ────────────────────
+
+    def test_fallo_grupo_con_flag_no_cancela_otros(self, tmp_path):
+        """RNF-003: si get_cobertura_custom falla para un grupo con requiere_todas_marcas=True,
+        el servicio genera las tablas de ese grupo vacias y continua con los otros grupos."""
+        loader = Mock(spec=DataLoader)
+        loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
+        loader.get_cobertura_preventista_marca.return_value = _df_cob_preventista_marca()
+
+        call_count = [0]
+
+        def side_effect_custom(periodo, marcas, filtro_descripcion=None, requiere_todas_marcas=False):
+            call_count[0] += 1
+            key = tuple(sorted(m.upper() for m in marcas))
+            if key == ("GRAFFIGNIA", "LA CELIA", "O-61"):
+                raise Exception("DB error en grupo con requiere_todas_marcas")
+            return _df_cob_aguas()
+
+        loader.get_cobertura_custom.side_effect = side_effect_custom
+
+        grupos = [
+            GrupoArticulos("VINOS", marcas=["LA CELIA", "GRAFFIGNIA", "O-61"], requiere_todas_marcas=True),
+            GrupoArticulos("AGUAS", marcas=["LEVITE", "VILLAVICENCIO"]),
+        ]
+        result, _ = self._generar(tmp_path, loader=loader, grupos=grupos)
+
+        assert result.ruta_archivos[0].exists()
+        assert call_count[0] == 2  # se intentaron ambas queries custom
+
+
+class TestRequiereTodosMarcasSchema:
+    """Tests unitarios del schema Pydantic GrupoArticulosSchema."""
+
+    def test_schema_acepta_requiere_todas_marcas_true(self):
+        """RF-014: GrupoArticulosSchema acepta requiere_todas_marcas=True sin errores."""
+        from src.api.routes.mision_posible import GrupoArticulosSchema
+        schema = GrupoArticulosSchema(nombre="VINOS", marcas=["LA CELIA", "GRAFFIGNIA"], requiere_todas_marcas=True)
+        assert schema.requiere_todas_marcas is True
+
+    def test_schema_default_requiere_todas_marcas_es_false(self):
+        """RF-014: GrupoArticulosSchema con requiere_todas_marcas omitido usa False por defecto."""
+        from src.api.routes.mision_posible import GrupoArticulosSchema
+        schema = GrupoArticulosSchema(nombre="IMPERIAL", marcas=["IMPERIAL"])
+        assert schema.requiere_todas_marcas is False
+
+    def test_build_config_pasa_requiere_todas_marcas(self):
+        """RF-014: _build_config construye GrupoArticulos con requiere_todas_marcas=True
+        cuando el schema lo indica."""
+        from src.api.routes.mision_posible import GrupoArticulosSchema, MisionPosibleRequest, _build_config
+        request = MisionPosibleRequest(
+            periodo="2026-03-01",
+            grupos=[
+                GrupoArticulosSchema(
+                    nombre="VINOS",
+                    marcas=["LA CELIA", "GRAFFIGNIA"],
+                    requiere_todas_marcas=True,
+                )
+            ],
+        )
+        config = _build_config(request)
+        assert config.grupos[0].requiere_todas_marcas is True
+        assert config.grupos[0].nombre == "VINOS"
+
+
+class TestRequiereTodosMarcasCLI:
+    """Tests de parseo de requiere_todas_marcas desde JSON config en main.py."""
+
+    def test_main_parsea_requiere_todas_marcas_desde_json(self):
+        """RF-015: cuando grupos_raw contiene requiere_todas_marcas=True, el GrupoArticulos
+        resultante tiene requiere_todas_marcas=True."""
+        grupos_raw = [
+            {
+                "nombre": "VINOS",
+                "marcas": ["LA CELIA", "GRAFFIGNIA", "O-61"],
+                "requiere_todas_marcas": True,
+            }
+        ]
+        grupos = [
+            GrupoArticulos(
+                nombre=g["nombre"],
+                marcas=g["marcas"],
+                filtro_descripcion=g.get("filtro_descripcion"),
+                requiere_todas_marcas=g.get("requiere_todas_marcas", False),
+            )
+            for g in grupos_raw
+        ]
+        assert grupos[0].requiere_todas_marcas is True
+        assert grupos[0].nombre == "VINOS"
+        assert grupos[0].marcas == ["LA CELIA", "GRAFFIGNIA", "O-61"]
+
+    def test_main_omite_requiere_todas_marcas_usa_default(self):
+        """RF-015: cuando grupos_raw no contiene requiere_todas_marcas, el GrupoArticulos
+        resultante tiene requiere_todas_marcas=False (valor por defecto del dataclass)."""
+        grupos_raw = [
+            {
+                "nombre": "IMPERIAL",
+                "marcas": ["IMPERIAL"],
+            }
+        ]
+        grupos = [
+            GrupoArticulos(
+                nombre=g["nombre"],
+                marcas=g["marcas"],
+                filtro_descripcion=g.get("filtro_descripcion"),
+                requiere_todas_marcas=g.get("requiere_todas_marcas", False),
+            )
+            for g in grupos_raw
+        ]
+        assert grupos[0].requiere_todas_marcas is False
