@@ -3,13 +3,17 @@
     "grupos": [
         {"nombre": "IMPERIAL", "marcas": ["IMPERIAL"]},
         {"nombre": "LEVITE", "marcas": ["LEVITE"]},
-        {"nombre": "VILLA DEL SUR", "marcas": ["VILLA DEL SUR"]}
+        {"nombre": "VILLA DEL SUR", "marcas": ["VILLA DEL SUR"]},
+        {"nombre": "LA CELIA - GRAFFIGNIA - O-61", "marcas": ["LA CELIA", "GRAFFIGNIA", "O-61"], "requiere_todas_marcas": true},
+        {"nombre": "SCHNEIDER 710", "marcas": ["SCHNEIDER"], "filtro_descripcion": "710"} 
+
     ],
     "objetivos": {
         "IMPERIAL": 5245,
         "LEVITE": 5256,
         "VILLA DEL SUR": 4475,
-        "SAENZ BRIONES": 383
+        "SAENZ BRIONES": 383,
+        "LA CELIA - GRAFFIGNIA - O-61": 622
     },
     "porcentajes_sucursal": {
         "CASA CENTRAL": 6.67,

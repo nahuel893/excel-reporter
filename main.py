@@ -220,6 +220,7 @@ def cmd_mision_posible(args) -> int:
             nombre=g["nombre"],
             marcas=g["marcas"],
             filtro_descripcion=g.get("filtro_descripcion"),
+            requiere_todas_marcas=g.get("requiere_todas_marcas", False),
         )
         for g in grupos_raw
     ]
