@@ -519,7 +519,7 @@ class DataLoader:
 
         Returns:
             DataFrame con columnas:
-                periodo, id_fuerza_ventas, id_sucursal, sucursal, id_vendedor, vendedor,
+                periodo, id_fuerza_ventas, id_sucursal, sucursal, vendedor,
                 id_ruta, clientes_compradores, volumen_total
         """
         if not marcas:
@@ -550,7 +550,7 @@ class DataLoader:
             SELECT
                 DATE_TRUNC('month', fv.fecha_comprobante)::date AS periodo,
                 1                                               AS id_fuerza_ventas,
-                dc.id_personal_fv1                              AS id_vendedor,
+                dc.des_personal_fv1                             AS vendedor,
                 dc.id_ruta_fv1                                  AS id_ruta,
                 fv.id_sucursal,
                 ds.descripcion                                  AS sucursal,
@@ -561,7 +561,7 @@ class DataLoader:
                                           AND fv.id_sucursal = dc.id_sucursal
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
-            WHERE dc.id_personal_fv1 IS NOT NULL
+            WHERE dc.des_personal_fv1 IS NOT NULL
               {filtro_marca_clause}
               {filtro_desc_clause}
               AND DATE_TRUNC('month', fv.fecha_comprobante) = :periodo
@@ -574,7 +574,7 @@ class DataLoader:
             SELECT
                 DATE_TRUNC('month', fv.fecha_comprobante)::date AS periodo,
                 4                                               AS id_fuerza_ventas,
-                dc.id_personal_fv4                              AS id_vendedor,
+                dc.des_personal_fv4                             AS vendedor,
                 dc.id_ruta_fv4                                  AS id_ruta,
                 fv.id_sucursal,
                 ds.descripcion                                  AS sucursal,
@@ -585,7 +585,7 @@ class DataLoader:
                                           AND fv.id_sucursal = dc.id_sucursal
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
-            WHERE dc.id_personal_fv4 IS NOT NULL
+            WHERE dc.des_personal_fv4 IS NOT NULL
               {filtro_marca_clause}
               {filtro_desc_clause}
               AND DATE_TRUNC('month', fv.fecha_comprobante) = :periodo
@@ -597,16 +597,14 @@ class DataLoader:
             vc.id_fuerza_ventas,
             vc.id_sucursal,
             vc.sucursal,
-            vc.id_vendedor,
-            dv.des_vendedor                  AS vendedor,
+            vc.vendedor,
             vc.id_ruta,
             COUNT(DISTINCT vc.id_cliente)    AS clientes_compradores,
             SUM(vc.total_qty)                AS volumen_total
         FROM vendedor_cliente vc
-        LEFT JOIN gold.dim_vendedor dv ON vc.id_vendedor = dv.id_vendedor
         GROUP BY vc.periodo, vc.id_fuerza_ventas, vc.id_sucursal, vc.sucursal,
-                 vc.id_vendedor, dv.des_vendedor, vc.id_ruta
-        ORDER BY vc.sucursal, dv.des_vendedor
+                 vc.vendedor, vc.id_ruta
+        ORDER BY vc.sucursal, vc.vendedor
         """
         return self.execute_query(query, params)
 

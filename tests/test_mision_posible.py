@@ -29,9 +29,9 @@ def _df_cob(rows=None):
     """Crea DataFrame de cobertura sin columna marca (post get_cobertura_custom)."""
     if rows is None:
         rows = [
-            {"sucursal": "CASA CENTRAL", "vendedor": "Juan", "id_vendedor": 1, "id_ruta": 1, "clientes_compradores": 20, "volumen_total": 100, "periodo": "2026-03-01"},
-            {"sucursal": "CASA CENTRAL", "vendedor": "Maria", "id_vendedor": 2, "id_ruta": 2, "clientes_compradores": 25, "volumen_total": 150, "periodo": "2026-03-01"},
-            {"sucursal": "SUCURSAL CAFAYATE", "vendedor": "Pedro", "id_vendedor": 3, "id_ruta": 10, "clientes_compradores": 15, "volumen_total": 80, "periodo": "2026-03-01"},
+            {"sucursal": "CASA CENTRAL", "vendedor": "Juan", "id_ruta": 1, "clientes_compradores": 20, "volumen_total": 100, "periodo": "2026-03-01"},
+            {"sucursal": "CASA CENTRAL", "vendedor": "Maria", "id_ruta": 2, "clientes_compradores": 25, "volumen_total": 150, "periodo": "2026-03-01"},
+            {"sucursal": "SUCURSAL CAFAYATE", "vendedor": "Pedro", "id_ruta": 10, "clientes_compradores": 15, "volumen_total": 80, "periodo": "2026-03-01"},
         ]
     return pd.DataFrame(rows)
 
@@ -39,24 +39,24 @@ def _df_cob(rows=None):
 def _df_cob_imperial():
     """DataFrame para grupo IMPERIAL (sin columna marca)."""
     return pd.DataFrame([
-        {"sucursal": "CASA CENTRAL", "vendedor": "Juan", "id_vendedor": 1, "id_ruta": 1, "clientes_compradores": 20, "volumen_total": 100, "periodo": "2026-03-01"},
-        {"sucursal": "CASA CENTRAL", "vendedor": "Maria", "id_vendedor": 2, "id_ruta": 2, "clientes_compradores": 25, "volumen_total": 150, "periodo": "2026-03-01"},
-        {"sucursal": "SUCURSAL CAFAYATE", "vendedor": "Pedro", "id_vendedor": 3, "id_ruta": 10, "clientes_compradores": 15, "volumen_total": 80, "periodo": "2026-03-01"},
+        {"sucursal": "CASA CENTRAL", "vendedor": "Juan", "id_ruta": 1, "clientes_compradores": 20, "volumen_total": 100, "periodo": "2026-03-01"},
+        {"sucursal": "CASA CENTRAL", "vendedor": "Maria", "id_ruta": 2, "clientes_compradores": 25, "volumen_total": 150, "periodo": "2026-03-01"},
+        {"sucursal": "SUCURSAL CAFAYATE", "vendedor": "Pedro", "id_ruta": 10, "clientes_compradores": 15, "volumen_total": 80, "periodo": "2026-03-01"},
     ])
 
 
 def _df_cob_levite():
     """DataFrame para grupo LEVITE (sin columna marca)."""
     return pd.DataFrame([
-        {"sucursal": "CASA CENTRAL", "vendedor": "Juan", "id_vendedor": 1, "id_ruta": 1, "clientes_compradores": 10, "volumen_total": 50, "periodo": "2026-03-01"},
+        {"sucursal": "CASA CENTRAL", "vendedor": "Juan", "id_ruta": 1, "clientes_compradores": 10, "volumen_total": 50, "periodo": "2026-03-01"},
     ])
 
 
 def _df_cob_aguas():
     """DataFrame para grupo AGUAS (union LEVITE+VILLAVICENCIO)."""
     return pd.DataFrame([
-        {"sucursal": "CASA CENTRAL", "vendedor": "Juan", "id_vendedor": 1, "id_ruta": 1, "clientes_compradores": 30, "volumen_total": 200, "periodo": "2026-03-01"},
-        {"sucursal": "SUCURSAL CAFAYATE", "vendedor": "Pedro", "id_vendedor": 3, "id_ruta": 10, "clientes_compradores": 12, "volumen_total": 60, "periodo": "2026-03-01"},
+        {"sucursal": "CASA CENTRAL", "vendedor": "Juan", "id_ruta": 1, "clientes_compradores": 30, "volumen_total": 200, "periodo": "2026-03-01"},
+        {"sucursal": "SUCURSAL CAFAYATE", "vendedor": "Pedro", "id_ruta": 10, "clientes_compradores": 12, "volumen_total": 60, "periodo": "2026-03-01"},
     ])
 
 
@@ -253,7 +253,7 @@ class TestMisionPosibleService:
         """RF-015: zonas virtuales se aplican; workbook tiene 2 hojas."""
         loader = Mock(spec=DataLoader)
         loader.get_cobertura_custom.return_value = pd.DataFrame([{
-            "sucursal": "CASA CENTRAL", "vendedor": "Juan", "id_vendedor": 1,
+            "sucursal": "CASA CENTRAL", "vendedor": "Juan",
             "id_ruta": 81, "clientes_compradores": 20,
             "volumen_total": 100, "periodo": "2026-03-01",
         }])
@@ -488,7 +488,7 @@ class TestMisionPosibleService:
         loader = Mock(spec=DataLoader)
         loader.get_ultima_fecha_venta.return_value = date(2026, 3, 6)
         loader.get_cobertura_custom.side_effect = lambda periodo, marcas, filtro_descripcion=None: pd.DataFrame([
-            {"sucursal": "SUC_A", "vendedor": "V1", "id_vendedor": 1, "id_ruta": 1, "clientes_compradores": 5, "volumen_total": 50, "periodo": "2026-03-01"},
+            {"sucursal": "SUC_A", "vendedor": "V1", "id_ruta": 1, "clientes_compradores": 5, "volumen_total": 50, "periodo": "2026-03-01"},
         ])
 
         with patch("src.services.mision_posible.service.DATA_OUTPUT", tmp_path):
