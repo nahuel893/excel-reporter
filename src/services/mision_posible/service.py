@@ -31,8 +31,12 @@ from src.services.mision_posible.processor import (
 class GrupoArticulos:
     """Define un grupo de articulos para el reporte Mision Posible."""
     nombre: str
-    marca: str
+    marcas: list[str]
     filtro_descripcion: str | None = None
+
+    def __post_init__(self):
+        if not self.marcas:
+            raise ValueError(f"GrupoArticulos '{self.nombre}': marcas no puede estar vacia.")
 
 
 @dataclass
@@ -378,7 +382,7 @@ class MisionPosibleService(BaseService):
         try:
             df_cob_raw = self.data_loader.get_cobertura_custom(
                 periodo=periodo,
-                marca=grupo.marca.upper(),
+                marcas=grupo.marcas,
                 filtro_descripcion=grupo.filtro_descripcion,
             )
             if not df_cob_raw.empty:
