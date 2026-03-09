@@ -23,6 +23,7 @@ class GrupoArticulosSchema(BaseModel):
     nombre: str = Field(..., description="Nombre de display del grupo")
     marcas: list[str] = Field(..., min_length=1, description="Marcas en dim_articulo")
     filtro_descripcion: Optional[str] = Field(None, description="Substring ILIKE sobre des_articulo")
+    requiere_todas_marcas: bool = Field(False, description="Si True, el cliente debe comprar de cada marca del grupo")
 
 
 class MisionPosibleRequest(BaseModel):
@@ -52,6 +53,7 @@ def _build_config(request: MisionPosibleRequest) -> MisionPosibleConfig:
             nombre=g.nombre,
             marcas=g.marcas,
             filtro_descripcion=g.filtro_descripcion,
+            requiere_todas_marcas=g.requiere_todas_marcas,
         )
         for g in request.grupos
     ]
