@@ -28,10 +28,18 @@ from src.services.mision_posible.processor import (
 
 
 @dataclass
+class GrupoArticulos:
+    """Define un grupo de articulos para el reporte Mision Posible."""
+    nombre: str
+    marca: str
+    filtro_descripcion: str | None = None
+
+
+@dataclass
 class MisionPosibleConfig:
     """Configuracion para el reporte Mision Posible."""
     periodo: str                                # "YYYY-MM-DD", primer dia del mes
-    marcas: list[str]                           # ["Imperial", "Levite", "Villa del Sur"]
+    grupos: list[GrupoArticulos]                # reemplaza a marcas: list[str]
     objetivos: dict[str, int] = field(default_factory=dict)
     porcentajes_sucursal: dict[str, float] = field(default_factory=dict)
     nombre_archivo: str | None = None
@@ -103,11 +111,11 @@ class MisionPosibleService(BaseService):
 
     def generar_reporte(self, config: MisionPosibleConfig) -> MisionPosibleResult:
         """Genera un unico archivo con hojas 'Sucursales' y 'Por Vendedor'."""
-        if not config.marcas:
-            raise ValueError("La lista de marcas no puede estar vacia.")
+        if not config.grupos:
+            raise ValueError("La lista de grupos no puede estar vacia.")
 
         periodo = _normalizar_periodo(config.periodo)
-        df_cob, ultima_fecha = self._fetch_data(periodo)
+        ultima_fecha = self._fetch_ultima_fecha()
 
         nombre = config.nombre_archivo or _nombre_reporte(periodo)
 
@@ -117,16 +125,17 @@ class MisionPosibleService(BaseService):
 
         tablas_suc = []
         tablas_vend = []
-        for marca in config.marcas:
-            objetivo_total = config.objetivos.get(marca)
+        for grupo in config.grupos:
+            df_cob = self._fetch_data_grupo(periodo, grupo)
+            objetivo_total = config.objetivos.get(grupo.nombre)
             df_suc = procesar_cobertura_sucursal(
-                df_cob, marca, objetivo_total, config.porcentajes_sucursal
+                df_cob, grupo.nombre, objetivo_total, config.porcentajes_sucursal
             )
             df_vend = procesar_cobertura_vendedor(
-                df_cob, marca, objetivo_total, config.porcentajes_sucursal
+                df_cob, grupo.nombre, objetivo_total, config.porcentajes_sucursal
             )
-            tablas_suc.append((marca, df_suc))
-            tablas_vend.append((marca, df_vend))
+            tablas_suc.append((grupo.nombre, df_suc))
+            tablas_vend.append((grupo.nombre, df_vend))
 
         self._escribir_hoja_sucursales(ws_suc, tablas_suc, ultima_fecha)
 
@@ -139,7 +148,7 @@ class MisionPosibleService(BaseService):
 
         return MisionPosibleResult(
             ruta_archivos=[ruta],
-            marcas_incluidas=list(config.marcas),
+            marcas_incluidas=[g.nombre for g in config.grupos],
             hojas=["Sucursales", "Por Vendedor"],
         )
 
@@ -148,18 +157,23 @@ class MisionPosibleService(BaseService):
         config: MisionPosibleConfig,
         supervisores: dict[str, list[str]],
     ) -> list[MisionPosibleResult]:
-        """Genera un archivo por supervisor con una sola consulta a BD."""
-        if not config.marcas:
-            raise ValueError("La lista de marcas no puede estar vacia.")
+        """Genera un archivo por supervisor. Una query por grupo, filtrado en memoria."""
+        if not config.grupos:
+            raise ValueError("La lista de grupos no puede estar vacia.")
 
         periodo = _normalizar_periodo(config.periodo)
-        df_cob, ultima_fecha = self._fetch_data(periodo)
+        ultima_fecha = self._fetch_ultima_fecha()
+
+        # Fetch data once per grupo (N queries), then filter per supervisor in memory
+        datos_por_grupo: list[tuple[GrupoArticulos, pd.DataFrame]] = []
+        for grupo in config.grupos:
+            df_cob = self._fetch_data_grupo(periodo, grupo)
+            datos_por_grupo.append((grupo, df_cob))
 
         DATA_OUTPUT.mkdir(parents=True, exist_ok=True)
         results = []
         for supervisor, sucursales in supervisores.items():
             sucursales_exp = expandir_sucursales(sucursales)
-            df_cob_sup = df_cob[df_cob["sucursal"].isin(sucursales_exp)] if not df_cob.empty else df_cob
 
             nombre = config.nombre_archivo or _nombre_reporte(periodo, supervisor)
 
@@ -169,16 +183,17 @@ class MisionPosibleService(BaseService):
 
             tablas_suc = []
             tablas_vend = []
-            for marca in config.marcas:
-                objetivo_total = config.objetivos.get(marca)
+            for grupo, df_cob in datos_por_grupo:
+                df_cob_sup = df_cob[df_cob["sucursal"].isin(sucursales_exp)] if not df_cob.empty else df_cob
+                objetivo_total = config.objetivos.get(grupo.nombre)
                 df_suc = procesar_cobertura_sucursal(
-                    df_cob_sup, marca, objetivo_total, config.porcentajes_sucursal
+                    df_cob_sup, grupo.nombre, objetivo_total, config.porcentajes_sucursal
                 )
                 df_vend = procesar_cobertura_vendedor(
-                    df_cob_sup, marca, objetivo_total, config.porcentajes_sucursal
+                    df_cob_sup, grupo.nombre, objetivo_total, config.porcentajes_sucursal
                 )
-                tablas_suc.append((marca, df_suc))
-                tablas_vend.append((marca, df_vend))
+                tablas_suc.append((grupo.nombre, df_suc))
+                tablas_vend.append((grupo.nombre, df_vend))
 
             self._escribir_hoja_sucursales(ws_suc, tablas_suc, ultima_fecha)
 
@@ -190,7 +205,7 @@ class MisionPosibleService(BaseService):
 
             results.append(MisionPosibleResult(
                 ruta_archivos=[ruta],
-                marcas_incluidas=list(config.marcas),
+                marcas_incluidas=[g.nombre for g in config.grupos],
                 hojas=["Sucursales", "Por Vendedor"],
                 supervisor=supervisor,
             ))
@@ -353,26 +368,28 @@ class MisionPosibleService(BaseService):
             # Empty separator row between marca blocks
             current_row += 1
 
-    def _fetch_data(self, periodo: str) -> tuple[pd.DataFrame, date | None]:
-        """Fetches cobertura data and ultima fecha venta.
+    def _fetch_data_grupo(self, periodo: str, grupo: GrupoArticulos) -> pd.DataFrame:
+        """Fetches cobertura for a single grupo via get_cobertura_custom.
 
         Returns:
-            Tuple of (df_cob post zonas virtuales, ultima_fecha_venta).
+            DataFrame post zonas virtuales, or empty DataFrame on error.
         """
         df_cob = pd.DataFrame()
         try:
-            df_cob_raw = self.data_loader.get_cobertura_preventista_marca(
-                periodos=[periodo]
+            df_cob_raw = self.data_loader.get_cobertura_custom(
+                periodo=periodo,
+                marca=grupo.marca.upper(),
+                filtro_descripcion=grupo.filtro_descripcion,
             )
             if not df_cob_raw.empty:
                 df_cob = aplicar_zonas_virtuales(df_cob_raw)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error al obtener cobertura para grupo '{grupo.nombre}': {e}")
+        return df_cob
 
-        ultima_fecha = None
+    def _fetch_ultima_fecha(self) -> date | None:
+        """Fetches ultima fecha venta."""
         try:
-            ultima_fecha = self.data_loader.get_ultima_fecha_venta()
+            return self.data_loader.get_ultima_fecha_venta()
         except Exception:
-            pass
-
-        return df_cob, ultima_fecha
+            return None
