@@ -400,11 +400,13 @@ class MisionPosibleService(BaseService):
                     df_cob_raw = df_cob_raw[df_cob_raw["marca"].str.upper() == marca]
                     df_cob_raw = df_cob_raw.drop(columns=["marca"], errors="ignore")
             else:
+                articulos_ids = list(grupo.articulos.keys()) if grupo.articulos else None
                 df_cob_raw = self.data_loader.get_cobertura_custom(
                     periodo=periodo,
                     marcas=grupo.marcas,
                     filtro_descripcion=grupo.filtro_descripcion,
                     requiere_todas_marcas=grupo.requiere_todas_marcas,
+                    articulos_ids=articulos_ids,
                 )
             if not df_cob_raw.empty:
                 df_cob = aplicar_zonas_virtuales(df_cob_raw)

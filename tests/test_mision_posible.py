@@ -77,7 +77,7 @@ def _mock_loader(ultima_fecha=date(2026, 3, 6)):
     loader.get_cobertura_preventista_marca.return_value = _df_cob_preventista_marca()
 
     # Query custom (grupos multi-marca o con filtro)
-    def _side_effect_cob(periodo, marcas, filtro_descripcion=None, requiere_todas_marcas=False):
+    def _side_effect_cob(periodo, marcas, filtro_descripcion=None, requiere_todas_marcas=False, articulos_ids=None):
         key = tuple(sorted(m.upper() for m in marcas))
         return {
             ("IMPERIAL",): _df_cob_imperial(),
@@ -564,7 +564,7 @@ class TestMisionPosibleService:
         self._generar(tmp_path, loader=loader, grupos=[grupo], objetivos={"SCHNEIDER 710": 100})
         loader.get_cobertura_custom.assert_called_once_with(
             periodo="2026-03-01", marcas=["SCHNEIDER"], filtro_descripcion="710",
-            requiere_todas_marcas=False,
+            requiere_todas_marcas=False, articulos_ids=None,
         )
         # No debe usar la tabla pre-agregada para este grupo
         loader.get_cobertura_preventista_marca.call_count  # may be called for other groups
@@ -579,7 +579,7 @@ class TestMisionPosibleService:
         self._generar(tmp_path, loader=loader, grupos=[grupo], objetivos={"SCHNEIDER 710": 100})
         loader.get_cobertura_custom.assert_called_once_with(
             periodo="2026-03-01", marcas=["SCHNEIDER"], filtro_descripcion="710",
-            requiere_todas_marcas=False,
+            requiere_todas_marcas=False, articulos_ids=None,
         )
 
     def test_objetivos_usan_nombre_del_grupo(self, tmp_path):
@@ -658,7 +658,7 @@ class TestMisionPosibleService:
         )
         loader.get_cobertura_custom.assert_called_once_with(
             periodo="2026-03-01", marcas=["LEVITE", "VILLAVICENCIO"], filtro_descripcion=None,
-            requiere_todas_marcas=False,
+            requiere_todas_marcas=False, articulos_ids=None,
         )
 
     def test_grupo_multimarca_resultado_marcas_incluidas_usa_nombre(self, tmp_path):
@@ -763,7 +763,7 @@ class TestRequiereTodosMarcasService:
             periodo="2026-03-01",
             marcas=["LA CELIA", "GRAFFIGNIA", "O-61"],
             filtro_descripcion=None,
-            requiere_todas_marcas=True,
+            requiere_todas_marcas=True, articulos_ids=None,
         )
 
     def test_fetch_data_grupo_false_no_pasa_flag_diferente(self, tmp_path):
@@ -784,7 +784,7 @@ class TestRequiereTodosMarcasService:
             periodo="2026-03-01",
             marcas=["LEVITE", "VILLAVICENCIO"],
             filtro_descripcion=None,
-            requiere_todas_marcas=False,
+            requiere_todas_marcas=False, articulos_ids=None,
         )
 
     # ── RF-005/RF-013: grupos simples no afectados por la flag ───────────────
@@ -817,7 +817,7 @@ class TestRequiereTodosMarcasService:
 
         call_count = [0]
 
-        def side_effect_custom(periodo, marcas, filtro_descripcion=None, requiere_todas_marcas=False):
+        def side_effect_custom(periodo, marcas, filtro_descripcion=None, requiere_todas_marcas=False, articulos_ids=None):
             call_count[0] += 1
             key = tuple(sorted(m.upper() for m in marcas))
             if key == ("GRAFFIGNIA", "LA CELIA", "O-61"):
