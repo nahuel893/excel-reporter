@@ -21,9 +21,14 @@ router = APIRouter(prefix="/mision-posible", tags=["Mision Posible"])
 class GrupoArticulosSchema(BaseModel):
     """Define un grupo de articulos."""
     nombre: str = Field(..., description="Nombre de display del grupo")
-    marcas: list[str] = Field(..., min_length=1, description="Marcas en dim_articulo")
+    marcas: list[str] = Field(default_factory=list, description="Marcas en dim_articulo. Requerido si articulos es None.")
     filtro_descripcion: Optional[str] = Field(None, description="Substring ILIKE sobre des_articulo")
     requiere_todas_marcas: bool = Field(False, description="Si True, el cliente debe comprar de cada marca del grupo")
+    articulos: Optional[dict[str, str]] = Field(
+        None,
+        description="Mapa {str(id_articulo): marca} para filtrar por articulos especificos. "
+                    "Las claves son strings porque JSON no soporta claves enteras."
+    )
 
 
 class MisionPosibleRequest(BaseModel):
@@ -48,15 +53,24 @@ class MisionPosibleResponse(BaseModel):
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 def _build_config(request: MisionPosibleRequest) -> MisionPosibleConfig:
-    grupos = [
-        GrupoArticulos(
+    grupos = []
+    for g in request.grupos:
+        articulos = None
+        if g.articulos is not None:
+            try:
+                articulos = {int(k): v for k, v in g.articulos.items()}
+            except (ValueError, TypeError):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Grupo '{g.nombre}': las claves de articulos deben ser enteros validos."
+                )
+        grupos.append(GrupoArticulos(
             nombre=g.nombre,
             marcas=g.marcas,
             filtro_descripcion=g.filtro_descripcion,
             requiere_todas_marcas=g.requiere_todas_marcas,
-        )
-        for g in request.grupos
-    ]
+            articulos=articulos,
+        ))
     return MisionPosibleConfig(
         periodo=request.periodo,
         grupos=grupos,
