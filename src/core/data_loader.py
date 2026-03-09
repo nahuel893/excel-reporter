@@ -508,38 +508,53 @@ class DataLoader:
         marcas: list[str],
         filtro_descripcion: str | None = None,
         requiere_todas_marcas: bool = False,
+        articulos_ids: list[int] | None = None,
     ) -> pd.DataFrame:
         """
-        Calcula cobertura desde fact_ventas para una o mas marcas y filtro de descripcion opcional.
+        Calcula cobertura desde fact_ventas para un grupo de marcas o articulos especificos.
 
         Args:
-            periodo: Primer dia del mes, formato 'YYYY-MM-DD' (ej: '2026-03-01').
-            marcas: Lista de nombres de marca en dim_articulo (se normaliza a UPPER).
-            filtro_descripcion: Substring para filtrar des_articulo con ILIKE.
-                                Si es None, incluye todos los articulos de las marcas.
-            requiere_todas_marcas: Si True, solo cuenta clientes con cantidad neta
-                                   positiva en al menos un articulo de CADA marca.
-                                   Si False (default), usa criterio actual.
+            periodo: Primer dia del mes, formato 'YYYY-MM-DD'.
+            marcas: Lista de marcas en dim_articulo. Requerido si articulos_ids es None.
+                    Cuando articulos_ids esta presente, marcas se usa solo para calcular
+                    num_marcas en la logica requiere_todas_marcas.
+            filtro_descripcion: Substring ILIKE sobre des_articulo. Opcional.
+            requiere_todas_marcas: Si True, cuenta solo clientes con compra en CADA marca.
+            articulos_ids: Lista de id_articulo especificos. Si se provee, filtra por
+                           fv.id_articulo IN (...) en lugar de da.marca IN (...).
 
         Returns:
             DataFrame con columnas:
                 periodo, id_fuerza_ventas, id_sucursal, sucursal, vendedor,
                 id_ruta, clientes_compradores, volumen_total
         """
-        if not marcas:
+        if not marcas and articulos_ids is None:
             raise ValueError("marcas no puede estar vacia.")
+
+        if articulos_ids is not None and not articulos_ids:
+            raise ValueError("articulos_ids no puede estar vacia.")
 
         marcas_upper = [m.upper() for m in marcas]
         marcas_upper = list(dict.fromkeys(marcas_upper))  # deduplicate preserving order
 
-        marca_params = {f"marca_{i}": m for i, m in enumerate(marcas_upper)}
-        marca_placeholders = ", ".join(f":marca_{i}" for i in range(len(marcas_upper)))
-        filtro_marca_clause = f"AND da.marca IN ({marca_placeholders})"
+        params: dict = {"periodo": periodo}
+
+        # Build principal filter clause
+        if articulos_ids is not None:
+            if len(articulos_ids) > 1000:
+                print(f"⚠ articulos_ids tiene {len(articulos_ids)} elementos en el IN clause.")
+            art_params = {f"art_{i}": aid for i, aid in enumerate(articulos_ids)}
+            art_placeholders = ", ".join(f":art_{i}" for i in range(len(articulos_ids)))
+            filtro_principal_clause = f"AND fv.id_articulo IN ({art_placeholders})"
+            params.update(art_params)
+        else:
+            marca_params = {f"marca_{i}": m for i, m in enumerate(marcas_upper)}
+            marca_placeholders = ", ".join(f":marca_{i}" for i in range(len(marcas_upper)))
+            filtro_principal_clause = f"AND da.marca IN ({marca_placeholders})"
+            params.update(marca_params)
 
         if filtro_descripcion is not None and filtro_descripcion.strip() == "":
             filtro_descripcion = None
-
-        params: dict = {"periodo": periodo, **marca_params}
 
         if filtro_descripcion is not None:
             escaped = filtro_descripcion.replace("%", r"\%").replace("_", r"\_")
@@ -553,17 +568,17 @@ class DataLoader:
         if usar_todas_marcas:
             params["num_marcas"] = len(marcas_upper)
             query = self._build_query_todas_marcas(
-                filtro_marca_clause, filtro_desc_clause
+                filtro_principal_clause, filtro_desc_clause
             )
         else:
             query = self._build_query_default(
-                filtro_marca_clause, filtro_desc_clause
+                filtro_principal_clause, filtro_desc_clause
             )
 
         return self.execute_query(query, params)
 
     def _build_query_default(
-        self, filtro_marca_clause: str, filtro_desc_clause: str
+        self, filtro_principal_clause: str, filtro_desc_clause: str
     ) -> str:
         return f"""
         WITH vendedor_cliente AS (
@@ -583,7 +598,7 @@ class DataLoader:
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
             WHERE dc.des_personal_fv1 IS NOT NULL
-              {filtro_marca_clause}
+              {filtro_principal_clause}
               {filtro_desc_clause}
               AND DATE_TRUNC('month', fv.fecha_comprobante) = :periodo
             GROUP BY 1, 2, 3, 4, 5, 6, fv.id_cliente
@@ -607,7 +622,7 @@ class DataLoader:
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
             WHERE dc.des_personal_fv4 IS NOT NULL
-              {filtro_marca_clause}
+              {filtro_principal_clause}
               {filtro_desc_clause}
               AND DATE_TRUNC('month', fv.fecha_comprobante) = :periodo
             GROUP BY 1, 2, 3, 4, 5, 6, fv.id_cliente
@@ -629,7 +644,7 @@ class DataLoader:
         """
 
     def _build_query_todas_marcas(
-        self, filtro_marca_clause: str, filtro_desc_clause: str
+        self, filtro_principal_clause: str, filtro_desc_clause: str
     ) -> str:
         return f"""
         WITH cliente_marca AS (
@@ -650,7 +665,7 @@ class DataLoader:
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
             WHERE dc.des_personal_fv1 IS NOT NULL
-              {filtro_marca_clause}
+              {filtro_principal_clause}
               {filtro_desc_clause}
               AND DATE_TRUNC('month', fv.fecha_comprobante) = :periodo
             GROUP BY 1, 2, 3, 4, 5, 6, fv.id_cliente, da.marca
@@ -675,7 +690,7 @@ class DataLoader:
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
             WHERE dc.des_personal_fv4 IS NOT NULL
-              {filtro_marca_clause}
+              {filtro_principal_clause}
               {filtro_desc_clause}
               AND DATE_TRUNC('month', fv.fecha_comprobante) = :periodo
             GROUP BY 1, 2, 3, 4, 5, 6, fv.id_cliente, da.marca
