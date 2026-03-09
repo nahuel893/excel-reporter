@@ -32,6 +32,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
+
 from src.services import VentasService, ResumenMensualService, ResumenMensualConfig
 from src.services import MisionPosibleService, MisionPosibleConfig, GrupoArticulos
 from src.services.ventas import ReporteVentasConfig
@@ -183,6 +185,46 @@ def cmd_resumen_mensual(args) -> int:
     return 0
 
 
+def _cargar_grupos_desde_xlsx(
+    ruta_xlsx: str,
+    requiere_todas_marcas: bool = False,
+) -> list[GrupoArticulos]:
+    """Lee el XLSX y construye GrupoArticulos por CATEGORIA."""
+    path = Path(ruta_xlsx)
+    if not path.exists():
+        raise ValueError(f"Archivo no encontrado: {path}")
+
+    df = pd.read_excel(path, dtype={"CODIGO": "Int64"})
+
+    columnas_requeridas = {"CODIGO", "ARTICULO", "MARCA", "CATEGORIA"}
+    faltantes = columnas_requeridas - set(df.columns)
+    if faltantes:
+        raise ValueError(f"Columnas faltantes en el XLSX: {faltantes}")
+
+    if df.empty:
+        raise ValueError("El XLSX no contiene filas de datos.")
+
+    grupos = []
+    for categoria, grupo_df in df.groupby("CATEGORIA", sort=False):
+        grupo_df = grupo_df.drop_duplicates(subset=["CODIGO"])
+        grupo_df = grupo_df.dropna(subset=["CODIGO"])
+        if grupo_df.empty:
+            print(f"⚠ Categoria '{categoria}' omitida: no tiene articulos validos.")
+            continue
+
+        articulos = {int(row["CODIGO"]): str(row["MARCA"]).upper() for _, row in grupo_df.iterrows()}
+        marcas = list(dict.fromkeys(str(m).upper() for m in grupo_df["MARCA"]))
+
+        grupos.append(GrupoArticulos(
+            nombre=str(categoria),
+            marcas=marcas,
+            articulos=articulos,
+            requiere_todas_marcas=requiere_todas_marcas,
+        ))
+
+    return grupos
+
+
 def cmd_mision_posible(args) -> int:
     """Ejecuta el comando de reporte Mision Posible."""
 
@@ -190,6 +232,7 @@ def cmd_mision_posible(args) -> int:
 
     periodo = cfg.get("periodo") or args.periodo
     grupos_raw = cfg.get("grupos")
+    archivo_articulos = cfg.get("archivo_articulos")
     nombre_archivo = cfg.get("nombre_archivo") or args.output
     objetivos = cfg.get("objetivos", {})
     porcentajes_sucursal = cfg.get("porcentajes_sucursal", {})
@@ -200,30 +243,38 @@ def cmd_mision_posible(args) -> int:
         print("       Usa --periodo o definelo en --config config.json")
         return 1
 
-    if not grupos_raw:
+    if not grupos_raw and not archivo_articulos:
         if cfg.get("marcas"):
             print("Error: el formato 'marcas' ya no es soportado.")
             print("       Usa 'grupos' en su lugar. Ejemplo:")
             print('       "grupos": [{"nombre": "IMPERIAL", "marcas": ["IMPERIAL"]}]')
             return 1
-        print("Error: grupos es requerido.")
+        print("Error: grupos o archivo_articulos es requerido.")
         print("       Definelo en --config config.json")
         return 1
 
-    if any("marca" in g and "marcas" not in g for g in grupos_raw):
-        raise ValueError(
-            "El formato de grupos cambió: usar 'marcas': ['X'] en lugar de 'marca': 'X'"
-        )
+    # Build grupos from manual JSON entries
+    grupos = []
+    if grupos_raw:
+        if any("marca" in g and "marcas" not in g for g in grupos_raw):
+            raise ValueError(
+                "El formato de grupos cambió: usar 'marcas': ['X'] en lugar de 'marca': 'X'"
+            )
+        grupos = [
+            GrupoArticulos(
+                nombre=g["nombre"],
+                marcas=g["marcas"],
+                filtro_descripcion=g.get("filtro_descripcion"),
+                requiere_todas_marcas=g.get("requiere_todas_marcas", False),
+            )
+            for g in grupos_raw
+        ]
 
-    grupos = [
-        GrupoArticulos(
-            nombre=g["nombre"],
-            marcas=g["marcas"],
-            filtro_descripcion=g.get("filtro_descripcion"),
-            requiere_todas_marcas=g.get("requiere_todas_marcas", False),
-        )
-        for g in grupos_raw
-    ]
+    # Append grupos from XLSX if archivo_articulos is present
+    if archivo_articulos:
+        requiere_todas_marcas_global = cfg.get("requiere_todas_marcas", False)
+        grupos_xlsx = _cargar_grupos_desde_xlsx(archivo_articulos, requiere_todas_marcas_global)
+        grupos.extend(grupos_xlsx)
 
     config = MisionPosibleConfig(
         periodo=periodo,
