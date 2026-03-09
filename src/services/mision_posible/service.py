@@ -34,9 +34,10 @@ class GrupoArticulos:
     marcas: list[str]
     filtro_descripcion: str | None = None
     requiere_todas_marcas: bool = False
+    articulos: dict[int, str] | None = None  # {id_articulo: marca} desde XLSX
 
     def __post_init__(self):
-        if not self.marcas:
+        if not self.marcas and self.articulos is None:
             raise ValueError(f"GrupoArticulos '{self.nombre}': marcas no puede estar vacia.")
 
 
@@ -374,7 +375,9 @@ class MisionPosibleService(BaseService):
             current_row += 1
 
     def _es_grupo_simple(self, grupo: GrupoArticulos) -> bool:
-        """True si el grupo tiene una sola marca y sin filtro_descripcion."""
+        """True si el grupo tiene una sola marca, sin filtro_descripcion y sin articulos."""
+        if grupo.articulos is not None:
+            return False
         return len(grupo.marcas) == 1 and grupo.filtro_descripcion is None
 
     def _fetch_data_grupo(self, periodo: str, grupo: GrupoArticulos) -> pd.DataFrame:
