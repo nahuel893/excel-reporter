@@ -505,28 +505,37 @@ class DataLoader:
     def get_cobertura_custom(
         self,
         periodo: str,
-        marca: str,
+        marcas: list[str],
         filtro_descripcion: str | None = None,
     ) -> pd.DataFrame:
         """
-        Calcula cobertura desde fact_ventas para una marca y filtro de descripcion opcional.
+        Calcula cobertura desde fact_ventas para una o mas marcas y filtro de descripcion opcional.
 
         Args:
             periodo: Primer dia del mes, formato 'YYYY-MM-DD' (ej: '2026-03-01').
-            marca: Nombre de marca exacto en dim_articulo (se usa UPPER para normalizar).
+            marcas: Lista de nombres de marca en dim_articulo (se normaliza a UPPER).
             filtro_descripcion: Substring para filtrar des_articulo con ILIKE.
-                                Si es None, incluye todos los articulos de la marca.
+                                Si es None, incluye todos los articulos de las marcas.
 
         Returns:
             DataFrame con columnas:
                 periodo, id_fuerza_ventas, id_sucursal, sucursal, id_vendedor, vendedor,
                 id_ruta, clientes_compradores, volumen_total
         """
-        marca = marca.upper()
+        if not marcas:
+            raise ValueError("marcas no puede estar vacia.")
+
+        marcas_upper = [m.upper() for m in marcas]
+        marcas_upper = list(dict.fromkeys(marcas_upper))  # deduplicate preserving order
+
+        marca_params = {f"marca_{i}": m for i, m in enumerate(marcas_upper)}
+        marca_placeholders = ", ".join(f":marca_{i}" for i in range(len(marcas_upper)))
+        filtro_marca_clause = f"AND da.marca IN ({marca_placeholders})"
+
         if filtro_descripcion is not None and filtro_descripcion.strip() == "":
             filtro_descripcion = None
 
-        params: dict = {"periodo": periodo, "marca": marca}
+        params: dict = {"periodo": periodo, **marca_params}
 
         if filtro_descripcion is not None:
             escaped = filtro_descripcion.replace("%", r"\%").replace("_", r"\_")
@@ -553,7 +562,7 @@ class DataLoader:
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
             WHERE dc.id_personal_fv1 IS NOT NULL
-              AND da.marca = :marca
+              {filtro_marca_clause}
               {filtro_desc_clause}
               AND DATE_TRUNC('month', fv.fecha_comprobante) = :periodo
             GROUP BY 1, 2, 3, 4, 5, 6, fv.id_cliente
@@ -577,7 +586,7 @@ class DataLoader:
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
             WHERE dc.id_personal_fv4 IS NOT NULL
-              AND da.marca = :marca
+              {filtro_marca_clause}
               {filtro_desc_clause}
               AND DATE_TRUNC('month', fv.fecha_comprobante) = :periodo
             GROUP BY 1, 2, 3, 4, 5, 6, fv.id_cliente
