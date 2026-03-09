@@ -9,28 +9,25 @@ import pandas as pd
 
 def procesar_cobertura_sucursal(
     df_cob: pd.DataFrame,
-    marca: str,
+    _grupo_nombre: str,
     objetivo_total: int | None,
     porcentajes_sucursal: dict[str, float],
 ) -> pd.DataFrame:
-    """Genera tabla de cobertura por sucursal para una marca.
+    """Genera tabla de cobertura por sucursal para un grupo de articulos.
 
     Args:
-        df_cob: DataFrame de cob_preventista_marca (post zonas virtuales).
-        marca: Nombre de la marca a filtrar.
-        objetivo_total: Objetivo total empresa para esta marca (o None).
+        df_cob: DataFrame ya filtrado para este grupo (post zonas virtuales).
+        _grupo_nombre: Nombre del grupo (no se usa en el cuerpo).
+        objetivo_total: Objetivo total empresa para este grupo (o None).
         porcentajes_sucursal: Dict {sucursal: porcentaje} para reparto.
 
     Returns:
         DataFrame con columnas [Sucursal, Cobertura, Objetivo, Faltante, %].
     """
-    marca = marca.upper()
-    df_marca = df_cob[df_cob["marca"] == marca] if not df_cob.empty else df_cob
-
     # Agrupar cobertura por sucursal
-    if not df_marca.empty:
+    if not df_cob.empty:
         cob_por_suc = (
-            df_marca.groupby("sucursal")["clientes_compradores"]
+            df_cob.groupby("sucursal")["clientes_compradores"]
             .sum()
             .reset_index()
             .rename(columns={"clientes_compradores": "Cobertura"})
@@ -71,30 +68,27 @@ def procesar_cobertura_sucursal(
 
 def procesar_cobertura_vendedor(
     df_cob: pd.DataFrame,
-    marca: str,
+    _grupo_nombre: str,
     objetivo_total: int | None,
     porcentajes_sucursal: dict[str, float],
 ) -> pd.DataFrame:
-    """Genera tabla de cobertura por vendedor para una marca.
+    """Genera tabla de cobertura por vendedor para un grupo de articulos.
 
     Args:
-        df_cob: DataFrame de cob_preventista_marca (post zonas virtuales).
-        marca: Nombre de la marca a filtrar.
-        objetivo_total: Objetivo total empresa para esta marca (o None).
+        df_cob: DataFrame ya filtrado para este grupo (post zonas virtuales).
+        _grupo_nombre: Nombre del grupo (no se usa en el cuerpo).
+        objetivo_total: Objetivo total empresa para este grupo (o None).
         porcentajes_sucursal: Dict {sucursal: porcentaje} para reparto.
 
     Returns:
         DataFrame con columnas [Vendedor, Sucursal, Cobertura, Objetivo, Faltante, %].
     """
-    marca = marca.upper()
-    df_marca = df_cob[df_cob["marca"] == marca] if not df_cob.empty else df_cob
-
-    if df_marca.empty:
+    if df_cob.empty:
         return pd.DataFrame(columns=["Vendedor", "Sucursal", "Cobertura", "Objetivo", "Faltante", "%"])
 
     # Agrupar por vendedor+sucursal
     df_vend = (
-        df_marca.groupby(["sucursal", "vendedor"])["clientes_compradores"]
+        df_cob.groupby(["sucursal", "vendedor"])["clientes_compradores"]
         .sum()
         .reset_index()
         .rename(columns={"clientes_compradores": "Cobertura"})
