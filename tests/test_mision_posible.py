@@ -1,5 +1,6 @@
 """Tests unitarios para Mision Posible."""
 from datetime import date
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -21,6 +22,7 @@ from src.services.mision_posible.service import (
     _nombre_reporte,
     _normalizar_periodo,
 )
+from main import _cargar_grupos_desde_xlsx
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -915,3 +917,282 @@ class TestRequiereTodosMarcasCLI:
             for g in grupos_raw
         ]
         assert grupos[0].requiere_todas_marcas is False
+
+
+# ── Tests para XLSX groups (Spec: mision-posible-grupos-desde-xlsx) ──────────
+
+
+def _crear_xlsx(tmp_path, df, filename="articulos.xlsx"):
+    """Helper: escribe un DataFrame a un XLSX temporal y retorna la ruta."""
+    path = tmp_path / filename
+    df.to_excel(path, index=False)
+    return str(path)
+
+
+class TestCargarGruposDesdeXlsx:
+    """Tests unitarios para _cargar_grupos_desde_xlsx (RF-001 a RF-009)."""
+
+    def test_basico_3_categorias(self, tmp_path):
+        """RF-003/RF-021: dado un XLSX con 3 CATEGORIAs, genera 3 GrupoArticulos."""
+        df = pd.DataFrame({
+            "CODIGO": [1, 2, 3, 4, 5],
+            "ARTICULO": ["Art A", "Art B", "Art C", "Art D", "Art E"],
+            "MARCA": ["HEINEKEN", "HEINEKEN", "IMPERIAL", "IMPERIAL", "MILLER"],
+            "CATEGORIA": ["CAT1", "CAT1", "CAT2", "CAT2", "CAT3"],
+        })
+        ruta = _crear_xlsx(tmp_path, df)
+        grupos = _cargar_grupos_desde_xlsx(ruta)
+        assert len(grupos) == 3
+        assert grupos[0].nombre == "CAT1"
+        assert grupos[0].articulos == {1: "HEINEKEN", 2: "HEINEKEN"}
+        assert grupos[0].marcas == ["HEINEKEN"]
+        assert grupos[1].nombre == "CAT2"
+        assert grupos[1].articulos == {3: "IMPERIAL", 4: "IMPERIAL"}
+        assert grupos[2].nombre == "CAT3"
+        assert grupos[2].articulos == {5: "MILLER"}
+
+    def test_deduplica_codigo(self, tmp_path):
+        """RF-004: CODIGO duplicado en misma CATEGORIA conserva primera ocurrencia."""
+        df = pd.DataFrame({
+            "CODIGO": [1, 1, 2],
+            "ARTICULO": ["Art A", "Art A dup", "Art B"],
+            "MARCA": ["HEINEKEN", "HEINEKEN", "IMPERIAL"],
+            "CATEGORIA": ["CAT1", "CAT1", "CAT1"],
+        })
+        ruta = _crear_xlsx(tmp_path, df)
+        grupos = _cargar_grupos_desde_xlsx(ruta)
+        assert len(grupos[0].articulos) == 2  # 1 and 2, not 1, 1, 2
+
+    def test_columna_faltante(self, tmp_path):
+        """RF-001: XLSX sin columna MARCA lanza ValueError."""
+        df = pd.DataFrame({
+            "CODIGO": [1],
+            "ARTICULO": ["Art A"],
+            "CATEGORIA": ["CAT1"],
+        })
+        ruta = _crear_xlsx(tmp_path, df)
+        with pytest.raises(ValueError, match="MARCA"):
+            _cargar_grupos_desde_xlsx(ruta)
+
+    def test_xlsx_vacio(self, tmp_path):
+        """RF-005: XLSX sin filas de datos lanza ValueError."""
+        df = pd.DataFrame(columns=["CODIGO", "ARTICULO", "MARCA", "CATEGORIA"])
+        ruta = _crear_xlsx(tmp_path, df)
+        with pytest.raises(ValueError, match="no contiene filas"):
+            _cargar_grupos_desde_xlsx(ruta)
+
+    def test_codigo_invalido_omitido(self, tmp_path):
+        """RF-002: fila con CODIGO no entero se omite."""
+        df = pd.DataFrame({
+            "CODIGO": [1, None, 3],
+            "ARTICULO": ["Art A", "Art B", "Art C"],
+            "MARCA": ["HEINEKEN", "HEINEKEN", "HEINEKEN"],
+            "CATEGORIA": ["CAT1", "CAT1", "CAT1"],
+        })
+        ruta = _crear_xlsx(tmp_path, df)
+        grupos = _cargar_grupos_desde_xlsx(ruta)
+        assert len(grupos[0].articulos) == 2  # 1 and 3, NaN omitted
+
+    def test_marcas_deduplicadas_y_upper(self, tmp_path):
+        """RF-003/RF-015: marcas deduplicadas y normalizadas a UPPER."""
+        df = pd.DataFrame({
+            "CODIGO": [1, 2, 3],
+            "ARTICULO": ["Art A", "Art B", "Art C"],
+            "MARCA": ["Heineken", "heineken", "Imperial"],
+            "CATEGORIA": ["CAT1", "CAT1", "CAT1"],
+        })
+        ruta = _crear_xlsx(tmp_path, df)
+        grupos = _cargar_grupos_desde_xlsx(ruta)
+        assert grupos[0].marcas == ["HEINEKEN", "IMPERIAL"]
+
+    def test_categoria_sin_codigos_validos_omitida(self, tmp_path):
+        """Edge case: categoria con todos CODIGOs NaN se omite."""
+        df = pd.DataFrame({
+            "CODIGO": [None, None, 1],
+            "ARTICULO": ["Art A", "Art B", "Art C"],
+            "MARCA": ["HEINEKEN", "HEINEKEN", "IMPERIAL"],
+            "CATEGORIA": ["CAT_BAD", "CAT_BAD", "CAT_OK"],
+        })
+        ruta = _crear_xlsx(tmp_path, df)
+        grupos = _cargar_grupos_desde_xlsx(ruta)
+        assert len(grupos) == 1
+        assert grupos[0].nombre == "CAT_OK"
+
+    def test_requiere_todas_marcas_global(self, tmp_path):
+        """RF-009: requiere_todas_marcas global se aplica a todos los grupos."""
+        df = pd.DataFrame({
+            "CODIGO": [1, 2],
+            "ARTICULO": ["Art A", "Art B"],
+            "MARCA": ["HEINEKEN", "IMPERIAL"],
+            "CATEGORIA": ["CAT1", "CAT2"],
+        })
+        ruta = _crear_xlsx(tmp_path, df)
+        grupos = _cargar_grupos_desde_xlsx(ruta, requiere_todas_marcas=True)
+        assert all(g.requiere_todas_marcas is True for g in grupos)
+
+    def test_archivo_inexistente(self):
+        """RF-008: archivo no encontrado lanza ValueError."""
+        with pytest.raises(ValueError, match="no encontrado"):
+            _cargar_grupos_desde_xlsx("/ruta/inexistente/archivo.xlsx")
+
+
+class TestGrupoArticulosDataclass:
+    """Tests para el campo articulos en GrupoArticulos (RF-011 a RF-013)."""
+
+    def test_acepta_campo_articulos(self):
+        """RF-011: GrupoArticulos acepta articulos dict."""
+        g = GrupoArticulos("G", marcas=["A"], articulos={123: "A"})
+        assert g.articulos == {123: "A"}
+
+    def test_sin_marcas_con_articulos_ok(self):
+        """RF-012: marcas vacia con articulos no lanza error."""
+        g = GrupoArticulos("G", marcas=[], articulos={123: "A"})
+        assert g.marcas == []
+        assert g.articulos is not None
+
+    def test_sin_marcas_sin_articulos_lanza_error(self):
+        """RF-012: marcas vacia sin articulos lanza ValueError."""
+        with pytest.raises(ValueError):
+            GrupoArticulos("G", marcas=[])
+
+    def test_es_grupo_simple_false_con_articulos(self):
+        """RF-013: grupo con articulos nunca es simple."""
+        g = GrupoArticulos("G", marcas=["A"], articulos={1: "A"})
+        service = MisionPosibleService.__new__(MisionPosibleService)
+        assert service._es_grupo_simple(g) is False
+
+
+class TestFetchDataGrupoArticulos:
+    """Tests para _fetch_data_grupo con articulos (RF-019/RF-020)."""
+
+    def _generar(self, tmp_path, loader, grupos, objetivos=None):
+        config = MisionPosibleConfig(
+            periodo="2026-03-01",
+            grupos=grupos,
+            objetivos=objetivos or {},
+        )
+        with patch("src.services.mision_posible.service.DATA_OUTPUT", tmp_path):
+            service = MisionPosibleService(data_loader=loader)
+            service.generar_reporte(config)
+
+    def test_pasa_articulos_ids_al_loader(self, tmp_path):
+        """RF-019: grupo con articulos pasa articulos_ids a get_cobertura_custom."""
+        loader = _mock_loader()
+
+        grupo = GrupoArticulos(
+            "LEVITE CHICO",
+            marcas=["LEVITE", "VILLAVICENCIO"],
+            articulos={100: "LEVITE", 200: "VILLAVICENCIO"},
+        )
+        self._generar(tmp_path, loader=loader, grupos=[grupo])
+
+        loader.get_cobertura_custom.assert_called_once_with(
+            periodo="2026-03-01",
+            marcas=["LEVITE", "VILLAVICENCIO"],
+            filtro_descripcion=None,
+            requiere_todas_marcas=False, articulos_ids=[100, 200],
+        )
+
+    def test_sin_articulos_pasa_none(self, tmp_path):
+        """RF-020: grupo sin articulos pasa articulos_ids=None."""
+        loader = _mock_loader()
+
+        grupo = GrupoArticulos(
+            "AGUAS",
+            marcas=["LEVITE", "VILLAVICENCIO"],
+        )
+        self._generar(tmp_path, loader=loader, grupos=[grupo])
+
+        loader.get_cobertura_custom.assert_called_once_with(
+            periodo="2026-03-01",
+            marcas=["LEVITE", "VILLAVICENCIO"],
+            filtro_descripcion=None,
+            requiere_todas_marcas=False, articulos_ids=None,
+        )
+
+    def test_reporte_con_grupo_articulos_genera_archivo(self, tmp_path):
+        """Flujo completo: grupo con articulos genera XLSX con hojas correctas."""
+        loader = _mock_loader()
+        grupo = GrupoArticulos(
+            "LEVITE CHICO",
+            marcas=["LEVITE"],
+            articulos={100: "LEVITE", 200: "LEVITE"},
+        )
+        config = MisionPosibleConfig(
+            periodo="2026-03-01",
+            grupos=[grupo],
+        )
+        with patch("src.services.mision_posible.service.DATA_OUTPUT", tmp_path):
+            service = MisionPosibleService(data_loader=loader)
+            result = service.generar_reporte(config)
+        assert len(result.ruta_archivos) == 1
+        assert result.hojas == ["Sucursales", "Por Vendedor"]
+
+
+class TestCombineGruposAndXlsx:
+    """Tests para la combinacion de grupos manuales y XLSX (RF-006/RF-007)."""
+
+    def test_combina_grupos_y_xlsx(self, tmp_path):
+        """RF-006: manual grupos + archivo_articulos se combinan."""
+        df = pd.DataFrame({
+            "CODIGO": [1],
+            "ARTICULO": ["Art A"],
+            "MARCA": ["HEINEKEN"],
+            "CATEGORIA": ["XLSX_GROUP"],
+        })
+        ruta = _crear_xlsx(tmp_path, df)
+
+        # Simulate what cmd_mision_posible does
+        grupos_manual = [GrupoArticulos("IMPERIAL", marcas=["IMPERIAL"])]
+        grupos_xlsx = _cargar_grupos_desde_xlsx(ruta)
+        grupos = grupos_manual + grupos_xlsx
+
+        assert len(grupos) == 2
+        assert grupos[0].nombre == "IMPERIAL"
+        assert grupos[0].articulos is None
+        assert grupos[1].nombre == "XLSX_GROUP"
+        assert grupos[1].articulos == {1: "HEINEKEN"}
+
+    def test_solo_xlsx_sin_grupos(self, tmp_path):
+        """RF-007: solo archivo_articulos sin grupos funciona."""
+        df = pd.DataFrame({
+            "CODIGO": [1, 2],
+            "ARTICULO": ["Art A", "Art B"],
+            "MARCA": ["HEINEKEN", "IMPERIAL"],
+            "CATEGORIA": ["CAT1", "CAT2"],
+        })
+        ruta = _crear_xlsx(tmp_path, df)
+        grupos = _cargar_grupos_desde_xlsx(ruta)
+        assert len(grupos) == 2
+
+
+class TestApiArticulos:
+    """Tests para el schema Pydantic y _build_config con articulos (RF-023/RF-024)."""
+
+    def test_schema_acepta_articulos(self):
+        """RF-023: GrupoArticulosSchema acepta articulos dict."""
+        from src.api.routes.mision_posible import GrupoArticulosSchema
+        schema = GrupoArticulosSchema(nombre="G", marcas=["A"], articulos={"123": "A"})
+        assert schema.articulos == {"123": "A"}
+
+    def test_build_config_convierte_claves_a_int(self):
+        """RF-024: _build_config convierte claves string a int."""
+        from src.api.routes.mision_posible import _build_config, MisionPosibleRequest
+        req = MisionPosibleRequest(
+            periodo="2026-03-01",
+            grupos=[{"nombre": "G", "marcas": ["A"], "articulos": {"123": "HEINEKEN"}}],
+        )
+        config = _build_config(req)
+        assert config.grupos[0].articulos == {123: "HEINEKEN"}
+
+    def test_build_config_clave_no_entero_lanza_400(self):
+        """RF-024: clave no convertible a int lanza HTTPException(400)."""
+        from fastapi import HTTPException
+        from src.api.routes.mision_posible import _build_config, MisionPosibleRequest
+        req = MisionPosibleRequest(
+            periodo="2026-03-01",
+            grupos=[{"nombre": "G", "marcas": ["A"], "articulos": {"abc": "HEINEKEN"}}],
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            _build_config(req)
+        assert exc_info.value.status_code == 400
