@@ -11,7 +11,7 @@ Documentacion interactiva:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routes import ventas_router, resumen_mensual_router, mision_posible_router
+from src.api.routes import ventas_router, resumen_mensual_router
 from src.core.data_loader import DataLoader
 
 app = FastAPI(
@@ -45,7 +45,6 @@ app.add_middleware(
 
 app.include_router(ventas_router)
 app.include_router(resumen_mensual_router)
-app.include_router(mision_posible_router)
 
 
 @app.get("/", tags=["Health"], summary="Estado del servicio")

@@ -32,10 +32,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import pandas as pd
-
 from src.services import VentasService, ResumenMensualService, ResumenMensualConfig
-from src.services import MisionPosibleService, MisionPosibleConfig, GrupoArticulos
 from src.services.ventas import ReporteVentasConfig
 
 
@@ -185,126 +182,6 @@ def cmd_resumen_mensual(args) -> int:
     return 0
 
 
-def _cargar_grupos_desde_xlsx(
-    ruta_xlsx: str,
-    requiere_todas_marcas: bool = False,
-) -> list[GrupoArticulos]:
-    """Lee el XLSX y construye GrupoArticulos por CATEGORIA."""
-    path = Path(ruta_xlsx)
-    if not path.exists():
-        raise ValueError(f"Archivo no encontrado: {path}")
-
-    df = pd.read_excel(path, dtype={"CODIGO": "Int64"})
-
-    columnas_requeridas = {"CODIGO", "ARTICULO", "MARCA", "CATEGORIA"}
-    faltantes = columnas_requeridas - set(df.columns)
-    if faltantes:
-        raise ValueError(f"Columnas faltantes en el XLSX: {faltantes}")
-
-    if df.empty:
-        raise ValueError("El XLSX no contiene filas de datos.")
-
-    grupos = []
-    for categoria, grupo_df in df.groupby("CATEGORIA", sort=False):
-        grupo_df = grupo_df.drop_duplicates(subset=["CODIGO"])
-        grupo_df = grupo_df.dropna(subset=["CODIGO"])
-        if grupo_df.empty:
-            print(f"⚠ Categoria '{categoria}' omitida: no tiene articulos validos.")
-            continue
-
-        articulos = {int(row["CODIGO"]): str(row["MARCA"]).upper() for _, row in grupo_df.iterrows()}
-        marcas = list(dict.fromkeys(str(m).upper() for m in grupo_df["MARCA"]))
-
-        grupos.append(GrupoArticulos(
-            nombre=str(categoria),
-            marcas=marcas,
-            articulos=articulos,
-            requiere_todas_marcas=requiere_todas_marcas,
-        ))
-
-    return grupos
-
-
-def cmd_mision_posible(args) -> int:
-    """Ejecuta el comando de reporte Mision Posible."""
-
-    cfg = _cargar_config_json(args.config) if args.config else {}
-
-    periodo = cfg.get("periodo") or args.periodo
-    grupos_raw = cfg.get("grupos")
-    archivo_articulos = cfg.get("archivo_articulos")
-    nombre_archivo = cfg.get("nombre_archivo") or args.output
-    objetivos = cfg.get("objetivos", {})
-    porcentajes_sucursal = cfg.get("porcentajes_sucursal", {})
-    supervisores = cfg.get("supervisores")
-
-    if not periodo:
-        print("Error: periodo es requerido.")
-        print("       Usa --periodo o definelo en --config config.json")
-        return 1
-
-    if not grupos_raw and not archivo_articulos:
-        if cfg.get("marcas"):
-            print("Error: el formato 'marcas' ya no es soportado.")
-            print("       Usa 'grupos' en su lugar. Ejemplo:")
-            print('       "grupos": [{"nombre": "IMPERIAL", "marcas": ["IMPERIAL"]}]')
-            return 1
-        print("Error: grupos o archivo_articulos es requerido.")
-        print("       Definelo en --config config.json")
-        return 1
-
-    # Build grupos from manual JSON entries
-    grupos = []
-    if grupos_raw:
-        if any("marca" in g and "marcas" not in g for g in grupos_raw):
-            raise ValueError(
-                "El formato de grupos cambió: usar 'marcas': ['X'] en lugar de 'marca': 'X'"
-            )
-        grupos = [
-            GrupoArticulos(
-                nombre=g["nombre"],
-                marcas=g["marcas"],
-                filtro_descripcion=g.get("filtro_descripcion"),
-                requiere_todas_marcas=g.get("requiere_todas_marcas", False),
-            )
-            for g in grupos_raw
-        ]
-
-    # Append grupos from XLSX if archivo_articulos is present
-    if archivo_articulos:
-        requiere_todas_marcas_global = cfg.get("requiere_todas_marcas", False)
-        grupos_xlsx = _cargar_grupos_desde_xlsx(archivo_articulos, requiere_todas_marcas_global)
-        grupos.extend(grupos_xlsx)
-
-    config = MisionPosibleConfig(
-        periodo=periodo,
-        grupos=grupos,
-        objetivos=objetivos,
-        porcentajes_sucursal=porcentajes_sucursal,
-        nombre_archivo=nombre_archivo,
-    )
-
-    print(f"Generando reporte Mision Posible para {periodo}...")
-    print(f"  Grupos: {', '.join(g.nombre for g in grupos)}")
-
-    service = MisionPosibleService()
-
-    if supervisores:
-        print(f"  Supervisores: {list(supervisores.keys())}")
-        results = service.generar_reporte_supervisores(config, supervisores)
-        for result in results:
-            print(f"\n  Supervisor: {result.supervisor}")
-            for ruta in result.ruta_archivos:
-                print(f"    Archivo: {ruta}")
-    else:
-        result = service.generar_reporte(config)
-        for ruta in result.ruta_archivos:
-            print(f"  Archivo: {ruta}")
-        print(f"  Hojas: {', '.join(result.hojas)}")
-
-    return 0
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Generador de reportes CCU",
@@ -336,8 +213,6 @@ Ejemplos:
         help="Reporte de ventas por sucursal, generico y marca",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-
-    # Grupo: configuracion via JSON (alternativa a args individuales)
     ventas_parser.add_argument(
         "--config",
         default=None,
@@ -349,40 +224,18 @@ Ejemplos:
             "con_slicers, con_cobertura, supervisores."
         )
     )
-
-    # Args individuales (opcionales si se usa --config)
+    ventas_parser.add_argument("--desde", default=None, help="Fecha inicio (YYYY-MM-DD)")
+    ventas_parser.add_argument("--hasta", default=None, help="Fecha fin (YYYY-MM-DD)")
     ventas_parser.add_argument(
-        "--desde",
-        default=None,
-        help="Fecha inicio (YYYY-MM-DD)"
-    )
-    ventas_parser.add_argument(
-        "--hasta",
-        default=None,
-        help="Fecha fin (YYYY-MM-DD)"
-    )
-    ventas_parser.add_argument(
-        "--genericos",
-        default=None,
+        "--genericos", default=None,
         help="Genericos a incluir, separados por coma (ej: CERVEZAS,AGUAS,VINOS)"
     )
+    ventas_parser.add_argument("--output", default=None, help="Nombre del archivo de salida (sin extension)")
     ventas_parser.add_argument(
-        "--output",
-        default=None,
-        help="Nombre del archivo de salida (sin extension)"
-    )
-    ventas_parser.add_argument(
-        "--slicers",
-        action="store_true",
-        default=True,
+        "--slicers", action="store_true", default=True,
         help="Agregar slicers/segmentadores (solo Windows con Excel)"
     )
-    ventas_parser.add_argument(
-        "--no-slicers",
-        action="store_false",
-        dest="slicers",
-        help="No agregar slicers"
-    )
+    ventas_parser.add_argument("--no-slicers", action="store_false", dest="slicers", help="No agregar slicers")
     ventas_parser.set_defaults(func=cmd_ventas)
 
     # Subcomando: resumen-mensual
@@ -391,8 +244,6 @@ Ejemplos:
         help="Resumen mensual por generico (ultimos dias, tendencia, anio anterior)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-
-    # Grupo: configuracion via JSON (alternativa a args individuales)
     resumen_parser.add_argument(
         "--config",
         default=None,
@@ -403,62 +254,14 @@ Ejemplos:
             "Soporta: fecha_desde, fecha_hasta, genericos, output, con_objetivo."
         )
     )
-
-    # Args individuales (opcionales si se usa --config)
+    resumen_parser.add_argument("--desde", default=None, help="Fecha inicio (YYYY-MM-DD)")
+    resumen_parser.add_argument("--hasta", default=None, help="Fecha fin (YYYY-MM-DD)")
     resumen_parser.add_argument(
-        "--desde",
-        default=None,
-        help="Fecha inicio (YYYY-MM-DD)"
-    )
-    resumen_parser.add_argument(
-        "--hasta",
-        default=None,
-        help="Fecha fin (YYYY-MM-DD)"
-    )
-    resumen_parser.add_argument(
-        "--genericos",
-        default=None,
+        "--genericos", default=None,
         help="Genericos a incluir, separados por coma (ej: CERVEZAS,AGUAS,VINOS)"
     )
-    resumen_parser.add_argument(
-        "--output",
-        default=None,
-        help="Nombre del archivo de salida (sin extension)"
-    )
+    resumen_parser.add_argument("--output", default=None, help="Nombre del archivo de salida (sin extension)")
     resumen_parser.set_defaults(func=cmd_resumen_mensual)
-
-    # Subcomando: mision-posible
-    mision_parser = subparsers.add_parser(
-        "mision-posible",
-        help="Reporte de cobertura Mision Posible por marca",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    mision_parser.add_argument(
-        "--config",
-        default=None,
-        metavar="config.json",
-        help=(
-            "Archivo JSON con todos los parametros del reporte. "
-            "Soporta: periodo, marcas, objetivos, porcentajes_sucursal, "
-            "nombre_archivo, supervisores."
-        )
-    )
-    mision_parser.add_argument(
-        "--periodo",
-        default=None,
-        help="Periodo del reporte (YYYY-MM-DD, primer dia del mes)"
-    )
-    mision_parser.add_argument(
-        "--marcas",
-        default=None,
-        help="Marcas a incluir, separadas por coma (ej: Imperial,Levite)"
-    )
-    mision_parser.add_argument(
-        "--output",
-        default=None,
-        help="Nombre del archivo de salida (sin extension)"
-    )
-    mision_parser.set_defaults(func=cmd_mision_posible)
 
     # Parsear argumentos
     args = parser.parse_args()
