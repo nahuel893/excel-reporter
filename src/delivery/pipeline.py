@@ -1,0 +1,139 @@
+"""
+DeliveryPipeline - Orquestacion de entrega automatizada de reportes.
+
+El pipeline ejecuta pasos configurables (captura de imagen, email, WhatsApp)
+de forma secuencial. Cada paso falla de forma aislada: si uno falla, los
+demas siguen ejecutandose.
+"""
+import logging
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, field_validator
+
+
+# ---------------------------------------------------------------------------
+# Config models — Pydantic para validacion al parsear el JSON de configuracion
+# ---------------------------------------------------------------------------
+
+class CaptureConfig(BaseModel):
+    """Configuracion para captura de rango Excel como imagen."""
+    hoja: str
+    rango: str  # Ej: "A1:H20"
+
+
+class EmailConfig(BaseModel):
+    """Configuracion para envio por email."""
+    destinatarios: list[str]
+    asunto: str | None = None
+    adjuntos: list[Literal["excel", "imagen"]] = ["excel"]
+
+    @field_validator("adjuntos")
+    @classmethod
+    def adjuntos_no_vacios(cls, v: list) -> list:
+        if len(v) == 0:
+            raise ValueError("adjuntos no puede estar vacio")
+        return v
+
+
+class WhatsAppConfig(BaseModel):
+    """Configuracion para envio por WhatsApp."""
+    grupos: list[str]  # Nombres de grupos o contactos individuales
+    enviar_como: Literal["imagen", "archivo"] = "imagen"
+
+
+class DeliveryConfig(BaseModel):
+    """Configuracion completa del pipeline de entrega."""
+    capture_image: CaptureConfig | None = None
+    email: EmailConfig | None = None
+    whatsapp: WhatsAppConfig | None = None
+    log_steps: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Runtime dataclasses — resultados internos, no requieren validacion Pydantic
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StepResult:
+    """Resultado de la ejecucion de un paso del pipeline."""
+    status: Literal["success", "skipped", "error"]
+    step_name: str
+    message: str = ""
+    artifact_path: Path | None = None
+
+
+@dataclass
+class PipelineResult:
+    """Resultado de la ejecucion completa del pipeline."""
+    steps: list[StepResult] = field(default_factory=list)
+
+    @property
+    def success(self) -> bool:
+        return all(s.status != "error" for s in self.steps)
+
+
+@dataclass
+class ReportArtifact:
+    """Artefactos generados por un reporte (archivos en disco)."""
+    ruta_excel: Path
+    ruta_imagen: Path | None = None
+    metadata: dict = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Pipeline
+# ---------------------------------------------------------------------------
+
+class DeliveryStep(ABC):
+    """Paso del pipeline de entrega. Cada paso debe implementar execute()."""
+
+    @abstractmethod
+    def execute(
+        self,
+        artifact: ReportArtifact,
+        config: DeliveryConfig,
+        logger: logging.Logger,
+    ) -> StepResult:
+        """Ejecuta el paso y retorna su resultado."""
+        ...
+
+
+class DeliveryPipeline:
+    """Pipeline de entrega que ejecuta pasos en secuencia con fallo aislado."""
+
+    def __init__(self, steps: list[DeliveryStep]):
+        self.steps = steps
+        self.logger = logging.getLogger("delivery.pipeline")
+
+    def run(self, artifact: ReportArtifact, config: DeliveryConfig) -> PipelineResult:
+        """Ejecuta todos los pasos. Un paso que falla no detiene los siguientes."""
+        result = PipelineResult()
+
+        for step in self.steps:
+            step_class = type(step).__name__
+            if config.log_steps:
+                self.logger.info("Iniciando paso: %s", step_class)
+            try:
+                step_result = step.execute(artifact, config, self.logger)
+            except Exception as exc:
+                self.logger.error("Error inesperado en %s: %s", step_class, exc)
+                step_result = StepResult(
+                    status="error",
+                    step_name=step_class,
+                    message=str(exc),
+                )
+
+            result.steps.append(step_result)
+
+            if config.log_steps:
+                self.logger.info(
+                    "Paso %s finalizado: status=%s message=%s",
+                    step_class,
+                    step_result.status,
+                    step_result.message,
+                )
+
+        return result

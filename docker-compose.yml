@@ -1,0 +1,26 @@
+services:
+  whatsapp-service:
+    build: ./whatsapp-service
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./whatsapp-service/session:/app/session
+    environment:
+      - PORT=3000
+      - SESSION_DIR=/app/session
+    restart: unless-stopped
+
+  # Collabora Online — renderizado de alta fidelidad de Excel (opcional, futuro)
+  # Descomentar para habilitar. Requiere ajustar ExcelManager para usar
+  # la REST API de Collabora en lugar de LibreOffice headless.
+  #
+  # collabora:
+  #   image: collabora/code:latest
+  #   ports:
+  #     - "9980:9980"
+  #   environment:
+  #     - aliasgroup1=http://excel-reporter:8000
+  #     - extra_params=--o:ssl.enable=false
+  #   cap_add:
+  #     - MKNOD
+  #   restart: unless-stopped

@@ -63,6 +63,18 @@ ZONAS_VIRTUALES = {
     }
 }
 
+# Configuracion SMTP para envio de emails
+SMTP_CONFIG = {
+    "host": os.getenv("SMTP_HOST", "smtp.gmail.com"),
+    "port": int(os.getenv("SMTP_PORT", "587")),
+    "user": os.getenv("SMTP_USER", ""),
+    "password": os.getenv("SMTP_PASSWORD", ""),
+    "use_ssl": os.getenv("SMTP_USE_SSL", "false").lower() == "true",
+}
+
+# URL del servicio WhatsApp (Baileys microservice)
+WHATSAPP_SERVICE_URL = os.getenv("WHATSAPP_SERVICE_URL", "http://localhost:3000")
+
 DIAS_SEMANA = {
     0: "Lunes",
     1: "Martes",
