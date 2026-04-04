@@ -164,7 +164,7 @@ class DataLoader:
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
-            LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente
+            LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
             WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
             AND da.generico IN ({placeholders})
             GROUP BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante, dc.id_ruta_fv1
@@ -186,7 +186,7 @@ class DataLoader:
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
-            LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente
+            LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
             WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
             GROUP BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante, dc.id_ruta_fv1
             ORDER BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante
@@ -272,7 +272,7 @@ class DataLoader:
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
             LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
-            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
             WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
               AND da.generico IS NOT NULL
               AND da.generico IN ({placeholders})
@@ -291,7 +291,7 @@ class DataLoader:
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
             LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
-            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
             WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
               AND da.generico IS NOT NULL
             GROUP BY ds.descripcion, da.generico, dc.id_ruta_fv1
@@ -328,7 +328,7 @@ class DataLoader:
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
             LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
-            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
             WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
               AND da.generico IS NOT NULL
               AND da.generico IN ({placeholders})
@@ -348,7 +348,7 @@ class DataLoader:
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
             LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
-            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
             WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
               AND da.generico IS NOT NULL
             GROUP BY ds.descripcion, da.generico, fv.fecha_comprobante, dc.id_ruta_fv1
@@ -457,8 +457,11 @@ class DataLoader:
             cpg.clientes_compradores,
             cpg.volumen_total
         FROM gold.cob_preventista_generico cpg
-        LEFT JOIN gold.dim_vendedor dv ON cpg.id_vendedor = dv.id_vendedor
-        WHERE {filtro_per}
+        LEFT JOIN gold.dim_vendedor dv
+            ON cpg.id_vendedor = dv.id_vendedor
+            AND cpg.id_sucursal = dv.id_sucursal
+        WHERE cpg.id_fuerza_ventas = 1
+        AND {filtro_per}
         {filtro_suc}
         ORDER BY cpg.periodo, cpg.ds_sucursal, dv.des_vendedor, cpg.generico
         """
@@ -495,8 +498,11 @@ class DataLoader:
             cpm.clientes_compradores,
             cpm.volumen_total
         FROM gold.cob_preventista_marca cpm
-        LEFT JOIN gold.dim_vendedor dv ON cpm.id_vendedor = dv.id_vendedor
-        WHERE {filtro_per}
+        LEFT JOIN gold.dim_vendedor dv
+            ON cpm.id_vendedor = dv.id_vendedor
+            AND cpm.id_sucursal = dv.id_sucursal
+        WHERE cpm.id_fuerza_ventas = 1
+        AND {filtro_per}
         {filtro_suc}
         ORDER BY cpm.periodo, cpm.ds_sucursal, dv.des_vendedor, cpm.marca
         """
@@ -593,7 +599,7 @@ class DataLoader:
                 fv.id_cliente,
                 SUM(fv.cantidades_total)                        AS total_qty
             FROM gold.fact_ventas fv
-            LEFT JOIN gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente
+            LEFT JOIN gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
                                           AND fv.id_sucursal = dc.id_sucursal
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
@@ -617,7 +623,7 @@ class DataLoader:
                 fv.id_cliente,
                 SUM(fv.cantidades_total)                        AS total_qty
             FROM gold.fact_ventas fv
-            LEFT JOIN gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente
+            LEFT JOIN gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
                                           AND fv.id_sucursal = dc.id_sucursal
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
@@ -660,7 +666,7 @@ class DataLoader:
                 da.marca,
                 SUM(fv.cantidades_total)                        AS total_qty
             FROM gold.fact_ventas fv
-            LEFT JOIN gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente
+            LEFT JOIN gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
                                           AND fv.id_sucursal = dc.id_sucursal
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
@@ -685,7 +691,7 @@ class DataLoader:
                 da.marca,
                 SUM(fv.cantidades_total)                        AS total_qty
             FROM gold.fact_ventas fv
-            LEFT JOIN gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente
+            LEFT JOIN gold.dim_cliente  dc ON fv.id_cliente  = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
                                           AND fv.id_sucursal = dc.id_sucursal
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal  = ds.id_sucursal
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
@@ -790,7 +796,8 @@ class DataLoader:
             SUM(cpg.clientes_compradores) AS clientes_compradores,
             SUM(cpg.volumen_total) AS volumen_total
         FROM gold.cob_preventista_generico cpg
-        WHERE {filtro_per}
+        WHERE cpg.id_fuerza_ventas = 1
+        AND {filtro_per}
         {filtro_suc}
         GROUP BY cpg.periodo, cpg.ds_sucursal, cpg.generico
         ORDER BY cpg.periodo, cpg.ds_sucursal, cpg.generico
