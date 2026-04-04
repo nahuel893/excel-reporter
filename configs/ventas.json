@@ -1,0 +1,65 @@
+{
+    "tipo": "ventas",
+    "filtros": {
+        "fecha_desde": "2026-02-01",
+        "fecha_hasta": "2026-02-28",
+        "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
+        "con_slicers": true,
+        "con_cobertura": true
+    },
+    "reportes": [
+        {
+            "nombre": "Ventas Walter Vilte",
+            "filtros": {
+                "supervisores": ["Walter Vilte"],
+                "sucursales": [
+                    "SUCURSAL CAFAYATE", "SUCURSAL ABRA PAMPA", "SUCURSAL SAN PEDRO",
+                    "SUCURSAL JOAQUIN V GONZALEZ", "SUCURSAL LA QUIACA", "SUCURSAL METAN",
+                    "SUCURSAL HUMAHUACA", "SUCURSAL ORAN", "SUCURSAL TARTAGAL",
+                    "SUCURSAL MAIMARA", "SUCURSAL GUEMES", "SUCURSAL LIBERTADOR",
+                    "SUCURSAL PERICO", "CASA CENTRAL"
+                ]
+            },
+            "enviar_a": {
+                "Walter Vilte": { "via": ["email"] }
+            }
+        },
+        {
+            "nombre": "Ventas Antonio Cabrerizo",
+            "filtros": {
+                "supervisores": ["Antonio Cabrerizo"],
+                "sucursales": ["CASA CENTRAL"]
+            },
+            "enviar_a": {
+                "Antonio Cabrerizo": { "via": ["email"] }
+            }
+        },
+        {
+            "nombre": "Ventas Adrian Garcia",
+            "filtros": {
+                "supervisores": ["Adrian Garcia"],
+                "sucursales": [
+                    "SUCURSAL CAFAYATE", "SUCURSAL JOAQUIN V GONZALEZ",
+                    "SUCURSAL METAN", "SUCURSAL GUEMES"
+                ]
+            },
+            "enviar_a": {
+                "Adrian Garcia": { "via": ["email"] }
+            }
+        },
+        {
+            "nombre": "Ventas Hernan Yapura",
+            "filtros": {
+                "supervisores": ["Hernan Yapura"],
+                "sucursales": [
+                    "SUCURSAL ABRA PAMPA", "SUCURSAL SAN PEDRO", "SUCURSAL LA QUIACA",
+                    "SUCURSAL HUMAHUACA", "SUCURSAL ORAN", "SUCURSAL TARTAGAL",
+                    "SUCURSAL MAIMARA", "SUCURSAL LIBERTADOR", "SUCURSAL PERICO"
+                ]
+            },
+            "enviar_a": {
+                "Hernan Yapura": { "via": ["email"] }
+            }
+        }
+    ]
+}

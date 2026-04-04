@@ -1,0 +1,13 @@
+{
+    "tipo": "resumen-mensual",
+    "filtros": {
+        "fecha_desde": "2026-02-01",
+        "fecha_hasta": "2026-02-28",
+        "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
+    },
+    "reportes": [
+        {
+            "nombre": "Resumen Mensual Febrero"
+        }
+    ]
+}

@@ -1,0 +1,95 @@
+"""
+Pydantic models for the new config format.
+
+Config structure:
+    configs/
+    ├── contactos.json       ← global contact catalog
+    ├── ventas.json          ← tipo + filtros + reportes[]
+    └── resumen_mensual.json ← tipo + filtros + reportes[]
+"""
+from typing import Literal
+
+from pydantic import BaseModel, model_validator
+
+
+class ContactInfo(BaseModel):
+    """A named contact. At least one channel must be present."""
+
+    email: str | None = None
+    telefono: str | None = None
+    whatsapp_grupo: str | None = None
+
+    @model_validator(mode="after")
+    def at_least_one_channel(self):
+        if not any([self.email, self.telefono, self.whatsapp_grupo]):
+            raise ValueError(
+                "contact must have at least one of: email, telefono, whatsapp_grupo"
+            )
+        return self
+
+
+class DeliveryTarget(BaseModel):
+    """How a specific contact receives a specific report."""
+
+    via: list[Literal["email", "whatsapp"]]
+
+    @model_validator(mode="after")
+    def via_not_empty(self):
+        if not self.via:
+            raise ValueError("via must have at least one channel")
+        return self
+
+
+class CaptureImageConfig(BaseModel):
+    """Config for Excel range screenshot."""
+
+    hoja: str
+    rango: str
+
+
+class GlobalFilters(BaseModel):
+    """Filters shared across all reports in a config file."""
+
+    fecha_desde: str
+    fecha_hasta: str
+    genericos: list[str] | None = None
+    con_slicers: bool = True
+    con_cobertura: bool = True
+
+
+class ReportFilters(BaseModel):
+    """Per-report filter overrides. All fields optional — None means inherit global."""
+
+    supervisores: list[str] | None = None
+    sucursales: list[str] | None = None
+    genericos: list[str] | None = None
+    con_slicers: bool | None = None
+    con_cobertura: bool | None = None
+
+
+class ReportEntry(BaseModel):
+    """One report to generate, with its own filters and delivery mapping."""
+
+    nombre: str
+    filtros: ReportFilters | None = None
+    capture_image: CaptureImageConfig | None = None
+    enviar_a: dict[str, DeliveryTarget] | None = None
+
+
+class ReportConfig(BaseModel):
+    """Top-level structure of a report config file (e.g. ventas.json)."""
+
+    tipo: Literal["ventas", "resumen-mensual"]
+    filtros: GlobalFilters
+    reportes: list[ReportEntry]
+
+    def validate_contacts(self, contactos: dict[str, ContactInfo]) -> None:
+        """Validate that all referenced contacts exist in the catalog."""
+        for report in self.reportes:
+            if report.enviar_a:
+                for contact_name in report.enviar_a:
+                    if contact_name not in contactos:
+                        raise ValueError(
+                            f"report '{report.nombre}' references unknown contact "
+                            f"'{contact_name}'. Available: {list(contactos.keys())}"
+                        )
