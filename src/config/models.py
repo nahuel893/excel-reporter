@@ -55,6 +55,8 @@ class GlobalFilters(BaseModel):
     genericos: list[str] | None = None
     con_slicers: bool = True
     con_cobertura: bool = True
+    enviar_email: bool = True
+    enviar_whatsapp: bool = True
 
 
 class ReportFilters(BaseModel):
@@ -65,6 +67,8 @@ class ReportFilters(BaseModel):
     genericos: list[str] | None = None
     con_slicers: bool | None = None
     con_cobertura: bool | None = None
+    enviar_email: bool | None = None
+    enviar_whatsapp: bool | None = None
 
 
 class ReportEntry(BaseModel):

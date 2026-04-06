@@ -384,3 +384,69 @@ class TestMergeFilters:
         merged = merge_filters(gf, rf)
         assert merged["supervisores"] == ["Walter Vilte"]
         assert merged["sucursales"] == ["CASA CENTRAL", "SUCURSAL CAFAYATE"]
+
+    def test_enviar_flags_default_true(self):
+        gf = GlobalFilters(fecha_desde="2026-01-01", fecha_hasta="2026-01-31")
+        merged = merge_filters(gf, None)
+        assert merged["enviar_email"] is True
+        assert merged["enviar_whatsapp"] is True
+
+    def test_global_enviar_flags_false(self):
+        gf = GlobalFilters(
+            fecha_desde="2026-01-01",
+            fecha_hasta="2026-01-31",
+            enviar_email=False,
+            enviar_whatsapp=False,
+        )
+        merged = merge_filters(gf, None)
+        assert merged["enviar_email"] is False
+        assert merged["enviar_whatsapp"] is False
+
+    def test_report_overrides_enviar_flags(self):
+        gf = GlobalFilters(
+            fecha_desde="2026-01-01",
+            fecha_hasta="2026-01-31",
+            enviar_email=True,
+            enviar_whatsapp=True,
+        )
+        rf = ReportFilters(enviar_email=False)
+        merged = merge_filters(gf, rf)
+        assert merged["enviar_email"] is False
+        assert merged["enviar_whatsapp"] is True
+
+
+class TestResolveDeliveryFlags:
+    def test_enviar_email_false_skips_email(self):
+        report = ReportEntry(
+            nombre="Test",
+            enviar_a={"W": DeliveryTarget(via=["email", "whatsapp"])},
+        )
+        contactos = {"W": ContactInfo(email="w@test.com", telefono="+5491155")}
+        result = resolve_delivery(report, contactos, enviar_email=False)
+
+        assert result.email is None
+        assert result.whatsapp is not None
+
+    def test_enviar_whatsapp_false_skips_whatsapp(self):
+        report = ReportEntry(
+            nombre="Test",
+            enviar_a={"W": DeliveryTarget(via=["email", "whatsapp"])},
+        )
+        contactos = {"W": ContactInfo(email="w@test.com", telefono="+5491155")}
+        result = resolve_delivery(report, contactos, enviar_whatsapp=False)
+
+        assert result.email is not None
+        assert result.whatsapp is None
+
+    def test_both_false_returns_empty_delivery(self):
+        report = ReportEntry(
+            nombre="Test",
+            enviar_a={"W": DeliveryTarget(via=["email", "whatsapp"])},
+        )
+        contactos = {"W": ContactInfo(email="w@test.com", telefono="+5491155")}
+        result = resolve_delivery(
+            report, contactos, enviar_email=False, enviar_whatsapp=False
+        )
+
+        assert result.email is None
+        assert result.whatsapp is None

@@ -39,6 +39,8 @@ def load_report_config(path: Path) -> ReportConfig:
 def resolve_delivery(
     report: ReportEntry,
     contactos: dict[str, ContactInfo],
+    enviar_email: bool = True,
+    enviar_whatsapp: bool = True,
 ) -> DeliveryConfig | None:
     """
     Translate named contacts + channels into the concrete DeliveryConfig
@@ -58,7 +60,7 @@ def resolve_delivery(
             logger.warning("Contact '%s' not found in catalog, skipping", contact_name)
             continue
 
-        if "email" in target.via:
+        if "email" in target.via and enviar_email:
             if contact.email:
                 email_recipients.append(contact.email)
             else:
@@ -66,7 +68,7 @@ def resolve_delivery(
                     "Contact '%s' has via 'email' but no email address", contact_name
                 )
 
-        if "whatsapp" in target.via:
+        if "whatsapp" in target.via and enviar_whatsapp:
             if contact.whatsapp_grupo:
                 whatsapp_targets.append(contact.whatsapp_grupo)
             elif contact.telefono:
@@ -99,6 +101,8 @@ def merge_filters(global_f: GlobalFilters, report_f: ReportFilters | None) -> di
         "genericos": global_f.genericos,
         "con_slicers": global_f.con_slicers,
         "con_cobertura": global_f.con_cobertura,
+        "enviar_email": global_f.enviar_email,
+        "enviar_whatsapp": global_f.enviar_whatsapp,
         "supervisores": None,
         "sucursales": None,
     }
@@ -109,6 +113,10 @@ def merge_filters(global_f: GlobalFilters, report_f: ReportFilters | None) -> di
             merged["con_slicers"] = report_f.con_slicers
         if report_f.con_cobertura is not None:
             merged["con_cobertura"] = report_f.con_cobertura
+        if report_f.enviar_email is not None:
+            merged["enviar_email"] = report_f.enviar_email
+        if report_f.enviar_whatsapp is not None:
+            merged["enviar_whatsapp"] = report_f.enviar_whatsapp
         if report_f.supervisores is not None:
             merged["supervisores"] = report_f.supervisores
         if report_f.sucursales is not None:

@@ -140,7 +140,11 @@ def _run_reportes(report_config, contactos) -> int:
             continue  # error already printed
 
         # Run delivery pipeline for EACH generated file
-        delivery_config = resolve_delivery(report, contactos)
+        delivery_config = resolve_delivery(
+            report, contactos,
+            enviar_email=merged["enviar_email"],
+            enviar_whatsapp=merged["enviar_whatsapp"],
+        )
         if delivery_config:
             for ruta_archivo, metadata in artifacts:
                 _ejecutar_pipeline(
