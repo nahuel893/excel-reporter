@@ -96,6 +96,43 @@ _UNIDADES = [
     (UNIDAD_HTLS, "Ventas HTLs"),
 ]
 
+# Hojas de cobertura
+_COB_GENERICO_SHEET = "Cobertura Generico"
+_COB_MARCA_SHEET = "Cobertura Marca"
+
+_COB_GENERICO_COLUMNS = {
+    "sucursal": COLUMN_NAMES["sucursal"],
+    "generico": COLUMN_NAMES["generico"],
+    "clientes_compradores": "Clientes Compradores",
+}
+
+_COB_MARCA_COLUMNS = {
+    "sucursal": COLUMN_NAMES["sucursal"],
+    "marca": COLUMN_NAMES["marca"],
+    "clientes_compradores": "Clientes Compradores",
+}
+
+_COBERTURA_STYLE = SheetStyle(
+    column_formats={
+        "Clientes Compradores": ColumnFormat(number_format="#,##0", width=20),
+    },
+    as_table=True,
+    table_style="TableStyleMedium9",
+)
+
+
+def _preparar_cobertura(
+    df_cob: pd.DataFrame | None,
+    sort_cols: list[str],
+    rename_map: dict[str, str],
+) -> pd.DataFrame | None:
+    """Ordena y renombra un DataFrame de cobertura para escribirlo como hoja Excel."""
+    if df_cob is None or df_cob.empty:
+        return None
+    df = df_cob.sort_values(sort_cols).reset_index(drop=True)
+    df = df[list(rename_map.keys())]
+    return df.rename(columns=rename_map)
+
 
 @dataclass
 class ReporteVentasConfig:
@@ -237,15 +274,16 @@ class VentasService(BaseService):
         df_cob_marca: pd.DataFrame | None,
         info_dias: dict,
         con_slicers: bool,
-    ) -> tuple[Path, int, bool]:
+    ) -> tuple[Path, int, bool, list[str]]:
         """
-        Genera el archivo Excel con ambas hojas (Bultos y HTLs).
+        Genera el archivo Excel con hojas de ventas y cobertura.
 
         Returns:
-            (ruta_archivo, total_procesados, slicers_ok)
+            (ruta_archivo, total_procesados, slicers_ok, hojas)
         """
         writer = ExcelWriter(nombre_archivo)
         total_procesados = 0
+        hojas = []
 
         for unidad, sheet_label in _UNIDADES:
             col_cantidad = _COL_CANTIDAD[unidad]
@@ -269,6 +307,22 @@ class VentasService(BaseService):
             style = _crear_estilo_ventas(columnas_dias, info_dias)
             writer.add_sheet(df_procesado, sheet_name=sheet_label, style=style)
             total_procesados += len(df_procesado)
+            hojas.append(sheet_label)
+
+        # Hojas de cobertura
+        df_cob_gen_sheet = _preparar_cobertura(
+            df_cob_generico, ["sucursal", "generico"], _COB_GENERICO_COLUMNS
+        )
+        if df_cob_gen_sheet is not None:
+            writer.add_sheet(df_cob_gen_sheet, sheet_name=_COB_GENERICO_SHEET, style=_COBERTURA_STYLE)
+            hojas.append(_COB_GENERICO_SHEET)
+
+        df_cob_marca_sheet = _preparar_cobertura(
+            df_cob_marca, ["sucursal", "marca"], _COB_MARCA_COLUMNS
+        )
+        if df_cob_marca_sheet is not None:
+            writer.add_sheet(df_cob_marca_sheet, sheet_name=_COB_MARCA_SHEET, style=_COBERTURA_STYLE)
+            hojas.append(_COB_MARCA_SHEET)
 
         ruta = writer.save()
 
@@ -279,7 +333,7 @@ class VentasService(BaseService):
                 agregar_slicers(ruta, nombre_tabla, SLICER_COLUMNS)
             slicers_ok = True
 
-        return ruta, total_procesados, slicers_ok
+        return ruta, total_procesados, slicers_ok, hojas
 
     def generar_reporte(self, config: ReporteVentasConfig) -> ReporteVentasResult:
         """
@@ -300,7 +354,7 @@ class VentasService(BaseService):
 
         nombre = _nombre_reporte(df_ventas, config.fecha_hasta, nombre_explicito=config.nombre_archivo)
 
-        ruta, total_procesados, slicers_ok = self._build_workbook(
+        ruta, total_procesados, slicers_ok, hojas = self._build_workbook(
             nombre,
             config.fecha_desde,
             config.fecha_hasta,
@@ -323,7 +377,7 @@ class VentasService(BaseService):
             registros_procesados=total_procesados,
             sucursales=len(df_sucursales),
             genericos_incluidos=genericos_incluidos,
-            hojas=[label for _, label in _UNIDADES],
+            hojas=hojas,
             slicers_agregados=slicers_ok,
         )
 
@@ -369,7 +423,7 @@ class VentasService(BaseService):
             # Nombre de archivo: "Ventas {supervisor} - {ultima_fecha}"
             nombre = _nombre_reporte(df_ventas_sup, config.fecha_hasta, supervisor=supervisor)
 
-            ruta, total_procesados, slicers_ok = self._build_workbook(
+            ruta, total_procesados, slicers_ok, hojas = self._build_workbook(
                 nombre,
                 config.fecha_desde,
                 config.fecha_hasta,
@@ -392,7 +446,7 @@ class VentasService(BaseService):
                 registros_procesados=total_procesados,
                 sucursales=len(sucursales_expandidas),
                 genericos_incluidos=genericos_incluidos,
-                hojas=[label for _, label in _UNIDADES],
+                hojas=hojas,
                 slicers_agregados=slicers_ok,
                 supervisor=supervisor,
             ))
