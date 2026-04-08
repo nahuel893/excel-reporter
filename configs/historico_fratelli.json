@@ -1,0 +1,12 @@
+{
+    "tipo": "historico-fratelli",
+    "filtros": {
+        "fecha_desde": "2024-01-01",
+        "fecha_hasta": "2026-12-31"
+    },
+    "reportes": [
+        {
+            "nombre": "Historico FRATELLI B"
+        }
+    ]
+}

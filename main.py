@@ -132,6 +132,10 @@ def _run_reportes(report_config, contactos) -> int:
             artifacts = _run_ventas_report(report, merged)
         elif report_config.tipo == "resumen-mensual":
             artifacts = _run_resumen_report(report, merged)
+        elif report_config.tipo == "mision-imposible":
+            artifacts = _run_mision_report(report, merged)
+        elif report_config.tipo == "historico-fratelli":
+            artifacts = _run_historico_fratelli_report(report, merged)
         else:
             print(f"Error: tipo de reporte desconocido: {report_config.tipo}")
             return 1
@@ -216,6 +220,35 @@ def _run_resumen_report(report, merged: dict) -> list[tuple[Path, dict]]:
         Path(result.ruta_archivo),
         {"nombre": report.nombre, "fecha": merged["fecha_hasta"]},
     )]
+
+
+def _run_mision_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    from src.services.mision_imposible import MisionImposibleConfig, MisionImposibleService
+    config = MisionImposibleConfig(
+        fecha_desde=merged["fecha_desde"],
+        fecha_hasta=merged["fecha_hasta"],
+        genericos=merged["genericos"],
+        nombre_archivo=report.nombre,
+    )
+    result = MisionImposibleService().generar_reporte(config)
+    print("Mision Imposible generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Hojas: {', '.join(result.hojas)}")
+    print(f"  - Registros procesados: {result.registros_procesados}")
+    print(f"  - Sucursales: {result.sucursales}")
+    print(f"  - Genericos: {len(result.genericos_incluidos)}")
+    return [(Path(result.ruta_archivo), {"nombre": report.nombre, "fecha": merged["fecha_hasta"]})]
+
+
+def _run_historico_fratelli_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    from src.services.historico_fratelli import HistoricoFratelliConfig, HistoricoFratelliService
+    config = HistoricoFratelliConfig(nombre_archivo=report.nombre)
+    result = HistoricoFratelliService().generar_reporte(config)
+    print("Historico FRATELLI B generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Hojas: {', '.join(result.hojas)}")
+    print(f"  - Registros procesados: {result.registros_procesados}")
+    return [(Path(result.ruta_archivo), {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")})]
 
 
 # ---------------------------------------------------------------------------

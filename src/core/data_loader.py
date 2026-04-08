@@ -395,6 +395,78 @@ class DataLoader:
         fecha_hasta_aa = f"{int(fecha_hasta[:4]) - 1}{fecha_hasta[4:]}"
         return self.get_ventas_resumen_mensual(fecha_desde_aa, fecha_hasta_aa, genericos)
 
+    def get_ventas_mision_imposible_categorias(
+        self, fecha_desde: str, fecha_hasta: str, articulos_ids: list[int]
+    ) -> pd.DataFrame:
+        """Obtiene ventas detalladas por cliente y articulo para armar pivot de categorias."""
+        if not articulos_ids:
+            return pd.DataFrame()
+
+        placeholders = ", ".join([f":art_{i}" for i in range(len(articulos_ids))])
+
+        query = f"""
+        SELECT
+            ds.descripcion AS sucursal,
+            dc.id_ruta_fv1 AS id_ruta,
+            fv.id_vendedor,
+            dv.des_vendedor AS vendedor,
+            fv.id_cliente,
+            COALESCE(dc.fantasia, dc.razon_social) AS cliente,
+            da.marca,
+            fv.id_articulo,
+            da.des_articulo,
+            SUM(fv.cantidades_total) AS cantidad
+        FROM gold.fact_ventas fv
+        LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+        LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+        LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
+        LEFT JOIN gold.dim_vendedor dv ON fv.id_vendedor = dv.id_vendedor AND fv.id_sucursal = dv.id_sucursal
+        WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
+        AND fv.id_articulo IN ({placeholders})
+        GROUP BY
+            ds.descripcion, dc.id_ruta_fv1, fv.id_vendedor, dv.des_vendedor,
+            fv.id_cliente, COALESCE(dc.fantasia, dc.razon_social),
+            da.marca, fv.id_articulo, da.des_articulo
+        HAVING SUM(fv.cantidades_total) > 0
+        """
+        params = {"desde": fecha_desde, "hasta": fecha_hasta}
+        params.update({f"art_{i}": art for i, art in enumerate(articulos_ids)})
+
+        return self.execute_query(query, params)
+
+    def get_ventas_historico_fratelli(
+        self,
+        id_sucursal: int = 1,
+        generico: str = "FRATELLI B",
+    ) -> pd.DataFrame:
+        """
+        Obtiene ventas mensuales de un generico por anio, marca y lista de precio.
+        Filtra sucursal fija, excluye facturas presupuesto (PRVTA).
+        Trae datos de 2024, 2025 y 2026.
+        """
+        query = """
+        SELECT
+            EXTRACT(YEAR FROM fv.fecha_comprobante)::int AS anio,
+            EXTRACT(MONTH FROM fv.fecha_comprobante)::int AS mes,
+            da.marca,
+            dc.id_lista_precio,
+            SUM(fv.cantidades_total) AS cantidad
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+        LEFT JOIN gold.dim_cliente dc
+            ON fv.id_cliente = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
+        WHERE fv.id_sucursal = :id_sucursal
+          AND da.generico = :generico
+          AND fv.id_documento != 'PRVTA'
+          AND fv.fecha_comprobante >= '2024-01-01'
+          AND fv.fecha_comprobante <= '2026-12-31'
+        GROUP BY anio, mes, da.marca, dc.id_lista_precio
+        ORDER BY anio, mes
+        """
+        return self.execute_query(
+            query, {"id_sucursal": id_sucursal, "generico": generico}
+        )
+
     # ── Cobertura ──────────────────────────────────────────────
 
     def _filtro_periodos(
