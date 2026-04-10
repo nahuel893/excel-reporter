@@ -1,0 +1,20 @@
+{
+    "tipo": "mision-imposible",
+    "filtros": {
+        "fecha_desde": "2026-03-01",
+        "fecha_hasta": "2026-03-31",
+        "genericos": ["CERVEZAS", "AGUAS DANONE"],
+        "categorias": {
+            "Premium": [23320, 1086],
+            "Saborizadas": [23179, 125974]
+        }
+    },
+    "reportes": [
+        {
+            "nombre": "Mision Imposible Test",
+            "enviar_a": {
+                "Walter Vilte": {"via": ["email"]}
+            }
+        }
+    ]
+}
