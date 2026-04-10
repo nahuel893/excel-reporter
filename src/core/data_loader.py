@@ -4,6 +4,7 @@ DataLoader - Acceso a datos del Data Warehouse.
 Proporciona acceso centralizado a la base de datos PostgreSQL
 usando SQLAlchemy con soporte para inyección de dependencias.
 """
+
 from datetime import timedelta, datetime
 
 import pandas as pd
@@ -88,7 +89,9 @@ class DataLoader:
 
         return self.execute_query(query, params)
 
-    def get_ventas_diarias(self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None) -> pd.DataFrame:
+    def get_ventas_diarias(
+        self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None
+    ) -> pd.DataFrame:
         """
         Obtiene ventas diarias por sucursal, generico y marca.
 
@@ -142,7 +145,9 @@ class DataLoader:
 
         return self.execute_query(query, params)
 
-    def get_ventas_diarias_con_ruta(self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None) -> pd.DataFrame:
+    def get_ventas_diarias_con_ruta(
+        self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None
+    ) -> pd.DataFrame:
         """
         Obtiene ventas diarias incluyendo id_ruta para split de zonas virtuales.
 
@@ -195,7 +200,73 @@ class DataLoader:
 
         return self.execute_query(query, params)
 
-    def get_ventas(self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None) -> pd.DataFrame:
+    def get_ventas_historico_mmaa(
+        self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None
+    ) -> pd.DataFrame:
+        """
+        Obtiene ventas del mismo periodo del año anterior (MMAA).
+
+        Desplaza internamente las fechas -1 año con relativedelta.
+        Misma estructura de JOINs que get_ventas_diarias_con_ruta pero sin monto.
+
+        Args:
+            fecha_desde: Fecha inicio formato 'YYYY-MM-DD' (del periodo actual)
+            fecha_hasta: Fecha fin formato 'YYYY-MM-DD' (del periodo actual)
+            genericos: Lista de genericos a filtrar. Si es None, trae todos.
+
+        Returns:
+            DataFrame con columnas: sucursal, generico, marca, fecha, id_ruta, cantidad, cantidad_htls
+        """
+        desde = (pd.to_datetime(fecha_desde) - relativedelta(years=1)).strftime("%Y-%m-%d")
+        hasta = (pd.to_datetime(fecha_hasta) - relativedelta(years=1)).strftime("%Y-%m-%d")
+
+        if genericos:
+            placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
+            query = f"""
+            SELECT
+                ds.descripcion AS sucursal,
+                da.generico,
+                da.marca,
+                fv.fecha_comprobante AS fecha,
+                dc.id_ruta_fv1 AS id_ruta,
+                SUM(fv.cantidades_total) AS cantidad,
+                SUM(fv.cantidad_total_htls) AS cantidad_htls
+            FROM gold.fact_ventas fv
+            LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+            LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+            LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
+            WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
+            AND da.generico IN ({placeholders})
+            GROUP BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante, dc.id_ruta_fv1
+            ORDER BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante
+            """
+            params = {"desde": desde, "hasta": hasta}
+            params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
+        else:
+            query = """
+            SELECT
+                ds.descripcion AS sucursal,
+                da.generico,
+                da.marca,
+                fv.fecha_comprobante AS fecha,
+                dc.id_ruta_fv1 AS id_ruta,
+                SUM(fv.cantidades_total) AS cantidad,
+                SUM(fv.cantidad_total_htls) AS cantidad_htls
+            FROM gold.fact_ventas fv
+            LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+            LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+            LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
+            WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
+            GROUP BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante, dc.id_ruta_fv1
+            ORDER BY ds.descripcion, da.generico, da.marca, fv.fecha_comprobante
+            """
+            params = {"desde": desde, "hasta": hasta}
+
+        return self.execute_query(query, params)
+
+    def get_ventas(
+        self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None
+    ) -> pd.DataFrame:
         """
         Obtiene ventas agrupadas por sucursal, generico y marca.
 
@@ -249,7 +320,9 @@ class DataLoader:
 
     # ── Resumen Mensual ─────────────────────────────────────────
 
-    def get_ventas_resumen_mensual(self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None) -> pd.DataFrame:
+    def get_ventas_resumen_mensual(
+        self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None
+    ) -> pd.DataFrame:
         """
         Obtiene ventas mensuales agrupadas por sucursal, generico e id_ruta.
 
@@ -301,7 +374,9 @@ class DataLoader:
 
         return self.execute_query(query, params)
 
-    def get_ventas_ultimos_dias_habiles(self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None) -> pd.DataFrame:
+    def get_ventas_ultimos_dias_habiles(
+        self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None
+    ) -> pd.DataFrame:
         """
         Obtiene ventas diarias del rango completo del mes, con desglose por fecha e id_ruta.
 
@@ -358,7 +433,9 @@ class DataLoader:
 
         return self.execute_query(query, params)
 
-    def get_ventas_mes_anterior(self, fecha_desde: str, genericos: list[str] | None = None) -> pd.DataFrame:
+    def get_ventas_mes_anterior(
+        self, fecha_desde: str, genericos: list[str] | None = None
+    ) -> pd.DataFrame:
         """
         Obtiene ventas del mes calendario completo anterior a fecha_desde.
 
@@ -371,7 +448,7 @@ class DataLoader:
             DataFrame con columnas: sucursal, generico, id_ruta, cantidad
         """
         fecha_dt = datetime.strptime(fecha_desde, "%Y-%m-%d").date()
-        primer_dia = (fecha_dt.replace(day=1) - relativedelta(months=1))
+        primer_dia = fecha_dt.replace(day=1) - relativedelta(months=1)
         ultimo_dia = fecha_dt.replace(day=1) - timedelta(days=1)
         return self.get_ventas_resumen_mensual(
             primer_dia.strftime("%Y-%m-%d"),
@@ -379,7 +456,9 @@ class DataLoader:
             genericos,
         )
 
-    def get_ventas_mismo_mes_anio_anterior(self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None) -> pd.DataFrame:
+    def get_ventas_mismo_mes_anio_anterior(
+        self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None
+    ) -> pd.DataFrame:
         """
         Obtiene ventas del mismo rango de fechas pero del anio anterior.
 
@@ -393,7 +472,9 @@ class DataLoader:
         """
         fecha_desde_aa = f"{int(fecha_desde[:4]) - 1}{fecha_desde[4:]}"
         fecha_hasta_aa = f"{int(fecha_hasta[:4]) - 1}{fecha_hasta[4:]}"
-        return self.get_ventas_resumen_mensual(fecha_desde_aa, fecha_hasta_aa, genericos)
+        return self.get_ventas_resumen_mensual(
+            fecha_desde_aa, fecha_hasta_aa, genericos
+        )
 
     def get_ventas_mision_imposible_categorias(
         self, fecha_desde: str, fecha_hasta: str, articulos_ids: list[int]
@@ -450,7 +531,8 @@ class DataLoader:
             EXTRACT(MONTH FROM fv.fecha_comprobante)::int AS mes,
             da.marca,
             dc.id_lista_precio,
-            SUM(fv.cantidades_total) AS cantidad
+            SUM(fv.cantidades_total) AS cantidad,
+            SUM(fv.descuentos) AS descuentos
         FROM gold.fact_ventas fv
         JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
         LEFT JOIN gold.dim_cliente dc
@@ -466,6 +548,83 @@ class DataLoader:
         return self.execute_query(
             query, {"id_sucursal": id_sucursal, "generico": generico}
         )
+
+    def get_cobertura_historico_fratelli(
+        self,
+        id_sucursal: int = 1,
+        generico: str = "FRATELLI B",
+    ) -> dict[str, pd.DataFrame]:
+        """
+        Obtiene cobertura historica de FRATELLI B desde 3 tablas:
+        - cob_sucursal_generico: total por mes
+        - cob_sucursal_lista_generico: por lista de precio
+        - cob_sucursal_marca: por marca
+
+        Returns:
+            dict con keys 'total', 'lista', 'marca', cada uno un DataFrame
+            con columnas: anio, mes, [dimension], clientes_compradores
+        """
+        base_where = """
+            WHERE ds_sucursal = (
+                SELECT descripcion FROM gold.dim_sucursal WHERE id_sucursal = :id_sucursal LIMIT 1
+            )
+            AND periodo >= '2024-01-01'
+            AND periodo <= '2026-12-31'
+        """
+        params = {"id_sucursal": id_sucursal, "generico": generico}
+
+        # Total por mes (cob_sucursal_generico)
+        q_total = f"""
+        SELECT
+            EXTRACT(YEAR FROM periodo)::int AS anio,
+            EXTRACT(MONTH FROM periodo)::int AS mes,
+            SUM(clientes_compradores) AS clientes_compradores
+        FROM gold.cob_sucursal_generico
+        {base_where}
+        AND generico = :generico
+        GROUP BY anio, mes
+        ORDER BY anio, mes
+        """
+
+        # Por lista de precio (cob_sucursal_lista_generico)
+        q_lista = f"""
+        SELECT
+            EXTRACT(YEAR FROM periodo)::int AS anio,
+            EXTRACT(MONTH FROM periodo)::int AS mes,
+            id_lista_precio,
+            SUM(clientes_compradores) AS clientes_compradores
+        FROM gold.cob_sucursal_lista_generico
+        {base_where}
+        AND generico = :generico
+        GROUP BY anio, mes, id_lista_precio
+        ORDER BY anio, mes, id_lista_precio
+        """
+
+        # Por marca (cob_sucursal_marca) — filtra marcas del genérico via dim_articulo
+        q_marca = f"""
+        SELECT
+            EXTRACT(YEAR FROM csm.periodo)::int AS anio,
+            EXTRACT(MONTH FROM csm.periodo)::int AS mes,
+            csm.marca,
+            SUM(csm.clientes_compradores) AS clientes_compradores
+        FROM gold.cob_sucursal_marca csm
+        WHERE csm.ds_sucursal = (
+            SELECT descripcion FROM gold.dim_sucursal WHERE id_sucursal = :id_sucursal LIMIT 1
+        )
+        AND csm.periodo >= '2024-01-01'
+        AND csm.periodo <= '2026-12-31'
+        AND csm.marca IN (
+            SELECT DISTINCT marca FROM gold.dim_articulo WHERE generico = :generico
+        )
+        GROUP BY anio, mes, csm.marca
+        ORDER BY anio, mes, csm.marca
+        """
+
+        return {
+            "total": self.execute_query(q_total, params),
+            "lista": self.execute_query(q_lista, params),
+            "marca": self.execute_query(q_marca, params),
+        }
 
     # ── Cobertura ──────────────────────────────────────────────
 
@@ -486,10 +645,14 @@ class DataLoader:
             filtro = f"{alias}.periodo BETWEEN :desde AND :hasta"
             params = {"desde": periodo_desde, "hasta": periodo_hasta}
         else:
-            raise ValueError("Debe especificar 'periodos' o 'periodo_desde'/'periodo_hasta'")
+            raise ValueError(
+                "Debe especificar 'periodos' o 'periodo_desde'/'periodo_hasta'"
+            )
         return filtro, params
 
-    def _filtro_sucursales(self, alias: str, sucursales: list[str] | None) -> tuple[str, dict]:
+    def _filtro_sucursales(
+        self, alias: str, sucursales: list[str] | None
+    ) -> tuple[str, dict]:
         """Construye filtro SQL y params para sucursales."""
         if not sucursales:
             return "", {}
@@ -503,7 +666,7 @@ class DataLoader:
         periodo_desde: str | None = None,
         periodo_hasta: str | None = None,
         periodos: list[str] | None = None,
-        sucursales: list[str] | None = None
+        sucursales: list[str] | None = None,
     ) -> pd.DataFrame:
         """
         Obtiene cobertura por preventista y generico.
@@ -514,7 +677,9 @@ class DataLoader:
             periodos: Lista de periodos especificos ['2025-02-01', '2026-01-01']
             sucursales: Lista de sucursales a filtrar.
         """
-        filtro_per, params = self._filtro_periodos("cpg", periodos, periodo_desde, periodo_hasta)
+        filtro_per, params = self._filtro_periodos(
+            "cpg", periodos, periodo_desde, periodo_hasta
+        )
         filtro_suc, params_suc = self._filtro_sucursales("cpg", sucursales)
         params.update(params_suc)
 
@@ -544,7 +709,7 @@ class DataLoader:
         periodo_desde: str | None = None,
         periodo_hasta: str | None = None,
         periodos: list[str] | None = None,
-        sucursales: list[str] | None = None
+        sucursales: list[str] | None = None,
     ) -> pd.DataFrame:
         """
         Obtiene cobertura por preventista y marca.
@@ -555,7 +720,9 @@ class DataLoader:
             periodos: Lista de periodos especificos ['2025-02-01', '2026-01-01']
             sucursales: Lista de sucursales a filtrar.
         """
-        filtro_per, params = self._filtro_periodos("cpm", periodos, periodo_desde, periodo_hasta)
+        filtro_per, params = self._filtro_periodos(
+            "cpm", periodos, periodo_desde, periodo_hasta
+        )
         filtro_suc, params_suc = self._filtro_sucursales("cpm", sucursales)
         params.update(params_suc)
 
@@ -620,14 +787,18 @@ class DataLoader:
         # Build principal filter clause
         if articulos_ids is not None:
             if len(articulos_ids) > 1000:
-                print(f"⚠ articulos_ids tiene {len(articulos_ids)} elementos en el IN clause.")
+                print(
+                    f"⚠ articulos_ids tiene {len(articulos_ids)} elementos en el IN clause."
+                )
             art_params = {f"art_{i}": aid for i, aid in enumerate(articulos_ids)}
             art_placeholders = ", ".join(f":art_{i}" for i in range(len(articulos_ids)))
             filtro_principal_clause = f"AND fv.id_articulo IN ({art_placeholders})"
             params.update(art_params)
         else:
             marca_params = {f"marca_{i}": m for i, m in enumerate(marcas_upper)}
-            marca_placeholders = ", ".join(f":marca_{i}" for i in range(len(marcas_upper)))
+            marca_placeholders = ", ".join(
+                f":marca_{i}" for i in range(len(marcas_upper))
+            )
             filtro_principal_clause = f"AND da.marca IN ({marca_placeholders})"
             params.update(marca_params)
 
@@ -809,7 +980,7 @@ class DataLoader:
         periodo_desde: str | None = None,
         periodo_hasta: str | None = None,
         periodos: list[str] | None = None,
-        sucursales: list[str] | None = None
+        sucursales: list[str] | None = None,
     ) -> pd.DataFrame:
         """
         Obtiene cobertura agregada por sucursal y marca.
@@ -820,7 +991,9 @@ class DataLoader:
             periodos: Lista de periodos especificos ['2025-02-01', '2026-01-01']
             sucursales: Lista de sucursales a filtrar.
         """
-        filtro_per, params = self._filtro_periodos("csm", periodos, periodo_desde, periodo_hasta)
+        filtro_per, params = self._filtro_periodos(
+            "csm", periodos, periodo_desde, periodo_hasta
+        )
         filtro_suc, params_suc = self._filtro_sucursales("csm", sucursales)
         params.update(params_suc)
 
@@ -843,7 +1016,7 @@ class DataLoader:
         periodo_desde: str | None = None,
         periodo_hasta: str | None = None,
         periodos: list[str] | None = None,
-        sucursales: list[str] | None = None
+        sucursales: list[str] | None = None,
     ) -> pd.DataFrame:
         """
         Obtiene cobertura agregada por sucursal y generico.
@@ -856,7 +1029,9 @@ class DataLoader:
             periodos: Lista de periodos especificos ['2025-02-01', '2026-01-01']
             sucursales: Lista de sucursales a filtrar.
         """
-        filtro_per, params = self._filtro_periodos("cpg", periodos, periodo_desde, periodo_hasta)
+        filtro_per, params = self._filtro_periodos(
+            "cpg", periodos, periodo_desde, periodo_hasta
+        )
         filtro_suc, params_suc = self._filtro_sucursales("cpg", sucursales)
         params.update(params_suc)
 
@@ -882,7 +1057,9 @@ class DataLoader:
         Returns:
             date o None si no hay datos.
         """
-        query = "SELECT MAX(fv.fecha_comprobante) AS ultima_venta FROM gold.fact_ventas fv"
+        query = (
+            "SELECT MAX(fv.fecha_comprobante) AS ultima_venta FROM gold.fact_ventas fv"
+        )
         df = self.execute_query(query)
         if df.empty or df["ultima_venta"].iloc[0] is None:
             return None

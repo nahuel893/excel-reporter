@@ -100,6 +100,10 @@ class TestVentasServiceUnit:
             "marca": ["CORONA"]
         })
 
+        loader.get_ventas_historico_mmaa.return_value = pd.DataFrame(
+            columns=["sucursal", "generico", "marca", "fecha", "id_ruta", "cantidad", "cantidad_htls"]
+        )
+
         return loader
 
     def test_service_acepta_data_loader(self, mock_loader):

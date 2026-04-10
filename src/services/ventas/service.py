@@ -30,6 +30,8 @@ VENTAS_COLUMN_FORMATS = {
     COLUMN_NAMES["monto_generico"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True),
     COLUMN_NAMES["cob_generico"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True),
     COLUMN_NAMES["total_marca"]: ColumnFormat(number_format='#,##0', width=11, font_bold=True),
+    COLUMN_NAMES["mmaa_marca"]: ColumnFormat(number_format='#,##0', width=11, font_bold=True),
+    COLUMN_NAMES["var_mmaa_marca"]: ColumnFormat(number_format='0.0%', width=9, font_bold=True),
     COLUMN_NAMES["tend_marca"]: ColumnFormat(number_format='#,##0', width=11, font_bold=True),
     COLUMN_NAMES["monto_marca"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True),
     COLUMN_NAMES["cob_marca"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True),
@@ -74,10 +76,26 @@ def _crear_estilo_ventas(
     for col_dia in columnas_dias:
         column_formats[col_dia] = ColumnFormat(number_format='#,##0', width=9.3)
 
+    # Columnas con subtotal: todas las numéricas menos cobertura y Var%
+    subtotal_cols = [
+        COLUMN_NAMES["cant_generico"],
+        COLUMN_NAMES["tend_generico"],
+        COLUMN_NAMES["monto_generico"],
+        # Cobertura (Generico) excluida
+        *columnas_dias,
+        COLUMN_NAMES["total_marca"],
+        COLUMN_NAMES["mmaa_marca"],
+        # Var% excluida
+        COLUMN_NAMES["tend_marca"],
+        COLUMN_NAMES["monto_marca"],
+        # Cobertura (Marca) excluida
+    ]
+
     return SheetStyle(
         column_formats=column_formats,
         column_groups=groups,
-        summary_rows=info_dias
+        summary_rows=info_dias,
+        subtotal_columns=subtotal_cols,
     )
 
 
@@ -207,7 +225,7 @@ class VentasService(BaseService):
         zonas virtuales (ej: CASA CENTRAL → CASA CENTRAL + VALLE SALTA).
 
         Returns:
-            (df_ventas, df_sucursales, df_articulos, df_cob_generico, df_cob_marca, info_dias)
+            (df_ventas, df_sucursales, df_articulos, df_cob_generico, df_cob_marca, df_mmaa, info_dias)
         """
         df_ventas = self.data_loader.get_ventas_diarias_con_ruta(
             config.fecha_desde,
@@ -260,7 +278,20 @@ class VentasService(BaseService):
             except Exception:
                 pass
 
-        return df_ventas, df_sucursales, df_articulos, df_cob_generico, df_cob_marca, info_dias
+        df_mmaa = pd.DataFrame(columns=["sucursal", "generico", "marca", "cantidad", "cantidad_htls"])
+        try:
+            df_mmaa_raw = self.data_loader.get_ventas_historico_mmaa(
+                config.fecha_desde, config.fecha_hasta, config.genericos
+            )
+            if not df_mmaa_raw.empty:
+                df_mmaa_raw = _aplicar_zonas_virtuales(df_mmaa_raw)
+                df_mmaa = df_mmaa_raw.groupby(
+                    ["sucursal", "generico", "marca"], as_index=False
+                )[["cantidad", "cantidad_htls"]].sum()
+        except Exception:
+            pass
+
+        return df_ventas, df_sucursales, df_articulos, df_cob_generico, df_cob_marca, df_mmaa, info_dias
 
     def _build_workbook(
         self,
@@ -272,6 +303,7 @@ class VentasService(BaseService):
         df_articulos: pd.DataFrame,
         df_cob_generico: pd.DataFrame | None,
         df_cob_marca: pd.DataFrame | None,
+        df_mmaa: pd.DataFrame | None,
         info_dias: dict,
         con_slicers: bool,
     ) -> tuple[Path, int, bool, list[str]]:
@@ -296,6 +328,7 @@ class VentasService(BaseService):
                 col_cantidad=col_cantidad,
                 df_cob_generico=df_cob_generico,
                 df_cob_marca=df_cob_marca,
+                df_mmaa=df_mmaa,
             )
 
             # Detectar columnas de dias (entre Marca y Total)
@@ -348,7 +381,7 @@ class VentasService(BaseService):
         Returns:
             ReporteVentasResult con informacion del reporte generado.
         """
-        df_ventas, df_sucursales, df_articulos, df_cob_gen, df_cob_marca, info_dias = (
+        df_ventas, df_sucursales, df_articulos, df_cob_gen, df_cob_marca, df_mmaa, info_dias = (
             self._fetch_data(config)
         )
 
@@ -363,6 +396,7 @@ class VentasService(BaseService):
             df_articulos,
             df_cob_gen,
             df_cob_marca,
+            df_mmaa,
             info_dias,
             config.con_slicers,
         )
@@ -399,7 +433,7 @@ class VentasService(BaseService):
             Lista de ReporteVentasResult, uno por supervisor.
         """
         # Una sola consulta para todos los supervisores
-        df_ventas, _, df_articulos, df_cob_gen, df_cob_marca, info_dias = (
+        df_ventas, _, df_articulos, df_cob_gen, df_cob_marca, df_mmaa, info_dias = (
             self._fetch_data(config)
         )
 
@@ -420,6 +454,8 @@ class VentasService(BaseService):
             if df_cob_marca is not None:
                 df_cob_marca_sup = df_cob_marca[df_cob_marca["sucursal"].isin(sucursales_expandidas)]
 
+            df_mmaa_sup = df_mmaa[df_mmaa["sucursal"].isin(sucursales_expandidas)] if not df_mmaa.empty else df_mmaa
+
             # Nombre de archivo: "Ventas {supervisor} - {ultima_fecha}"
             nombre = _nombre_reporte(df_ventas_sup, config.fecha_hasta, supervisor=supervisor)
 
@@ -432,6 +468,7 @@ class VentasService(BaseService):
                 df_articulos,
                 df_cob_gen_sup,
                 df_cob_marca_sup,
+                df_mmaa_sup,
                 info_dias,
                 config.con_slicers,
             )

@@ -56,6 +56,7 @@ def procesar_ventas_diarias(
     col_cantidad: str = "cantidad",
     df_cob_generico: pd.DataFrame | None = None,
     df_cob_marca: pd.DataFrame | None = None,
+    df_mmaa: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Procesa las ventas diarias para generar tabla con columnas por dia.
@@ -72,6 +73,8 @@ def procesar_ventas_diarias(
         col_cantidad: Columna de cantidad a usar ('cantidad' para bultos, 'cantidad_htls' para htls)
         df_cob_generico: DataFrame con cobertura por (sucursal, generico, clientes_compradores)
         df_cob_marca: DataFrame con cobertura por (sucursal, marca, clientes_compradores)
+        df_mmaa: DataFrame con ventas del mismo periodo año anterior, agrupado por
+                 (sucursal, generico, marca) con columnas cantidad y cantidad_htls.
 
     Returns:
         DataFrame con formato incluyendo dias como columnas y columnas de cobertura
@@ -93,6 +96,13 @@ def procesar_ventas_diarias(
             (r["sucursal"], r["marca"]): r["clientes_compradores"]
             for _, r in df_cob_marca.iterrows()
         }
+
+    # Construir dict de lookup para MMAA (acceso O(1) en el loop)
+    mmaa_dict: dict = {}
+    if df_mmaa is not None and not df_mmaa.empty:
+        for _, r in df_mmaa.iterrows():
+            val = r.get(col_cantidad, 0)
+            mmaa_dict[(r["sucursal"], r["generico"], r["marca"])] = int(val) if val and val > 0 else None
 
     # Asegurar que fecha sea datetime
     df = df.copy()
@@ -202,6 +212,12 @@ def procesar_ventas_diarias(
 
             # Agregar totales de marca
             row[COLUMN_NAMES["total_marca"]] = fila["total_marca"]
+
+            # MMAA y Var%
+            mmaa_val = mmaa_dict.get((sucursal, generico, fila["marca"]))
+            row[COLUMN_NAMES["mmaa_marca"]] = mmaa_val
+            row[COLUMN_NAMES["var_mmaa_marca"]] = (fila["total_marca"] / mmaa_val) if mmaa_val else None
+
             row[COLUMN_NAMES["tend_marca"]] = round(fila["tend_marca"])
             row[COLUMN_NAMES["monto_marca"]] = fila["monto_marca"]
             row[COLUMN_NAMES["cob_marca"]] = cob_marca_dict.get((sucursal, fila["marca"]))

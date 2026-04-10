@@ -50,6 +50,8 @@ COLUMN_NAMES = {
     "marca": "Marca",
     # Columnas dinamicas de dias van aqui (generadas en processor)
     "total_marca": "Total",
+    "mmaa_marca": "MMAA",
+    "var_mmaa_marca": "Var%",
     "tend_marca": "Tendencia (Marca)",
     "monto_marca": "Monto (Marca)",
     "cob_marca": "Cobertura (Marca)",
