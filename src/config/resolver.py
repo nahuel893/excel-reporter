@@ -4,6 +4,7 @@ Contact resolution: translates named contacts into concrete DeliveryConfig.
 This is the thin layer between the new config format (named contacts + channels)
 and the existing delivery pipeline models (EmailConfig, WhatsAppConfig).
 """
+
 import json
 import logging
 from pathlib import Path
@@ -15,7 +16,12 @@ from src.config.models import (
     ReportEntry,
     ReportFilters,
 )
-from src.delivery.pipeline import CaptureConfig, DeliveryConfig, EmailConfig, WhatsAppConfig
+from src.delivery.pipeline import (
+    CaptureConfig,
+    DeliveryConfig,
+    EmailConfig,
+    WhatsAppConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +105,7 @@ def merge_filters(global_f: GlobalFilters, report_f: ReportFilters | None) -> di
         "fecha_desde": global_f.fecha_desde,
         "fecha_hasta": global_f.fecha_hasta,
         "genericos": global_f.genericos,
+        "categorias": getattr(global_f, "categorias", None),
         "con_slicers": global_f.con_slicers,
         "con_cobertura": global_f.con_cobertura,
         "enviar_email": global_f.enviar_email,
@@ -109,6 +116,8 @@ def merge_filters(global_f: GlobalFilters, report_f: ReportFilters | None) -> di
     if report_f:
         if report_f.genericos is not None:
             merged["genericos"] = report_f.genericos
+        if getattr(report_f, "categorias", None) is not None:
+            merged["categorias"] = report_f.categorias
         if report_f.con_slicers is not None:
             merged["con_slicers"] = report_f.con_slicers
         if report_f.con_cobertura is not None:

@@ -19,6 +19,7 @@ Subcomandos disponibles:
     ventas           - Reporte de ventas por sucursal, generico y marca
     resumen-mensual  - Resumen mensual por generico (ultimos dias, tendencia, anio anterior)
 """
+
 import argparse
 import json
 import logging
@@ -109,9 +110,9 @@ def _run_config_dir(config_dir: Path) -> int:
     print(f"Procesando {len(config_files)} config(s) desde {config_dir}/")
     exit_code = 0
     for config_file in config_files:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Config: {config_file.name}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         result = _run_report_config(config_file, contactos_path)
         if result != 0:
             exit_code = result
@@ -145,7 +146,8 @@ def _run_reportes(report_config, contactos) -> int:
 
         # Run delivery pipeline for EACH generated file
         delivery_config = resolve_delivery(
-            report, contactos,
+            report,
+            contactos,
             enviar_email=merged["enviar_email"],
             enviar_whatsapp=merged["enviar_whatsapp"],
         )
@@ -184,18 +186,25 @@ def _run_ventas_report(report, merged: dict) -> list[tuple[Path, dict]]:
         artifacts = []
         for result in results:
             _imprimir_resultado(result, merged["con_slicers"])
-            artifacts.append((
-                Path(result.ruta_archivo),
-                {"nombre": f"Ventas {result.supervisor}", "fecha": merged["fecha_hasta"]},
-            ))
+            artifacts.append(
+                (
+                    Path(result.ruta_archivo),
+                    {
+                        "nombre": f"Ventas {result.supervisor}",
+                        "fecha": merged["fecha_hasta"],
+                    },
+                )
+            )
         return artifacts
     else:
         result = service.generar_reporte(config)
         _imprimir_resultado(result, merged["con_slicers"])
-        return [(
-            Path(result.ruta_archivo),
-            {"nombre": report.nombre, "fecha": merged["fecha_hasta"]},
-        )]
+        return [
+            (
+                Path(result.ruta_archivo),
+                {"nombre": report.nombre, "fecha": merged["fecha_hasta"]},
+            )
+        ]
 
 
 def _run_resumen_report(report, merged: dict) -> list[tuple[Path, dict]]:
@@ -216,14 +225,20 @@ def _run_resumen_report(report, merged: dict) -> list[tuple[Path, dict]]:
     print(f"  - Sucursales: {result.sucursales}")
     print(f"  - Genericos: {len(result.genericos_incluidos)}")
 
-    return [(
-        Path(result.ruta_archivo),
-        {"nombre": report.nombre, "fecha": merged["fecha_hasta"]},
-    )]
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged["fecha_hasta"]},
+        )
+    ]
 
 
 def _run_mision_report(report, merged: dict) -> list[tuple[Path, dict]]:
-    from src.services.mision_imposible import MisionImposibleConfig, MisionImposibleService
+    from src.services.mision_imposible import (
+        MisionImposibleConfig,
+        MisionImposibleService,
+    )
+
     config = MisionImposibleConfig(
         fecha_desde=merged["fecha_desde"],
         fecha_hasta=merged["fecha_hasta"],
@@ -237,18 +252,32 @@ def _run_mision_report(report, merged: dict) -> list[tuple[Path, dict]]:
     print(f"  - Registros procesados: {result.registros_procesados}")
     print(f"  - Sucursales: {result.sucursales}")
     print(f"  - Genericos: {len(result.genericos_incluidos)}")
-    return [(Path(result.ruta_archivo), {"nombre": report.nombre, "fecha": merged["fecha_hasta"]})]
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged["fecha_hasta"]},
+        )
+    ]
 
 
 def _run_historico_fratelli_report(report, merged: dict) -> list[tuple[Path, dict]]:
-    from src.services.historico_fratelli import HistoricoFratelliConfig, HistoricoFratelliService
+    from src.services.historico_fratelli import (
+        HistoricoFratelliConfig,
+        HistoricoFratelliService,
+    )
+
     config = HistoricoFratelliConfig(nombre_archivo=report.nombre)
     result = HistoricoFratelliService().generar_reporte(config)
     print("Historico FRATELLI B generado exitosamente:")
     print(f"  - Archivo: {result.ruta_archivo}")
     print(f"  - Hojas: {', '.join(result.hojas)}")
     print(f"  - Registros procesados: {result.registros_procesados}")
-    return [(Path(result.ruta_archivo), {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")})]
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -288,8 +317,12 @@ def _ejecutar_pipeline(
         metadata=metadata or {},
     )
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
-    pipeline = DeliveryPipeline([CaptureImageStep(), SendEmailStep(), SendWhatsAppStep()])
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s"
+    )
+    pipeline = DeliveryPipeline(
+        [CaptureImageStep(), SendEmailStep(), SendWhatsAppStep()]
+    )
     result = pipeline.run(artifact, delivery_config)
 
     print("\nPipeline de entrega:")
@@ -427,6 +460,42 @@ def cmd_resumen_mensual(args) -> int:
     return _cmd_resumen_legacy(args, {})
 
 
+def cmd_mision_imposible(args) -> int:
+    """Ejecuta el comando de mision imposible."""
+    if not args.config:
+        print("Error: mision-imposible requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path)
+    else:
+        print(
+            "Error: mision-imposible solo soporta el nuevo formato de configuracion JSON."
+        )
+        return 1
+
+
+def cmd_historico_fratelli(args) -> int:
+    """Ejecuta el comando de historico fratelli."""
+    if not args.config:
+        print("Error: historico-fratelli requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path)
+    else:
+        print(
+            "Error: historico-fratelli solo soporta el nuevo formato de configuracion JSON."
+        )
+        return 1
+
+
 def _cmd_resumen_legacy(args, cfg: dict) -> int:
     """Legacy resumen mensual flow."""
     # Resolver parametros: JSON tiene precedencia sobre args individuales
@@ -499,7 +568,7 @@ Ejemplos:
 
   # Legacy (config flat)
   python main.py ventas --config config.json
-"""
+""",
     )
 
     # Global option: --config-dir for running all configs
@@ -511,9 +580,7 @@ Ejemplos:
     )
 
     subparsers = parser.add_subparsers(
-        title="comandos",
-        description="Tipos de reportes disponibles",
-        dest="comando"
+        title="comandos", description="Tipos de reportes disponibles", dest="comando"
     )
 
     # Subcomando: ventas
@@ -529,20 +596,29 @@ Ejemplos:
         help=(
             "Archivo JSON con configuracion del reporte. "
             "Soporta formato nuevo (contactos + reportes) y legacy."
-        )
+        ),
     )
-    ventas_parser.add_argument("--desde", default=None, help="Fecha inicio (YYYY-MM-DD)")
+    ventas_parser.add_argument(
+        "--desde", default=None, help="Fecha inicio (YYYY-MM-DD)"
+    )
     ventas_parser.add_argument("--hasta", default=None, help="Fecha fin (YYYY-MM-DD)")
     ventas_parser.add_argument(
-        "--genericos", default=None,
-        help="Genericos a incluir, separados por coma (ej: CERVEZAS,AGUAS,VINOS)"
+        "--genericos",
+        default=None,
+        help="Genericos a incluir, separados por coma (ej: CERVEZAS,AGUAS,VINOS)",
     )
-    ventas_parser.add_argument("--output", default=None, help="Nombre del archivo de salida (sin extension)")
     ventas_parser.add_argument(
-        "--slicers", action="store_true", default=True,
-        help="Agregar slicers/segmentadores (solo Windows con Excel)"
+        "--output", default=None, help="Nombre del archivo de salida (sin extension)"
     )
-    ventas_parser.add_argument("--no-slicers", action="store_false", dest="slicers", help="No agregar slicers")
+    ventas_parser.add_argument(
+        "--slicers",
+        action="store_true",
+        default=True,
+        help="Agregar slicers/segmentadores (solo Windows con Excel)",
+    )
+    ventas_parser.add_argument(
+        "--no-slicers", action="store_false", dest="slicers", help="No agregar slicers"
+    )
     ventas_parser.set_defaults(func=cmd_ventas)
 
     # Subcomando: resumen-mensual
@@ -558,16 +634,35 @@ Ejemplos:
         help=(
             "Archivo JSON con configuracion del reporte. "
             "Soporta formato nuevo (contactos + reportes) y legacy."
-        )
+        ),
     )
-    resumen_parser.add_argument("--desde", default=None, help="Fecha inicio (YYYY-MM-DD)")
+    resumen_parser.add_argument(
+        "--desde", default=None, help="Fecha inicio (YYYY-MM-DD)"
+    )
     resumen_parser.add_argument("--hasta", default=None, help="Fecha fin (YYYY-MM-DD)")
     resumen_parser.add_argument(
-        "--genericos", default=None,
-        help="Genericos a incluir, separados por coma (ej: CERVEZAS,AGUAS,VINOS)"
+        "--genericos",
+        default=None,
+        help="Genericos a incluir, separados por coma (ej: CERVEZAS,AGUAS,VINOS)",
     )
-    resumen_parser.add_argument("--output", default=None, help="Nombre del archivo de salida (sin extension)")
+    resumen_parser.add_argument(
+        "--output", default=None, help="Nombre del archivo de salida (sin extension)"
+    )
     resumen_parser.set_defaults(func=cmd_resumen_mensual)
+
+    # Subcomando: historico-fratelli
+    historico_parser = subparsers.add_parser(
+        "historico-fratelli",
+        help="Historico de ventas FRATELLI B (2024-2026)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    historico_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    historico_parser.set_defaults(func=cmd_historico_fratelli)
 
     # Parsear argumentos
     args = parser.parse_args()
