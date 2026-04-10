@@ -45,7 +45,12 @@ def pivot_stock(df: pd.DataFrame, val_col: str, sucursales: list[str]) -> pd.Dat
     return pivot.reset_index()
 
 
-def build_excel(fecha_str: str, df: pd.DataFrame, output_dir: Path | None = None) -> Path:
+def build_excel(
+    fecha_str: str,
+    df: pd.DataFrame,
+    output_dir: Path | None = None,
+    nombre_prefijo: str = "Stock",
+) -> Path:
     """Build the Stock Excel file for one date. Returns the file path."""
     output = output_dir or DATA_OUTPUT
     output.mkdir(parents=True, exist_ok=True)
@@ -138,7 +143,7 @@ def build_excel(fecha_str: str, df: pd.DataFrame, output_dir: Path | None = None
     ws.freeze_panes = "D3"
 
     fecha_fmt = pd.to_datetime(fecha_str).strftime("%d-%m-%Y")
-    nombre = f"Stock - {fecha_fmt}.xlsx"
+    nombre = f"{nombre_prefijo} - {fecha_fmt}.xlsx"
     ruta = output / nombre
     wb.save(ruta)
     return ruta

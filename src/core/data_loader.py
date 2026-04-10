@@ -1067,17 +1067,29 @@ class DataLoader:
 
     # ── Stock Diario ────────────────────────────────────────────
 
-    def get_stock_diario(self, fecha: str) -> pd.DataFrame:
+    def get_stock_diario(
+        self, fecha: str, genericos: list[str] | None = None
+    ) -> pd.DataFrame:
         """Stock snapshot for a single date, grouped by article+sucursal.
 
         Args:
             fecha: Date string in 'YYYY-MM-DD' format.
+            genericos: Optional list of genericos to filter.
 
         Returns:
             DataFrame with columns: generico, marca, des_articulo, sucursal,
             cant_bultos, cant_htls.
         """
-        query = """
+        params = {"fecha": fecha}
+
+        if genericos:
+            placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
+            filtro_gen = f"AND a.generico IN ({placeholders})"
+            params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
+        else:
+            filtro_gen = ""
+
+        query = f"""
         SELECT
             a.generico,
             a.marca,
@@ -1089,10 +1101,11 @@ class DataLoader:
         JOIN gold.dim_articulo a ON a.id_articulo = f.id_articulo
         JOIN gold.dim_deposito d ON d.id_deposito = f.id_deposito
         WHERE f.date_stock = :fecha
+        {filtro_gen}
         GROUP BY a.generico, a.marca, a.des_articulo, d.des_sucursal
         ORDER BY a.generico, a.marca, a.des_articulo, d.des_sucursal
         """
-        return self.execute_query(query, {"fecha": fecha})
+        return self.execute_query(query, params)
 
 
 # Instancia por defecto para compatibilidad

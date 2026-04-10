@@ -125,7 +125,7 @@ class TestStockDiarioServiceSingleDate:
 
         assert len(result.archivos_generados) == 1
         assert len(result.fechas_sin_datos) == 0
-        mock_loader.get_stock_diario.assert_called_once_with("2026-04-10")
+        mock_loader.get_stock_diario.assert_called_once_with("2026-04-10", None)
 
     def test_generated_file_exists(self, tmp_path):
         from src.services.stock_diario.service import StockDiarioConfig, StockDiarioService
@@ -433,3 +433,136 @@ class TestDataCellValues:
         ]
         assert genericos_in_excel[0] == "AGUAS"
         assert genericos_in_excel[1] == "CERVEZAS"
+
+
+# ── Genericos filter ────────────────────────────────────────────────────────
+
+
+class TestStockDiarioGenericosFilter:
+    def test_passes_genericos_to_data_loader(self, tmp_path):
+        from src.services.stock_diario.service import StockDiarioConfig, StockDiarioService
+
+        mock_loader = MagicMock(spec=DataLoader)
+        mock_loader.get_stock_diario.return_value = _make_stock_df()
+
+        with patch("src.services.stock_diario.processor.DATA_OUTPUT", tmp_path):
+            service = StockDiarioService(data_loader=mock_loader)
+            config = StockDiarioConfig(
+                fecha_desde="2026-04-10",
+                fecha_hasta="2026-04-10",
+                genericos=["CERVEZAS", "AGUAS"],
+            )
+            service.generar_reporte(config)
+
+        mock_loader.get_stock_diario.assert_called_once_with(
+            "2026-04-10", ["CERVEZAS", "AGUAS"]
+        )
+
+
+# ── Supervisores split ──────────────────────────────────────────────────────
+
+
+class TestStockDiarioSupervisores:
+    def test_generates_one_file_per_supervisor(self, tmp_path):
+        from src.services.stock_diario.service import StockDiarioConfig, StockDiarioService
+
+        df = pd.DataFrame({
+            "generico": ["CERVEZAS"] * 3,
+            "marca": ["BRAHMA"] * 3,
+            "des_articulo": ["ART1"] * 3,
+            "sucursal": ["CAFAYATE", "METAN", "ORAN"],
+            "cant_bultos": [10, 20, 30],
+            "cant_htls": [100, 200, 300],
+        })
+
+        mock_loader = MagicMock(spec=DataLoader)
+        mock_loader.get_stock_diario.return_value = df
+
+        with patch("src.services.stock_diario.processor.DATA_OUTPUT", tmp_path):
+            service = StockDiarioService(data_loader=mock_loader)
+            config = StockDiarioConfig(
+                fecha_desde="2026-04-10",
+                fecha_hasta="2026-04-10",
+                supervisores={
+                    "Walter": ["CAFAYATE", "METAN"],
+                    "Adrian": ["ORAN"],
+                },
+            )
+            result = service.generar_reporte(config)
+
+        assert len(result.archivos_generados) == 2
+
+    def test_supervisor_file_named_correctly(self, tmp_path):
+        from src.services.stock_diario.service import StockDiarioConfig, StockDiarioService
+
+        mock_loader = MagicMock(spec=DataLoader)
+        mock_loader.get_stock_diario.return_value = _make_stock_df()
+
+        with patch("src.services.stock_diario.processor.DATA_OUTPUT", tmp_path):
+            service = StockDiarioService(data_loader=mock_loader)
+            config = StockDiarioConfig(
+                fecha_desde="2026-04-10",
+                fecha_hasta="2026-04-10",
+                supervisores={"Walter Vilte": ["CAFAYATE", "METAN", "SALTA"]},
+            )
+            result = service.generar_reporte(config)
+
+        assert len(result.archivos_generados) == 1
+        assert "Stock Walter Vilte" in result.archivos_generados[0].name
+        assert "10-04-2026" in result.archivos_generados[0].name
+
+    def test_supervisor_only_sees_own_sucursales(self, tmp_path):
+        from src.services.stock_diario.service import StockDiarioConfig, StockDiarioService
+
+        df = pd.DataFrame({
+            "generico": ["CERVEZAS"] * 3,
+            "marca": ["BRAHMA"] * 3,
+            "des_articulo": ["ART1"] * 3,
+            "sucursal": ["CAFAYATE", "METAN", "ORAN"],
+            "cant_bultos": [10, 20, 30],
+            "cant_htls": [100, 200, 300],
+        })
+
+        mock_loader = MagicMock(spec=DataLoader)
+        mock_loader.get_stock_diario.return_value = df
+
+        with patch("src.services.stock_diario.processor.DATA_OUTPUT", tmp_path):
+            service = StockDiarioService(data_loader=mock_loader)
+            config = StockDiarioConfig(
+                fecha_desde="2026-04-10",
+                fecha_hasta="2026-04-10",
+                supervisores={"Adrian": ["ORAN"]},
+            )
+            result = service.generar_reporte(config)
+
+        wb = load_workbook(result.archivos_generados[0])
+        ws = wb.active
+        # Only 1 sucursal → bultos col 4, htls col 5
+        assert ws.cell(row=2, column=4).value == "ORAN"
+        assert ws.cell(row=2, column=5).value == "ORAN"
+
+    def test_supervisor_empty_sucursales_skipped(self, tmp_path):
+        from src.services.stock_diario.service import StockDiarioConfig, StockDiarioService
+
+        df = pd.DataFrame({
+            "generico": ["CERVEZAS"],
+            "marca": ["BRAHMA"],
+            "des_articulo": ["ART1"],
+            "sucursal": ["CAFAYATE"],
+            "cant_bultos": [10],
+            "cant_htls": [100],
+        })
+
+        mock_loader = MagicMock(spec=DataLoader)
+        mock_loader.get_stock_diario.return_value = df
+
+        with patch("src.services.stock_diario.processor.DATA_OUTPUT", tmp_path):
+            service = StockDiarioService(data_loader=mock_loader)
+            config = StockDiarioConfig(
+                fecha_desde="2026-04-10",
+                fecha_hasta="2026-04-10",
+                supervisores={"Adrian": ["ORAN"]},  # no data for ORAN
+            )
+            result = service.generar_reporte(config)
+
+        assert len(result.archivos_generados) == 0
