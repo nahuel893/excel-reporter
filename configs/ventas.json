@@ -1,15 +1,17 @@
 {
     "tipo": "ventas",
     "filtros": {
-        "fecha_desde": "2026-02-01",
-        "fecha_hasta": "2026-02-28",
+        "fecha_desde": "2026-04-01",
+        "fecha_hasta": "2026-04-30",
         "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
         "con_slicers": true,
-        "con_cobertura": true
+        "con_cobertura": true,
+        "enviar_email": false,
+        "enviar_whatsapp": false
     },
     "reportes": [
         {
-            "nombre": "Ventas Walter Vilte",
+            "nombre": "Ventas CCU - WV",
             "filtros": {
                 "supervisores": ["Walter Vilte"],
                 "sucursales": [
