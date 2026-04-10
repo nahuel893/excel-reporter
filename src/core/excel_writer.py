@@ -53,6 +53,7 @@ class SheetStyle:
         column_formats: Formatos especificos por nombre de columna
         column_groups: Lista de grupos de columnas colapsables
         summary_rows: Filas de resumen al inicio {etiqueta: valor}
+        subtotal_columns: Columnas que llevan formula SUBTOTAL(109,...) en summary area
         as_table: Convertir datos a tabla Excel nativa
         table_style: Estilo de tabla Excel (ej: 'TableStyleMedium9')
     """
@@ -63,6 +64,7 @@ class SheetStyle:
     column_formats: dict[str, ColumnFormat] = field(default_factory=dict)
     column_groups: list[ColumnGroup] = field(default_factory=list)
     summary_rows: dict[str, int | float | str] = field(default_factory=dict)
+    subtotal_columns: list[str] = field(default_factory=list)
     as_table: bool = True
     table_style: str = "TableStyleMedium9"
 
@@ -171,21 +173,70 @@ def _write_summary_rows(ws, style: SheetStyle) -> int:
     """Escribe filas de resumen al inicio de la hoja.
 
     Returns:
-        Numero de filas escritas (offset para los datos)
+        Numero de filas escritas (offset para los datos).
+        Si hay subtotal_columns, reserva una fila extra para las formulas.
     """
-    if not style.summary_rows:
+    if not style.summary_rows and not style.subtotal_columns:
         return 0
 
-    for r_idx, (label, value) in enumerate(style.summary_rows.items(), 1):
-        # Columna A: etiqueta en negrita
-        cell_label = ws.cell(row=r_idx, column=1, value=label)
-        cell_label.font = Font(bold=True)
+    rows_written = 0
 
-        # Columna B: valor
-        cell_value = ws.cell(row=r_idx, column=2, value=value)
+    if style.summary_rows:
+        for r_idx, (label, value) in enumerate(style.summary_rows.items(), 1):
+            # Columna A: etiqueta en negrita
+            cell_label = ws.cell(row=r_idx, column=1, value=label)
+            cell_label.font = Font(bold=True)
+
+            # Columna B: valor
+            ws.cell(row=r_idx, column=2, value=value)
+        rows_written = len(style.summary_rows)
 
     # Fila vacia de separacion
-    return len(style.summary_rows) + 1
+    rows_written += 1
+
+    # Si hay subtotales, reservar una fila mas (se escribe despues con _write_subtotal_row)
+    if style.subtotal_columns:
+        rows_written += 1
+
+    return rows_written
+
+
+def _write_subtotal_row(ws, df: pd.DataFrame, style: SheetStyle, row_offset: int):
+    """Escribe fila con formulas SUBTOTAL(109,...) para columnas indicadas.
+
+    Se ubica justo antes del header de la tabla (ultima fila del area summary).
+    Las formulas referencian el rango de datos (sin header) de cada columna.
+
+    Args:
+        ws: Worksheet de openpyxl
+        df: DataFrame con los datos
+        style: Estilo con subtotal_columns definidas
+        row_offset: Offset actual (filas de summary ya escritas)
+    """
+    if not style.subtotal_columns:
+        return
+
+    subtotal_row = row_offset  # fila justo antes del header de tabla
+    header_row = row_offset + 1
+    data_start = header_row + 1
+    data_end = header_row + len(df)
+
+    headers = list(df.columns)
+    col_to_idx = {name: idx + 1 for idx, name in enumerate(headers)}
+
+    # Label en columna A
+    label_cell = ws.cell(row=subtotal_row, column=1, value="Subtotales")
+    label_cell.font = Font(bold=True)
+
+    for col_name in style.subtotal_columns:
+        col_idx = col_to_idx.get(col_name)
+        if col_idx is None:
+            continue
+        col_letter = get_column_letter(col_idx)
+        formula = f"=SUBTOTAL(109,{col_letter}{data_start}:{col_letter}{data_end})"
+        cell = ws.cell(row=subtotal_row, column=col_idx, value=formula)
+        cell.number_format = style.column_formats.get(col_name, ColumnFormat()).number_format or style.numeric_format
+        cell.font = Font(bold=True)
 
 
 def _apply_table_format(ws, df: pd.DataFrame, style: SheetStyle, header_row: int):
@@ -240,6 +291,11 @@ def _write_sheet(ws, df: pd.DataFrame, style: SheetStyle):
             _apply_cell_format(cell, col_name, style, is_header=(r_idx == 1))
 
     header_row = row_offset + 1
+
+    # Escribir formulas SUBTOTAL en la fila reservada (justo antes del header)
+    if style.subtotal_columns:
+        _write_subtotal_row(ws, df, style, row_offset)
+
     _auto_fit_columns(ws, style, header_row=header_row)
     _apply_column_groups(ws, df, style)
     _apply_table_format(ws, df, style, header_row=header_row)
