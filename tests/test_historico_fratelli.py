@@ -28,6 +28,7 @@ def _make_test_data():
         "marca": ["FRATELLI", "FRATELLI", "OTRA", "FRATELLI", "OTRA", "FRATELLI"],
         "id_lista_precio": [1, 1, 2, 1, 2, 1],
         "cantidad": [100, 200, 50, 300, 75, 150],
+        "descuentos": [500, 1000, 250, 1500, 375, 750],
     })
 
 
@@ -201,7 +202,7 @@ class TestHistoricoFratelliService:
     def test_empty_data_produces_valid_excel(self, tmp_path):
         mock_loader = MagicMock(spec=DataLoader)
         mock_loader.get_ventas_historico_fratelli.return_value = pd.DataFrame(
-            columns=["anio", "mes", "marca", "id_lista_precio", "cantidad"]
+            columns=["anio", "mes", "marca", "id_lista_precio", "cantidad", "descuentos"]
         )
 
         with patch("src.services.historico_fratelli.service.DATA_OUTPUT", tmp_path):
