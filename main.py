@@ -137,6 +137,8 @@ def _run_reportes(report_config, contactos) -> int:
             artifacts = _run_mision_report(report, merged)
         elif report_config.tipo == "historico-fratelli":
             artifacts = _run_historico_fratelli_report(report, merged)
+        elif report_config.tipo == "stock-diario":
+            artifacts = _run_stock_diario_report(report, merged)
         else:
             print(f"Error: tipo de reporte desconocido: {report_config.tipo}")
             return 1
@@ -257,6 +259,31 @@ def _run_mision_report(report, merged: dict) -> list[tuple[Path, dict]]:
             Path(result.ruta_archivo),
             {"nombre": report.nombre, "fecha": merged["fecha_hasta"]},
         )
+    ]
+
+
+def _run_stock_diario_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate stock-diario report(s). Returns list of (path, metadata) tuples."""
+    from src.services.stock_diario import StockDiarioConfig, StockDiarioService
+
+    config = StockDiarioConfig(
+        fecha_desde=merged["fecha_desde"],
+        fecha_hasta=merged["fecha_hasta"],
+        nombre_archivo=report.nombre,
+    )
+    result = StockDiarioService().generar_reporte(config)
+
+    print("Stock Diario generado exitosamente:")
+    print(f"  - Archivos generados: {len(result.archivos_generados)}")
+    if result.fechas_sin_datos:
+        print(f"  - Fechas sin datos: {', '.join(result.fechas_sin_datos)}")
+
+    return [
+        (
+            Path(ruta),
+            {"nombre": report.nombre, "fecha": ruta.stem},
+        )
+        for ruta in result.archivos_generados
     ]
 
 
@@ -496,6 +523,24 @@ def cmd_historico_fratelli(args) -> int:
         return 1
 
 
+def cmd_stock_diario(args) -> int:
+    """Ejecuta el comando de stock diario."""
+    if not args.config:
+        print("Error: stock-diario requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path)
+    else:
+        print(
+            "Error: stock-diario solo soporta el nuevo formato de configuracion JSON."
+        )
+        return 1
+
+
 def _cmd_resumen_legacy(args, cfg: dict) -> int:
     """Legacy resumen mensual flow."""
     # Resolver parametros: JSON tiene precedencia sobre args individuales
@@ -663,6 +708,20 @@ Ejemplos:
         help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
     )
     historico_parser.set_defaults(func=cmd_historico_fratelli)
+
+    # Subcomando: stock-diario
+    stock_parser = subparsers.add_parser(
+        "stock-diario",
+        help="Reporte de stock diario por articulo y sucursal",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    stock_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    stock_parser.set_defaults(func=cmd_stock_diario)
 
     # Parsear argumentos
     args = parser.parse_args()

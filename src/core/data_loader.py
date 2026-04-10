@@ -1065,6 +1065,35 @@ class DataLoader:
             return None
         return pd.to_datetime(df["ultima_venta"].iloc[0]).date()
 
+    # ── Stock Diario ────────────────────────────────────────────
+
+    def get_stock_diario(self, fecha: str) -> pd.DataFrame:
+        """Stock snapshot for a single date, grouped by article+sucursal.
+
+        Args:
+            fecha: Date string in 'YYYY-MM-DD' format.
+
+        Returns:
+            DataFrame with columns: generico, marca, des_articulo, sucursal,
+            cant_bultos, cant_htls.
+        """
+        query = """
+        SELECT
+            a.generico,
+            a.marca,
+            a.des_articulo,
+            d.des_sucursal AS sucursal,
+            SUM(f.cant_bultos) AS cant_bultos,
+            SUM(f.cantidad_total_htls) AS cant_htls
+        FROM gold.fact_stock f
+        JOIN gold.dim_articulo a ON a.id_articulo = f.id_articulo
+        JOIN gold.dim_deposito d ON d.id_deposito = f.id_deposito
+        WHERE f.date_stock = :fecha
+        GROUP BY a.generico, a.marca, a.des_articulo, d.des_sucursal
+        ORDER BY a.generico, a.marca, a.des_articulo, d.des_sucursal
+        """
+        return self.execute_query(query, {"fecha": fecha})
+
 
 # Instancia por defecto para compatibilidad
 _default_loader = None

@@ -1,0 +1,10 @@
+{
+    "tipo": "stock-diario",
+    "filtros": {
+        "fecha_desde": "2026-04-10",
+        "fecha_hasta": "2026-04-10"
+    },
+    "reportes": [
+        {"nombre": "Stock Diario"}
+    ]
+}
