@@ -2,9 +2,50 @@
     "tipo": "stock-diario",
     "filtros": {
         "fecha_desde": "2026-04-10",
-        "fecha_hasta": "2026-04-10"
+        "fecha_hasta": "2026-04-10",
+        "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
     },
     "reportes": [
-        {"nombre": "Stock Diario"}
+        {
+            "nombre": "Stock CCU - WV",
+            "filtros": {
+                "supervisores": ["Walter Vilte"],
+                "sucursales": [
+                    "SUCURSAL CAFAYATE", "SUCURSAL ABRA PAMPA", "SUCURSAL SAN PEDRO",
+                    "SUCURSAL JOAQUIN V GONZALEZ", "SUCURSAL LA QUIACA", "SUCURSAL METAN",
+                    "SUCURSAL HUMAHUACA", "SUCURSAL ORAN", "SUCURSAL TARTAGAL",
+                    "SUCURSAL MAIMARA", "SUCURSAL GUEMES", "SUCURSAL LIBERTADOR",
+                    "SUCURSAL PERICO", "CASA CENTRAL"
+                ]
+            }
+        },
+        {
+            "nombre": "Stock Antonio Cabrerizo",
+            "filtros": {
+                "supervisores": ["Antonio Cabrerizo"],
+                "sucursales": ["CASA CENTRAL"]
+            }
+        },
+        {
+            "nombre": "Stock Adrian Garcia",
+            "filtros": {
+                "supervisores": ["Adrian Garcia"],
+                "sucursales": [
+                    "SUCURSAL CAFAYATE", "SUCURSAL JOAQUIN V GONZALEZ",
+                    "SUCURSAL METAN", "SUCURSAL GUEMES"
+                ]
+            }
+        },
+        {
+            "nombre": "Stock Hernan Yapura",
+            "filtros": {
+                "supervisores": ["Hernan Yapura"],
+                "sucursales": [
+                    "SUCURSAL ABRA PAMPA", "SUCURSAL SAN PEDRO", "SUCURSAL LA QUIACA",
+                    "SUCURSAL HUMAHUACA", "SUCURSAL ORAN", "SUCURSAL TARTAGAL",
+                    "SUCURSAL MAIMARA", "SUCURSAL LIBERTADOR", "SUCURSAL PERICO"
+                ]
+            }
+        }
     ]
 }

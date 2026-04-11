@@ -266,12 +266,16 @@ def _run_stock_diario_report(report, merged: dict) -> list[tuple[Path, dict]]:
     """Generate stock-diario report(s). Returns list of (path, metadata) tuples."""
     from src.services.stock_diario import StockDiarioConfig, StockDiarioService
 
+    supervisores = merged.get("supervisores")
+    supervisor_name = supervisores[0] if supervisores else None
+
     config = StockDiarioConfig(
         fecha_desde=merged["fecha_desde"],
         fecha_hasta=merged["fecha_hasta"],
         genericos=merged.get("genericos"),
         nombre_archivo=report.nombre,
-        supervisores=merged.get("supervisores"),
+        sucursales=merged.get("sucursales"),
+        supervisor=supervisor_name,
     )
     result = StockDiarioService().generar_reporte(config)
 
