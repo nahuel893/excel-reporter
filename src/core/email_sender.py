@@ -33,6 +33,7 @@ class EmailSender:
         asunto: str,
         cuerpo: str,
         adjuntos: list[Path] | None = None,
+        cc: list[str] | None = None,
     ) -> None:
         """
         Envia un email con adjuntos opcionales.
@@ -42,6 +43,7 @@ class EmailSender:
             asunto: Asunto del email
             cuerpo: Cuerpo del email en texto plano
             adjuntos: Lista de paths a archivos para adjuntar
+            cc: Lista de direcciones en copia
 
         Raises:
             smtplib.SMTPException: Si el envio falla (logeado, re-raised)
@@ -49,6 +51,8 @@ class EmailSender:
         msg = MIMEMultipart()
         msg["From"] = self._config["user"]
         msg["To"] = ", ".join(destinatarios)
+        if cc:
+            msg["Cc"] = ", ".join(cc)
         msg["Subject"] = asunto
         msg.attach(MIMEText(cuerpo, "plain", "utf-8"))
 
@@ -65,19 +69,21 @@ class EmailSender:
         password = self._config["password"]
         use_ssl = self._config.get("use_ssl", False)
 
+        all_recipients = destinatarios + (cc or [])
+
         try:
             if use_ssl:
                 with smtplib.SMTP_SSL(host, port) as server:
                     server.login(user, password)
-                    server.sendmail(user, destinatarios, msg.as_string())
+                    server.sendmail(user, all_recipients, msg.as_string())
             else:
                 with smtplib.SMTP(host, port) as server:
                     server.ehlo()
                     server.starttls()
                     server.login(user, password)
-                    server.sendmail(user, destinatarios, msg.as_string())
+                    server.sendmail(user, all_recipients, msg.as_string())
 
-            logger.info("Email enviado a %s | asunto: %s", destinatarios, asunto)
+            logger.info("Email enviado a %s (cc: %s) | asunto: %s", destinatarios, cc or [], asunto)
 
         except smtplib.SMTPException as exc:
             logger.error("Error al enviar email: %s", exc)

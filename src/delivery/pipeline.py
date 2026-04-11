@@ -27,6 +27,7 @@ class CaptureConfig(BaseModel):
 class EmailConfig(BaseModel):
     """Configuracion para envio por email."""
     destinatarios: list[str]
+    cc: list[str] = []
     asunto: str | None = None
     adjuntos: list[Literal["excel", "imagen"]] = ["excel"]
 

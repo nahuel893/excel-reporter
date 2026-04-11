@@ -47,11 +47,13 @@ class SendEmailStep(DeliveryStep):
                 asunto=asunto,
                 cuerpo=_generar_cuerpo(artifact),
                 adjuntos=adjuntos,
+                cc=config.email.cc or None,
             )
+            cc_msg = f" (cc: {config.email.cc})" if config.email.cc else ""
             return StepResult(
                 status="success",
                 step_name="SendEmailStep",
-                message=f"Email enviado a {config.email.destinatarios}",
+                message=f"Email enviado a {config.email.destinatarios}{cc_msg}",
             )
         except Exception as exc:
             logger.error("Error al enviar email: %s", exc)

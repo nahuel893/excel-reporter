@@ -58,6 +58,7 @@ def resolve_delivery(
         return None
 
     email_recipients: list[str] = []
+    email_cc: list[str] = []
     whatsapp_targets: list[str] = []
 
     for contact_name, target in report.enviar_a.items():
@@ -72,6 +73,14 @@ def resolve_delivery(
             else:
                 logger.warning(
                     "Contact '%s' has via 'email' but no email address", contact_name
+                )
+
+        if "email_cc" in target.via and enviar_email:
+            if contact.email:
+                email_cc.append(contact.email)
+            else:
+                logger.warning(
+                    "Contact '%s' has via 'email_cc' but no email address", contact_name
                 )
 
         if "whatsapp" in target.via and enviar_whatsapp:
@@ -94,7 +103,7 @@ def resolve_delivery(
 
     return DeliveryConfig(
         capture_image=capture,
-        email=EmailConfig(destinatarios=email_recipients) if email_recipients else None,
+        email=EmailConfig(destinatarios=email_recipients, cc=email_cc) if email_recipients else None,
         whatsapp=WhatsAppConfig(grupos=whatsapp_targets) if whatsapp_targets else None,
     )
 

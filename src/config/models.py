@@ -31,7 +31,7 @@ class ContactInfo(BaseModel):
 class DeliveryTarget(BaseModel):
     """How a specific contact receives a specific report."""
 
-    via: list[Literal["email", "whatsapp"]]
+    via: list[Literal["email", "email_cc", "whatsapp"]]
 
     @model_validator(mode="after")
     def via_not_empty(self):
