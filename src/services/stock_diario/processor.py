@@ -104,6 +104,7 @@ def build_excel(
         cell.font = _HEADER_FONT
         cell.fill = _HEADER_FILL
         cell.border = _THIN_BORDER
+        cell.alignment = Alignment(horizontal="center", wrap_text=True)
 
     for i, suc in enumerate(sucursales):
         # Bultos header
