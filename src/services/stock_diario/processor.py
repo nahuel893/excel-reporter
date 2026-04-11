@@ -24,7 +24,7 @@ _THIN_BORDER = Border(
     top=Side(style="thin"), bottom=Side(style="thin"),
 )
 
-DESC_COLS = ["Generico", "Marca", "Articulo"]
+DESC_COLS = ["Articulo", "Marca", "Generico"]
 DESC_WIDTH = 22
 SUC_WIDTH = 9.5
 
@@ -69,7 +69,7 @@ def build_excel(
         df.groupby(["generico", "marca", "des_articulo"])
         .size()
         .reset_index()[["generico", "marca", "des_articulo"]]
-        .sort_values(["generico", "marca", "des_articulo"])
+        .sort_values(["des_articulo", "marca", "generico"])
         .reset_index(drop=True)
     )
 
@@ -121,9 +121,9 @@ def build_excel(
 
     # ── Row 3+: Data ──
     for r_idx, (_, art) in enumerate(articles.iterrows(), 3):
-        ws.cell(row=r_idx, column=1, value=art["generico"])
+        ws.cell(row=r_idx, column=1, value=art["des_articulo"])
         ws.cell(row=r_idx, column=2, value=art["marca"])
-        ws.cell(row=r_idx, column=3, value=art["des_articulo"])
+        ws.cell(row=r_idx, column=3, value=art["generico"])
         for s_idx, suc in enumerate(sucursales):
             key = (art["generico"], art["marca"], art["des_articulo"], suc)
             val_b = bultos_lookup.get(key, 0)

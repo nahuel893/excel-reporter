@@ -294,9 +294,9 @@ class TestHeaderRowContent:
     def test_desc_col_headers(self, tmp_path):
         wb = self._build(tmp_path)
         ws = wb.active
-        assert ws.cell(row=2, column=1).value == "Generico"
+        assert ws.cell(row=2, column=1).value == "Articulo"
         assert ws.cell(row=2, column=2).value == "Marca"
-        assert ws.cell(row=2, column=3).value == "Articulo"
+        assert ws.cell(row=2, column=3).value == "Generico"
 
     def test_sucursal_headers_appear_in_bultos(self, tmp_path):
         wb = self._build(tmp_path)
@@ -402,10 +402,10 @@ class TestDataCellValues:
         wb = load_workbook(ruta)
         ws = wb.active
 
-        # Row 3 = first data row
-        assert ws.cell(row=3, column=1).value == "CERVEZAS"
+        # Row 3 = first data row (order: Articulo, Marca, Generico)
+        assert ws.cell(row=3, column=1).value == "BRAHMA LATA 473"
         assert ws.cell(row=3, column=2).value == "BRAHMA"
-        assert ws.cell(row=3, column=3).value == "BRAHMA LATA 473"
+        assert ws.cell(row=3, column=3).value == "CERVEZAS"
         # Bultos value (col 4 = first sucursal)
         assert ws.cell(row=3, column=4).value == 42
         # HTLs value (col 4 + 1 suc = col 5)
@@ -426,13 +426,14 @@ class TestDataCellValues:
         wb = load_workbook(ruta)
         ws = wb.active
 
-        # Should be alphabetically sorted by generico, marca, des_articulo
-        genericos_in_excel = [
+        # Should be alphabetically sorted by des_articulo, marca, generico
+        # Col 1 = Articulo: BRAHMA LATA < VDS 500ML
+        articulos_in_excel = [
             ws.cell(row=3, column=1).value,
             ws.cell(row=4, column=1).value,
         ]
-        assert genericos_in_excel[0] == "AGUAS"
-        assert genericos_in_excel[1] == "CERVEZAS"
+        assert articulos_in_excel[0] == "BRAHMA LATA"
+        assert articulos_in_excel[1] == "VDS 500ML"
 
 
 # ── Genericos filter ────────────────────────────────────────────────────────
