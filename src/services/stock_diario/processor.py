@@ -17,7 +17,8 @@ _BULTOS_FILL = PatternFill(fill_type="solid", fgColor="4472C4")
 _HTLS_FILL = PatternFill(fill_type="solid", fgColor="70AD47")
 _BANNER_FONT = Font(bold=True, color="FFFFFF", size=12)
 _HEADER_FILL = PatternFill(fill_type="solid", fgColor="D9D9D9")
-_HEADER_FONT = Font(bold=True)
+_HEADER_FONT = Font(bold=True, size=8)
+_HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
 _NUMBER_FORMAT = "#,##0"
 _THIN_BORDER = Border(
     left=Side(style="thin"), right=Side(style="thin"),
@@ -104,7 +105,7 @@ def build_excel(
         cell.font = _HEADER_FONT
         cell.fill = _HEADER_FILL
         cell.border = _THIN_BORDER
-        cell.alignment = Alignment(horizontal="center", wrap_text=True)
+        cell.alignment = _HEADER_ALIGNMENT
 
     for i, suc in enumerate(sucursales):
         # Bultos header
@@ -112,13 +113,13 @@ def build_excel(
         cell.font = _HEADER_FONT
         cell.fill = _HEADER_FILL
         cell.border = _THIN_BORDER
-        cell.alignment = Alignment(horizontal="center", wrap_text=True)
+        cell.alignment = _HEADER_ALIGNMENT
         # HTLs header
         cell = ws.cell(row=2, column=htls_start + i, value=suc)
         cell.font = _HEADER_FONT
         cell.fill = _HEADER_FILL
         cell.border = _THIN_BORDER
-        cell.alignment = Alignment(horizontal="center", wrap_text=True)
+        cell.alignment = _HEADER_ALIGNMENT
 
     # ── Row 3+: Data ──
     for r_idx, (_, art) in enumerate(articles.iterrows(), 3):
