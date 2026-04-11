@@ -24,7 +24,7 @@ _THIN_BORDER = Border(
     top=Side(style="thin"), bottom=Side(style="thin"),
 )
 
-DESC_COLS = ["Articulo", "Marca", "Generico"]
+DESC_COLS = ["Codigo", "Articulo", "Marca", "Generico"]
 DESC_WIDTH = 22
 SUC_WIDTH = 9.5
 
@@ -66,9 +66,9 @@ def build_excel(
 
     # Build article list (sorted) and lookup dicts
     articles = (
-        df.groupby(["generico", "marca", "des_articulo"])
+        df.groupby(["id_articulo", "generico", "marca", "des_articulo"])
         .size()
-        .reset_index()[["generico", "marca", "des_articulo"]]
+        .reset_index()[["id_articulo", "generico", "marca", "des_articulo"]]
         .sort_values(["des_articulo", "marca", "generico"])
         .reset_index(drop=True)
     )
@@ -76,7 +76,7 @@ def build_excel(
     bultos_lookup: dict = {}
     htls_lookup: dict = {}
     for _, r in df.iterrows():
-        key = (r["generico"], r["marca"], r["des_articulo"], r["sucursal"])
+        key = (r["id_articulo"], r["sucursal"])
         bultos_lookup[key] = int(r["cant_bultos"]) if pd.notna(r["cant_bultos"]) else 0
         htls_lookup[key] = int(r["cant_htls"]) if pd.notna(r["cant_htls"]) else 0
 
@@ -121,11 +121,12 @@ def build_excel(
 
     # ── Row 3+: Data ──
     for r_idx, (_, art) in enumerate(articles.iterrows(), 3):
-        ws.cell(row=r_idx, column=1, value=art["des_articulo"])
-        ws.cell(row=r_idx, column=2, value=art["marca"])
-        ws.cell(row=r_idx, column=3, value=art["generico"])
+        ws.cell(row=r_idx, column=1, value=art["id_articulo"])
+        ws.cell(row=r_idx, column=2, value=art["des_articulo"])
+        ws.cell(row=r_idx, column=3, value=art["marca"])
+        ws.cell(row=r_idx, column=4, value=art["generico"])
         for s_idx, suc in enumerate(sucursales):
-            key = (art["generico"], art["marca"], art["des_articulo"], suc)
+            key = (art["id_articulo"], suc)
             val_b = bultos_lookup.get(key, 0)
             cell = ws.cell(row=r_idx, column=bultos_start + s_idx, value=val_b)
             cell.number_format = _NUMBER_FORMAT
@@ -140,7 +141,7 @@ def build_excel(
         ws.column_dimensions[get_column_letter(i)].width = SUC_WIDTH
 
     # ── Freeze panes ──
-    ws.freeze_panes = "D3"
+    ws.freeze_panes = "E3"
 
     fecha_fmt = pd.to_datetime(fecha_str).strftime("%d-%m-%Y")
     nombre = f"{nombre_prefijo} - {fecha_fmt}.xlsx"

@@ -28,6 +28,7 @@ from src.core.data_loader import DataLoader
 def _make_stock_df():
     """Minimal valid stock DataFrame with 3 articles × 2 sucursales."""
     return pd.DataFrame({
+        "id_articulo": [1001, 1001, 1002, 1002, 1003, 1003],
         "generico": ["CERVEZAS", "CERVEZAS", "AGUAS", "AGUAS", "VINOS", "VINOS"],
         "marca": ["BRAHMA", "BRAHMA", "VILLA DEL SUR", "VILLA DEL SUR", "NAVARRO", "NAVARRO"],
         "des_articulo": ["BRAHMA LATA 473", "BRAHMA LATA 473", "VDS 500ML", "VDS 500ML", "NAV 750ML", "NAV 750ML"],
@@ -40,6 +41,7 @@ def _make_stock_df():
 def _make_single_article_df():
     """One article, one sucursal."""
     return pd.DataFrame({
+        "id_articulo": [1001],
         "generico": ["CERVEZAS"],
         "marca": ["BRAHMA"],
         "des_articulo": ["BRAHMA LATA 473"],
@@ -241,7 +243,7 @@ class TestBannerRowStructure:
         wb = self._build(tmp_path)
         ws = wb.active
         # Row 1 should contain "BULTOS" in column 4 (after 3 desc cols)
-        bultos_cell = ws.cell(row=1, column=4)
+        bultos_cell = ws.cell(row=1, column=5)
         assert bultos_cell.value == "BULTOS"
 
     def test_htls_banner_text(self, tmp_path):
@@ -249,14 +251,14 @@ class TestBannerRowStructure:
         ws = wb.active
         df = _make_stock_df()
         n_suc = len(df["sucursal"].unique())
-        htls_start = 4 + n_suc
+        htls_start = 5 + n_suc
         htls_cell = ws.cell(row=1, column=htls_start)
         assert htls_cell.value == "HTLs"
 
     def test_bultos_banner_fill_color(self, tmp_path):
         wb = self._build(tmp_path)
         ws = wb.active
-        bultos_cell = ws.cell(row=1, column=4)
+        bultos_cell = ws.cell(row=1, column=5)
         # Should have a solid fill (non-empty)
         assert bultos_cell.fill is not None
         assert bultos_cell.fill.fill_type == "solid"
@@ -268,7 +270,7 @@ class TestBannerRowStructure:
         ws = wb.active
         df = _make_stock_df()
         n_suc = len(df["sucursal"].unique())
-        htls_start = 4 + n_suc
+        htls_start = 5 + n_suc
         htls_cell = ws.cell(row=1, column=htls_start)
         assert htls_cell.fill is not None
         assert htls_cell.fill.fill_type == "solid"
@@ -278,7 +280,7 @@ class TestBannerRowStructure:
     def test_banner_cells_are_bold(self, tmp_path):
         wb = self._build(tmp_path)
         ws = wb.active
-        bultos_cell = ws.cell(row=1, column=4)
+        bultos_cell = ws.cell(row=1, column=5)
         assert bultos_cell.font.bold is True
 
 
@@ -294,9 +296,10 @@ class TestHeaderRowContent:
     def test_desc_col_headers(self, tmp_path):
         wb = self._build(tmp_path)
         ws = wb.active
-        assert ws.cell(row=2, column=1).value == "Articulo"
-        assert ws.cell(row=2, column=2).value == "Marca"
-        assert ws.cell(row=2, column=3).value == "Generico"
+        assert ws.cell(row=2, column=1).value == "Codigo"
+        assert ws.cell(row=2, column=2).value == "Articulo"
+        assert ws.cell(row=2, column=3).value == "Marca"
+        assert ws.cell(row=2, column=4).value == "Generico"
 
     def test_sucursal_headers_appear_in_bultos(self, tmp_path):
         wb = self._build(tmp_path)
@@ -304,7 +307,7 @@ class TestHeaderRowContent:
         df = _make_stock_df()
         sucursales = sorted(df["sucursal"].unique().tolist())
         for i, suc in enumerate(sucursales):
-            cell = ws.cell(row=2, column=4 + i)
+            cell = ws.cell(row=2, column=5 + i)
             assert cell.value == suc
 
     def test_sucursal_headers_appear_in_htls(self, tmp_path):
@@ -313,7 +316,7 @@ class TestHeaderRowContent:
         df = _make_stock_df()
         sucursales = sorted(df["sucursal"].unique().tolist())
         n_suc = len(sucursales)
-        htls_start = 4 + n_suc
+        htls_start = 5 + n_suc
         for i, suc in enumerate(sucursales):
             cell = ws.cell(row=2, column=htls_start + i)
             assert cell.value == suc
@@ -327,6 +330,7 @@ class TestSucursalAlphabeticalOrdering:
         from src.services.stock_diario.processor import build_excel
 
         df = pd.DataFrame({
+            "id_articulo": [3001] * 3,
             "generico": ["CERVEZAS"] * 3,
             "marca": ["BRAHMA"] * 3,
             "des_articulo": ["ART1"] * 3,
@@ -338,9 +342,9 @@ class TestSucursalAlphabeticalOrdering:
         wb = load_workbook(ruta)
         ws = wb.active
 
-        assert ws.cell(row=2, column=4).value == "ALFARO"
-        assert ws.cell(row=2, column=5).value == "METAN"
-        assert ws.cell(row=2, column=6).value == "ZARAGOZA"
+        assert ws.cell(row=2, column=5).value == "ALFARO"
+        assert ws.cell(row=2, column=6).value == "METAN"
+        assert ws.cell(row=2, column=7).value == "ZARAGOZA"
 
 
 # ── TS-008: Zero values shown as 0 ───────────────────────────────────────────
@@ -352,6 +356,7 @@ class TestZeroValues:
 
         # Only CAFAYATE has stock for ART1; SALTA has none
         df = pd.DataFrame({
+            "id_articulo": [4001, 4001],
             "generico": ["CERVEZAS", "CERVEZAS"],
             "marca": ["BRAHMA", "BRAHMA"],
             "des_articulo": ["ART1", "ART1"],
@@ -366,7 +371,7 @@ class TestZeroValues:
         sucursales = ["CAFAYATE", "SALTA"]
         # Data starts at row 3
         salta_idx = sucursales.index("SALTA")
-        cell = ws.cell(row=3, column=4 + salta_idx)
+        cell = ws.cell(row=3, column=5 + salta_idx)
         assert cell.value == 0
 
 
@@ -380,7 +385,7 @@ class TestFrozenPanes:
         ruta = build_excel("2026-04-10", _make_stock_df(), output_dir=tmp_path)
         wb = load_workbook(ruta)
         ws = wb.active
-        assert ws.freeze_panes == "D3"
+        assert ws.freeze_panes == "E3"
 
 
 # ── TS-011: Data correctness in cells ─────────────────────────────────────────
@@ -391,6 +396,7 @@ class TestDataCellValues:
         from src.services.stock_diario.processor import build_excel
 
         df = pd.DataFrame({
+            "id_articulo": [5001],
             "generico": ["CERVEZAS"],
             "marca": ["BRAHMA"],
             "des_articulo": ["BRAHMA LATA 473"],
@@ -402,19 +408,21 @@ class TestDataCellValues:
         wb = load_workbook(ruta)
         ws = wb.active
 
-        # Row 3 = first data row (order: Articulo, Marca, Generico)
-        assert ws.cell(row=3, column=1).value == "BRAHMA LATA 473"
-        assert ws.cell(row=3, column=2).value == "BRAHMA"
-        assert ws.cell(row=3, column=3).value == "CERVEZAS"
-        # Bultos value (col 4 = first sucursal)
-        assert ws.cell(row=3, column=4).value == 42
-        # HTLs value (col 4 + 1 suc = col 5)
-        assert ws.cell(row=3, column=5).value == 420
+        # Row 3 = first data row (order: Codigo, Articulo, Marca, Generico)
+        assert ws.cell(row=3, column=1).value == 5001
+        assert ws.cell(row=3, column=2).value == "BRAHMA LATA 473"
+        assert ws.cell(row=3, column=3).value == "BRAHMA"
+        assert ws.cell(row=3, column=4).value == "CERVEZAS"
+        # Bultos value (col 5 = first sucursal)
+        assert ws.cell(row=3, column=5).value == 42
+        # HTLs value (col 5 + 1 suc = col 6)
+        assert ws.cell(row=3, column=6).value == 420
 
     def test_multiple_articles_in_correct_rows(self, tmp_path):
         from src.services.stock_diario.processor import build_excel
 
         df = pd.DataFrame({
+            "id_articulo": [2001, 2002],
             "generico": ["AGUAS", "CERVEZAS"],
             "marca": ["VDS", "BRAHMA"],
             "des_articulo": ["VDS 500ML", "BRAHMA LATA"],
@@ -427,10 +435,10 @@ class TestDataCellValues:
         ws = wb.active
 
         # Should be alphabetically sorted by des_articulo, marca, generico
-        # Col 1 = Articulo: BRAHMA LATA < VDS 500ML
+        # Col 2 = Articulo: BRAHMA LATA < VDS 500ML
         articulos_in_excel = [
-            ws.cell(row=3, column=1).value,
-            ws.cell(row=4, column=1).value,
+            ws.cell(row=3, column=2).value,
+            ws.cell(row=4, column=2).value,
         ]
         assert articulos_in_excel[0] == "BRAHMA LATA"
         assert articulos_in_excel[1] == "VDS 500ML"
@@ -468,6 +476,7 @@ class TestStockDiarioSucursalesFilter:
         from src.services.stock_diario.service import StockDiarioConfig, StockDiarioService
 
         df = pd.DataFrame({
+            "id_articulo": [6001] * 3,
             "generico": ["CERVEZAS"] * 3,
             "marca": ["BRAHMA"] * 3,
             "des_articulo": ["ART1"] * 3,
@@ -490,9 +499,9 @@ class TestStockDiarioSucursalesFilter:
 
         wb = load_workbook(result.archivos_generados[0])
         ws = wb.active
-        # Only 1 sucursal → bultos col 4, htls col 5
-        assert ws.cell(row=2, column=4).value == "ORAN"
+        # Only 1 sucursal → bultos col 5, htls col 6
         assert ws.cell(row=2, column=5).value == "ORAN"
+        assert ws.cell(row=2, column=6).value == "ORAN"
 
     def test_supervisor_name_in_filename(self, tmp_path):
         from src.services.stock_diario.service import StockDiarioConfig, StockDiarioService
@@ -518,6 +527,7 @@ class TestStockDiarioSucursalesFilter:
         from src.services.stock_diario.service import StockDiarioConfig, StockDiarioService
 
         df = pd.DataFrame({
+            "id_articulo": [7001],
             "generico": ["CERVEZAS"],
             "marca": ["BRAHMA"],
             "des_articulo": ["ART1"],

@@ -1091,6 +1091,7 @@ class DataLoader:
 
         query = f"""
         SELECT
+            a.id_articulo,
             a.generico,
             a.marca,
             a.des_articulo,
@@ -1102,8 +1103,8 @@ class DataLoader:
         JOIN gold.dim_deposito d ON d.id_deposito = f.id_deposito
         WHERE f.date_stock = :fecha
         {filtro_gen}
-        GROUP BY a.generico, a.marca, a.des_articulo, d.des_sucursal
-        ORDER BY a.generico, a.marca, a.des_articulo, d.des_sucursal
+        GROUP BY a.id_articulo, a.generico, a.marca, a.des_articulo, d.des_sucursal
+        ORDER BY a.des_articulo, a.marca, a.generico, d.des_sucursal
         """
         return self.execute_query(query, params)
 
