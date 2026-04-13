@@ -165,7 +165,8 @@ class DataLoader:
                 dc.id_ruta_fv1 AS id_ruta,
                 SUM(fv.cantidades_total) AS cantidad,
                 SUM(fv.cantidad_total_htls) AS cantidad_htls,
-                SUM(fv.subtotal_neto) AS monto
+                SUM(fv.subtotal_neto) AS monto,
+                SUM(fv.descuentos) AS descuentos
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
@@ -187,7 +188,8 @@ class DataLoader:
                 dc.id_ruta_fv1 AS id_ruta,
                 SUM(fv.cantidades_total) AS cantidad,
                 SUM(fv.cantidad_total_htls) AS cantidad_htls,
-                SUM(fv.subtotal_neto) AS monto
+                SUM(fv.subtotal_neto) AS monto,
+                SUM(fv.descuentos) AS descuentos
             FROM gold.fact_ventas fv
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
             LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal

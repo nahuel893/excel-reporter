@@ -147,6 +147,8 @@ def procesar_ventas_diarias(
         # Rellenar NaN con 0
         df[col_cantidad] = df[col_cantidad].fillna(0)
         df["monto"] = df["monto"].fillna(0)
+        if "descuentos" in df.columns:
+            df["descuentos"] = df["descuentos"].fillna(0)
 
     # Factor de tendencia
     factor_tendencia = calcular_factor_tendencia(fecha_desde, fecha_hasta)
@@ -170,23 +172,30 @@ def procesar_ventas_diarias(
         for col in pivot_dias.columns
     ]
 
-    # Calcular totales por marca (suma de cantidad y monto)
-    totales_marca = df.groupby(["sucursal", "generico", "marca"]).agg({
-        col_cantidad: "sum",
-        "monto": "sum"
-    }).reset_index()
-    totales_marca.columns = ["sucursal", "generico", "marca", "total_marca", "monto_marca"]
+    # Calcular totales por marca (suma de cantidad, monto y descuentos)
+    agg_cols = {col_cantidad: "sum", "monto": "sum"}
+    has_descuentos = "descuentos" in df.columns
+    if has_descuentos:
+        agg_cols["descuentos"] = "sum"
+    totales_marca = df.groupby(["sucursal", "generico", "marca"]).agg(agg_cols).reset_index()
+    rename_cols = ["sucursal", "generico", "marca", "total_marca", "monto_marca"]
+    if has_descuentos:
+        rename_cols.append("desc_marca")
+    totales_marca.columns = rename_cols
     totales_marca["tend_marca"] = totales_marca["total_marca"] * factor_tendencia
 
     # Merge pivot con totales
     df_merged = pivot_dias.merge(totales_marca, on=["sucursal", "generico", "marca"])
 
     # Calcular totales por generico
-    totales_generico = df_merged.groupby(["sucursal", "generico"]).agg({
-        "total_marca": "sum",
-        "monto_marca": "sum"
-    }).reset_index()
-    totales_generico.columns = ["sucursal", "generico", "cant_generico", "monto_generico"]
+    agg_gen = {"total_marca": "sum", "monto_marca": "sum"}
+    if has_descuentos:
+        agg_gen["desc_marca"] = "sum"
+    totales_generico = df_merged.groupby(["sucursal", "generico"]).agg(agg_gen).reset_index()
+    rename_gen = ["sucursal", "generico", "cant_generico", "monto_generico"]
+    if has_descuentos:
+        rename_gen.append("desc_generico")
+    totales_generico.columns = rename_gen
     totales_generico["tend_generico"] = totales_generico["cant_generico"] * factor_tendencia
 
     # Ordenar por sucursal, generico y monto descendente
@@ -220,6 +229,7 @@ def procesar_ventas_diarias(
                 COLUMN_NAMES["cant_generico"]: totales["cant_generico"] if i == 0 else None,
                 COLUMN_NAMES["tend_generico"]: tend_gen_rounded,
                 COLUMN_NAMES["monto_generico"]: totales["monto_generico"] if i == 0 else None,
+                COLUMN_NAMES["desc_generico"]: totales.get("desc_generico") if i == 0 else None,
                 COLUMN_NAMES["cob_generico"]: cob_gen_dict.get((sucursal, generico)) if i == 0 else None,
                 COLUMN_NAMES["cupo_generico"]: cupo_gen_val,
                 COLUMN_NAMES["cupo_vs_tend_generico"]: cupo_vs_tend_gen,
@@ -241,6 +251,7 @@ def procesar_ventas_diarias(
             tend_marca_rounded = round(fila["tend_marca"])
             row[COLUMN_NAMES["tend_marca"]] = tend_marca_rounded
             row[COLUMN_NAMES["monto_marca"]] = fila["monto_marca"]
+            row[COLUMN_NAMES["desc_marca"]] = fila.get("desc_marca")
             row[COLUMN_NAMES["cob_marca"]] = cob_marca_dict.get((sucursal, fila["marca"]))
 
             # Cupo de marca (todas las filas)

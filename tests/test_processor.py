@@ -170,6 +170,7 @@ class TestProcesarVentas:
         cols_sin_cobertura = [v for k, v in COLUMN_NAMES.items() if k not in (
             "cob_generico", "cob_marca", "mmaa_marca", "var_mmaa_marca",
             "cupo_generico", "cupo_vs_tend_generico", "cupo_marca", "cupo_vs_tend_marca",
+            "desc_generico", "desc_marca",
         )]
         assert list(resultado.columns) == cols_sin_cobertura
 

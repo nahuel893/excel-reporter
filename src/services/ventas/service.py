@@ -28,6 +28,7 @@ VENTAS_COLUMN_FORMATS = {
     COLUMN_NAMES["cant_generico"]: ColumnFormat(number_format='#,##0', width=15, font_bold=True),
     COLUMN_NAMES["tend_generico"]: ColumnFormat(number_format='#,##0', width=15, font_bold=True),
     COLUMN_NAMES["monto_generico"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True),
+    COLUMN_NAMES["desc_generico"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True),
     COLUMN_NAMES["cob_generico"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True, header_fill_color="7030A0"),
     COLUMN_NAMES["cupo_generico"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True),
     COLUMN_NAMES["cupo_vs_tend_generico"]: ColumnFormat(number_format='0.0%', width=13, font_bold=True),
@@ -36,6 +37,7 @@ VENTAS_COLUMN_FORMATS = {
     COLUMN_NAMES["var_mmaa_marca"]: ColumnFormat(number_format='0.0%', width=9, font_bold=True),
     COLUMN_NAMES["tend_marca"]: ColumnFormat(number_format='#,##0', width=11, font_bold=True),
     COLUMN_NAMES["monto_marca"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True),
+    COLUMN_NAMES["desc_marca"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True),
     COLUMN_NAMES["cob_marca"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True, header_fill_color="7030A0"),
     COLUMN_NAMES["cupo_marca"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True),
     COLUMN_NAMES["cupo_vs_tend_marca"]: ColumnFormat(number_format='0.0%', width=13, font_bold=True),
@@ -85,6 +87,7 @@ def _crear_estilo_ventas(
         COLUMN_NAMES["cant_generico"],
         COLUMN_NAMES["tend_generico"],
         COLUMN_NAMES["monto_generico"],
+        COLUMN_NAMES["desc_generico"],
         # Cobertura (Generico) excluida
         COLUMN_NAMES["cupo_generico"],
         # Cupo vs Tend (Generico) excluida (ratio)
@@ -94,6 +97,7 @@ def _crear_estilo_ventas(
         # Var% excluida
         COLUMN_NAMES["tend_marca"],
         COLUMN_NAMES["monto_marca"],
+        COLUMN_NAMES["desc_marca"],
         # Cobertura (Marca) excluida
         COLUMN_NAMES["cupo_marca"],
         # Cupo vs Tend (Marca) excluida (ratio)
