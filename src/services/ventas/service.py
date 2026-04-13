@@ -28,7 +28,7 @@ VENTAS_COLUMN_FORMATS = {
     COLUMN_NAMES["cant_generico"]: ColumnFormat(number_format='#,##0', width=15, font_bold=True),
     COLUMN_NAMES["tend_generico"]: ColumnFormat(number_format='#,##0', width=15, font_bold=True),
     COLUMN_NAMES["monto_generico"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True),
-    COLUMN_NAMES["cob_generico"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True, fill_color="9B72CF"),
+    COLUMN_NAMES["cob_generico"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True, header_fill_color="7030A0"),
     COLUMN_NAMES["cupo_generico"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True),
     COLUMN_NAMES["cupo_vs_tend_generico"]: ColumnFormat(number_format='0.0%', width=13, font_bold=True),
     COLUMN_NAMES["total_marca"]: ColumnFormat(number_format='#,##0', width=11, font_bold=True),
@@ -36,7 +36,7 @@ VENTAS_COLUMN_FORMATS = {
     COLUMN_NAMES["var_mmaa_marca"]: ColumnFormat(number_format='0.0%', width=9, font_bold=True),
     COLUMN_NAMES["tend_marca"]: ColumnFormat(number_format='#,##0', width=11, font_bold=True),
     COLUMN_NAMES["monto_marca"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True),
-    COLUMN_NAMES["cob_marca"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True, fill_color="9B72CF"),
+    COLUMN_NAMES["cob_marca"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True, header_fill_color="7030A0"),
     COLUMN_NAMES["cupo_marca"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True),
     COLUMN_NAMES["cupo_vs_tend_marca"]: ColumnFormat(number_format='0.0%', width=13, font_bold=True),
 }

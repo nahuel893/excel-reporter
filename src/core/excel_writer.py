@@ -24,6 +24,7 @@ class ColumnFormat:
     font_bold: bool = False
     width: int | float | None = None
     fill_color: str | None = None
+    header_fill_color: str | None = None
 
 
 @dataclass
@@ -90,8 +91,13 @@ def _apply_cell_format(cell, col_name: str, style: SheetStyle, is_header: bool =
         is_header: Si es celda de encabezado
     """
     if is_header:
-        # Fondo burdeo pastel, texto blanco, negrita, centrado y distribuido
-        cell.fill = PatternFill(start_color="A92C1F", end_color="A92C1F", fill_type="solid")
+        # Color de header por defecto o custom por columna
+        header_color = "A92C1F"
+        if col_name in style.column_formats:
+            fmt = style.column_formats[col_name]
+            if fmt.header_fill_color:
+                header_color = fmt.header_fill_color
+        cell.fill = PatternFill(start_color=header_color, end_color=header_color, fill_type="solid")
         cell.font = Font(bold=style.header_bold, color="FFFFFF")
         cell.alignment = Alignment(
             horizontal="center",
