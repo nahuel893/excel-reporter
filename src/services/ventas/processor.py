@@ -230,6 +230,11 @@ def procesar_ventas_diarias(
                 COLUMN_NAMES["tend_generico"]: tend_gen_rounded,
                 COLUMN_NAMES["monto_generico"]: totales["monto_generico"] if i == 0 else None,
                 COLUMN_NAMES["desc_generico"]: totales.get("desc_generico") if i == 0 else None,
+                COLUMN_NAMES["desc_pct_generico"]: (
+                    totales.get("desc_generico") / totales["monto_generico"]
+                    if i == 0 and totales.get("desc_generico") and totales["monto_generico"]
+                    else None
+                ),
                 COLUMN_NAMES["cob_generico"]: cob_gen_dict.get((sucursal, generico)) if i == 0 else None,
                 COLUMN_NAMES["cupo_generico"]: cupo_gen_val,
                 COLUMN_NAMES["cupo_vs_tend_generico"]: cupo_vs_tend_gen,
@@ -251,7 +256,10 @@ def procesar_ventas_diarias(
             tend_marca_rounded = round(fila["tend_marca"])
             row[COLUMN_NAMES["tend_marca"]] = tend_marca_rounded
             row[COLUMN_NAMES["monto_marca"]] = fila["monto_marca"]
-            row[COLUMN_NAMES["desc_marca"]] = fila.get("desc_marca")
+            desc_m = fila.get("desc_marca")
+            monto_m = fila["monto_marca"]
+            row[COLUMN_NAMES["desc_marca"]] = desc_m
+            row[COLUMN_NAMES["desc_pct_marca"]] = (desc_m / monto_m) if desc_m and monto_m else None
             row[COLUMN_NAMES["cob_marca"]] = cob_marca_dict.get((sucursal, fila["marca"]))
 
             # Cupo de marca (todas las filas)

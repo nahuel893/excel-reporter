@@ -47,6 +47,7 @@ COLUMN_NAMES = {
     "tend_generico": "Tendencia (Generico)",
     "monto_generico": "Monto (Generico)",
     "desc_generico": "Descuentos (Generico)",
+    "desc_pct_generico": "% Desc (Generico)",
     "cob_generico": "Cobertura (Generico)",
     "marca": "Marca",
     # Columnas dinamicas de dias van aqui (generadas en processor)
@@ -56,6 +57,7 @@ COLUMN_NAMES = {
     "tend_marca": "Tendencia (Marca)",
     "monto_marca": "Monto (Marca)",
     "desc_marca": "Descuentos (Marca)",
+    "desc_pct_marca": "% Desc (Marca)",
     "cob_marca": "Cobertura (Marca)",
     "cupo_generico": "Cupo (Generico)",
     "cupo_vs_tend_generico": "Cupo vs Tend (Generico)",
