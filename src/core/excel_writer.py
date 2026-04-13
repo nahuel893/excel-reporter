@@ -23,6 +23,7 @@ class ColumnFormat:
     alignment: str | None = None
     font_bold: bool = False
     width: int | float | None = None
+    fill_color: str | None = None
 
 
 @dataclass
@@ -106,6 +107,8 @@ def _apply_cell_format(cell, col_name: str, style: SheetStyle, is_header: bool =
             cell.number_format = fmt.number_format
         if fmt.alignment:
             cell.alignment = Alignment(horizontal=fmt.alignment)
+        if fmt.fill_color:
+            cell.fill = PatternFill(start_color=fmt.fill_color, end_color=fmt.fill_color, fill_type="solid")
         cell.font = Font(bold=True)
         return
 
