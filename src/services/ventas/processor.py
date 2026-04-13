@@ -248,24 +248,27 @@ def procesar_ventas_diarias(
             # Agregar totales de marca
             row[COLUMN_NAMES["total_marca"]] = fila["total_marca"]
 
+            tend_marca_rounded = round(fila["tend_marca"])
+            row[COLUMN_NAMES["tend_marca"]] = tend_marca_rounded
+
+            # Cupo de marca
+            cupo_marca = cupos_dict.get((sucursal, fila["marca"]))
+            row[COLUMN_NAMES["cupo_marca"]] = cupo_marca
+            row[COLUMN_NAMES["cupo_vs_tend_marca"]] = (tend_marca_rounded / cupo_marca) if cupo_marca else None
+
             # MMAA y Var%
             mmaa_val = mmaa_dict.get((sucursal, generico, fila["marca"]))
             row[COLUMN_NAMES["mmaa_marca"]] = mmaa_val
             row[COLUMN_NAMES["var_mmaa_marca"]] = (fila["total_marca"] / mmaa_val) if mmaa_val else None
 
-            tend_marca_rounded = round(fila["tend_marca"])
-            row[COLUMN_NAMES["tend_marca"]] = tend_marca_rounded
-            row[COLUMN_NAMES["monto_marca"]] = fila["monto_marca"]
-            desc_m = fila.get("desc_marca")
-            monto_m = fila["monto_marca"]
-            row[COLUMN_NAMES["desc_marca"]] = desc_m
-            row[COLUMN_NAMES["desc_pct_marca"]] = (desc_m / monto_m) if desc_m and monto_m else None
             row[COLUMN_NAMES["cob_marca"]] = cob_marca_dict.get((sucursal, fila["marca"]))
 
-            # Cupo de marca (todas las filas)
-            cupo_marca = cupos_dict.get((sucursal, fila["marca"]))
-            row[COLUMN_NAMES["cupo_marca"]] = cupo_marca
-            row[COLUMN_NAMES["cupo_vs_tend_marca"]] = (tend_marca_rounded / cupo_marca) if cupo_marca else None
+            # Columnas de plata
+            monto_m = fila["monto_marca"]
+            desc_m = fila.get("desc_marca")
+            row[COLUMN_NAMES["monto_marca"]] = monto_m
+            row[COLUMN_NAMES["desc_marca"]] = desc_m
+            row[COLUMN_NAMES["desc_pct_marca"]] = (desc_m / monto_m) if desc_m and monto_m else None
 
             rows.append(row)
 

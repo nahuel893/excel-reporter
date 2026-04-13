@@ -207,25 +207,25 @@ class TestTS011SubtotalCols:
 # ---------------------------------------------------------------------------
 
 class TestTS012ColumnOrder:
-    """TS-012: Orden: ...Total | MMAA | Var% | Tendencia(Marca)..."""
+    """TS-012: Orden marca: Total | Tend | Cupo | CupoVsTend | MMAA | Var% | Cob | Monto | Desc | %Desc"""
 
-    def test_mmaa_despues_de_total(self):
+    def test_tend_despues_de_total(self):
         resultado = _procesar(df_mmaa=_make_df_mmaa())
         cols = list(resultado.columns)
         idx_total = cols.index(COLUMN_NAMES["total_marca"])
+        idx_tend = cols.index(COLUMN_NAMES["tend_marca"])
+        assert idx_tend == idx_total + 1
+
+    def test_mmaa_despues_de_cupo_vs_tend(self):
+        resultado = _procesar(df_mmaa=_make_df_mmaa())
+        cols = list(resultado.columns)
+        idx_cupo_vs = cols.index(COLUMN_NAMES["cupo_vs_tend_marca"])
         idx_mmaa = cols.index(COLUMN_NAMES["mmaa_marca"])
-        assert idx_mmaa == idx_total + 1, f"MMAA debería estar en posición {idx_total + 1}, pero está en {idx_mmaa}"
+        assert idx_mmaa == idx_cupo_vs + 1
 
     def test_var_despues_de_mmaa(self):
         resultado = _procesar(df_mmaa=_make_df_mmaa())
         cols = list(resultado.columns)
         idx_mmaa = cols.index(COLUMN_NAMES["mmaa_marca"])
         idx_var = cols.index(COLUMN_NAMES["var_mmaa_marca"])
-        assert idx_var == idx_mmaa + 1, f"Var% debería estar en posición {idx_mmaa + 1}, pero está en {idx_var}"
-
-    def test_tend_despues_de_var(self):
-        resultado = _procesar(df_mmaa=_make_df_mmaa())
-        cols = list(resultado.columns)
-        idx_var = cols.index(COLUMN_NAMES["var_mmaa_marca"])
-        idx_tend = cols.index(COLUMN_NAMES["tend_marca"])
-        assert idx_tend == idx_var + 1, f"Tendencia(Marca) debería estar en posición {idx_var + 1}, pero está en {idx_tend}"
+        assert idx_var == idx_mmaa + 1

@@ -95,14 +95,14 @@ def _crear_estilo_ventas(
         # Cupo vs Tend (Generico) excluida (ratio)
         *columnas_dias,
         COLUMN_NAMES["total_marca"],
-        COLUMN_NAMES["mmaa_marca"],
-        # Var% excluida
         COLUMN_NAMES["tend_marca"],
-        COLUMN_NAMES["monto_marca"],
-        COLUMN_NAMES["desc_marca"],
-        # Cobertura (Marca) excluida
         COLUMN_NAMES["cupo_marca"],
         # Cupo vs Tend (Marca) excluida (ratio)
+        COLUMN_NAMES["mmaa_marca"],
+        # Var% excluida
+        # Cobertura (Marca) excluida
+        COLUMN_NAMES["monto_marca"],
+        COLUMN_NAMES["desc_marca"],
     ]
 
     return SheetStyle(

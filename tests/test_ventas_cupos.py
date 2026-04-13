@@ -299,15 +299,15 @@ class TestColumnOrder:
 
         assert idx_cob_gen < idx_cupo_gen < idx_cupo_vs_tend_gen < idx_marca
 
-    def test_cupo_marca_despues_de_cob_marca(self):
-        """Cupo (Marca) debe aparecer despues de Cobertura (Marca)."""
+    def test_cupo_marca_despues_de_tend_marca(self):
+        """Cupo (Marca) debe aparecer despues de Tendencia (Marca)."""
         df = _run_processor(df_cupos=_df_cupos_simple())
         cols = list(df.columns)
-        idx_cob_marca = cols.index(COLUMN_NAMES["cob_marca"])
+        idx_tend_marca = cols.index(COLUMN_NAMES["tend_marca"])
         idx_cupo_marca = cols.index(COLUMN_NAMES["cupo_marca"])
         idx_cupo_vs_tend_marca = cols.index(COLUMN_NAMES["cupo_vs_tend_marca"])
 
-        assert idx_cob_marca < idx_cupo_marca < idx_cupo_vs_tend_marca
+        assert idx_tend_marca < idx_cupo_marca < idx_cupo_vs_tend_marca
 
     def test_cupo_generico_is_last_before_marca(self):
         """La columna inmediatamente antes de Marca es Cupo vs Tend (Generico)."""
