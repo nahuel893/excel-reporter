@@ -55,6 +55,10 @@ COLUMN_NAMES = {
     "tend_marca": "Tendencia (Marca)",
     "monto_marca": "Monto (Marca)",
     "cob_marca": "Cobertura (Marca)",
+    "cupo_generico": "Cupo (Generico)",
+    "cupo_vs_tend_generico": "Cupo vs Tend (Generico)",
+    "cupo_marca": "Cupo (Marca)",
+    "cupo_vs_tend_marca": "Cupo vs Tend (Marca)",
 }
 
 # Nombres de dias en espanol

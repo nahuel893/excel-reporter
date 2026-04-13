@@ -104,6 +104,10 @@ class TestVentasServiceUnit:
             columns=["sucursal", "generico", "marca", "fecha", "id_ruta", "cantidad", "cantidad_htls"]
         )
 
+        loader.get_cupos.return_value = pd.DataFrame(
+            columns=["sucursal", "id_ruta", "cupo_generico", "cupo"]
+        )
+
         return loader
 
     def test_service_acepta_data_loader(self, mock_loader):

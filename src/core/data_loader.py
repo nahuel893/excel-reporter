@@ -1065,6 +1065,33 @@ class DataLoader:
             return None
         return pd.to_datetime(df["ultima_venta"].iloc[0]).date()
 
+    # ── Cupos ──────────────────────────────────────────────────
+
+    def get_cupos(self, periodo: str) -> pd.DataFrame:
+        """
+        Obtiene cupos para un periodo, uniendo via dim_sucursal para obtener
+        el nombre de sucursal correcto.
+
+        Args:
+            periodo: Periodo en formato "YYYY-MM" (ej: "2026-04")
+
+        Returns:
+            DataFrame con columnas: sucursal, id_ruta, cupo_generico, cupo
+        """
+        query = """
+        SELECT
+            ds.descripcion AS sucursal,
+            fc.id_ruta,
+            fc.generico AS cupo_generico,
+            SUM(fc.cupo) AS cupo
+        FROM gold.fact_cupos fc
+        JOIN gold.dim_sucursal ds ON fc.id_sucursal = ds.id_sucursal
+        WHERE fc.periodo = :periodo
+        GROUP BY ds.descripcion, fc.id_ruta, fc.generico
+        ORDER BY ds.descripcion, fc.generico
+        """
+        return self.execute_query(query, {"periodo": periodo})
+
     # ── Stock Diario ────────────────────────────────────────────
 
     def get_stock_diario(

@@ -166,8 +166,11 @@ class TestProcesarVentas:
         })
         resultado = procesar_ventas(df, "2026-01-01", "2026-01-31")
 
-        # procesar_ventas es la version legacy sin columnas de cobertura ni MMAA
-        cols_sin_cobertura = [v for k, v in COLUMN_NAMES.items() if k not in ("cob_generico", "cob_marca", "mmaa_marca", "var_mmaa_marca")]
+        # procesar_ventas es la version legacy sin columnas de cobertura, MMAA ni cupos
+        cols_sin_cobertura = [v for k, v in COLUMN_NAMES.items() if k not in (
+            "cob_generico", "cob_marca", "mmaa_marca", "var_mmaa_marca",
+            "cupo_generico", "cupo_vs_tend_generico", "cupo_marca", "cupo_vs_tend_marca",
+        )]
         assert list(resultado.columns) == cols_sin_cobertura
 
     @patch("src.core.base_processor.FERIADOS", [])
