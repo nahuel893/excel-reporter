@@ -1,6 +1,4 @@
 """Tests para ExcelManager."""
-import io
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -60,7 +58,6 @@ class TestExcelManagerCaptureRange:
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = sheet_name
-        # Datos simples para la hoja
         ws["A1"] = "Header"
         ws["B1"] = "Value"
         ws["A2"] = 100
@@ -74,96 +71,118 @@ class TestExcelManagerCaptureRange:
         with pytest.raises(ValueError, match="Hoja 'NoExiste' no encontrada"):
             mgr.capture_range("NoExiste", "A1:B2")
 
-    def test_soffice_not_found_raises_runtime_error(self, tmp_path):
-        xlsx = self._make_xlsx(tmp_path)
-        mgr = ExcelManager(xlsx)
-
-        mock_pil_image = MagicMock()
-        mock_pil = MagicMock()
-        mock_pil.Image = mock_pil_image
-
-        with (
-            patch.dict("sys.modules", {"PIL": mock_pil, "PIL.Image": mock_pil_image}),
-            patch("shutil.which", return_value=None),
-        ):
-            with pytest.raises(RuntimeError, match="LibreOffice no encontrado"):
-                mgr.capture_range("Hoja1", "A1:B2")
-
     def test_pillow_not_installed_raises_import_error(self, tmp_path):
         xlsx = self._make_xlsx(tmp_path)
         mgr = ExcelManager(xlsx)
-        with patch.dict("sys.modules", {"PIL": None, "PIL.Image": None}):
-            with pytest.raises(ImportError, match="Pillow"):
+        # soffice debe estar disponible (o mockeado) para llegar al import de Pillow
+        with patch.object(ExcelManager, "_find_soffice", return_value="/usr/bin/soffice"):
+            with patch.object(ExcelManager, "_recalc_with_libreoffice", return_value=xlsx):
+                with patch.dict("sys.modules", {"PIL": None, "PIL.Image": None, "PIL.ImageDraw": None, "PIL.ImageFont": None}):
+                    with pytest.raises((ImportError, ModuleNotFoundError)):
+                        mgr.capture_range("Hoja1", "A1:B2")
+
+    def test_soffice_not_found_raises_runtime_error(self, tmp_path):
+        """Sin LibreOffice en el PATH -> RuntimeError antes de intentar renderizar."""
+        xlsx = self._make_xlsx(tmp_path)
+        mgr = ExcelManager(xlsx)
+        with patch.object(ExcelManager, "_find_soffice", return_value=None):
+            with pytest.raises(RuntimeError, match="LibreOffice no encontrado"):
                 mgr.capture_range("Hoja1", "A1:B2")
 
-    def test_capture_range_calls_soffice_and_crops(self, tmp_path):
-        """Verifica que se llama a soffice y se recorta la imagen con Pillow."""
+    def test_capture_range_generates_png(self, tmp_path):
+        """Verifica que genera un archivo PNG real."""
+        try:
+            from PIL import Image
+        except ImportError:
+            pytest.skip("Pillow not installed")
+
         xlsx = self._make_xlsx(tmp_path)
         mgr = ExcelManager(xlsx)
+        with patch.object(ExcelManager, "_find_soffice", return_value="/usr/bin/soffice"):
+            with patch.object(ExcelManager, "_recalc_with_libreoffice", return_value=xlsx):
+                out_path = mgr.capture_range("Hoja1", "A1:B2", output_dir=tmp_path)
 
-        fake_png = tmp_path / "fake_full.png"
-        fake_png.write_bytes(b"fake-png-data")
-
-        # Mock de PIL.Image
-        mock_image_instance = MagicMock()
-        mock_cropped = MagicMock()
-        mock_image_instance.crop.return_value = mock_cropped
-
-        mock_pil_image = MagicMock()
-        mock_pil_image.open.return_value = mock_image_instance
-        mock_pil = MagicMock()
-        mock_pil.Image = mock_pil_image
-
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-
-        with (
-            patch.dict("sys.modules", {"PIL": mock_pil, "PIL.Image": mock_pil_image}),
-            patch("shutil.which", return_value="/usr/bin/soffice"),
-            patch("subprocess.run", return_value=mock_result),
-            patch("pathlib.Path.glob", return_value=[fake_png]),
-        ):
-            out_path = mgr.capture_range("Hoja1", "A1:B2", output_dir=tmp_path)
-
-        mock_cropped.save.assert_called_once()
+        assert out_path.exists()
         assert out_path.suffix == ".png"
+        img = Image.open(out_path)
+        assert img.width > 0
+        assert img.height > 0
 
-    def test_calculate_crop_box_pixel_math(self, tmp_path):
-        """Verifica la conversion chars→px y pts→px segun la formula del diseno."""
-        xlsx = self._make_xlsx(tmp_path)
-        mgr = ExcelManager(xlsx)
+    def test_capture_range_auto_detect(self, tmp_path):
+        """Verifica auto-deteccion de bordes gruesos."""
+        try:
+            from PIL import Image
+        except ImportError:
+            pytest.skip("Pillow not installed")
 
-        wb = openpyxl.load_workbook(xlsx)
-        ws = wb.active
+        from openpyxl.styles import Border, Side
 
-        # Con dimensiones por defecto (8.43 chars, 15.0 pts):
-        # col_px = int(8.43 * 7.0 + 5) = int(64.01) = 64
-        # row_px = int(15.0 * 96.0 / 72.0) = int(20.0) = 20
-        col_px_default = int(ExcelManager.DEFAULT_COL_WIDTH_CHARS * 7.0 + 5)
-        row_px_default = int(ExcelManager.DEFAULT_ROW_HEIGHT_PTS * 96.0 / 72.0)
-
-        # Rango A1:B2 → x1=0, y1=0, x2=col_px*2, y2=row_px*2
-        box = mgr._calculate_crop_box(ws, col1=1, row1=1, col2=2, row2=2)
-        assert box == (0, 0, col_px_default * 2, row_px_default * 2)
-
-    def test_calculate_crop_box_with_custom_dimensions(self, tmp_path):
-        """Verifica el calculo cuando hay dimensiones de columnas/filas personalizadas."""
-        xlsx = tmp_path / "custom.xlsx"
+        xlsx = tmp_path / "bordered.xlsx"
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Hoja1"
-        ws.column_dimensions["A"].width = 20.0  # 20 chars
-        ws.row_dimensions[1].height = 30.0      # 30 pts
+
+        thick = Side(style="thick")
+        # Poner bordes gruesos en A1:B3
+        for r in range(1, 4):
+            for c in range(1, 3):
+                cell = ws.cell(row=r, column=c, value=f"R{r}C{c}")
+                cell.border = Border(
+                    top=thick if r == 1 else None,
+                    bottom=thick if r == 3 else None,
+                    left=thick if c == 1 else None,
+                    right=thick if c == 2 else None,
+                )
         wb.save(xlsx)
 
         mgr = ExcelManager(xlsx)
-        wb2 = openpyxl.load_workbook(xlsx)
-        ws2 = wb2.active
+        with patch.object(ExcelManager, "_find_soffice", return_value="/usr/bin/soffice"):
+            with patch.object(ExcelManager, "_recalc_with_libreoffice", return_value=xlsx):
+                out_path = mgr.capture_range("Hoja1", "auto", output_dir=tmp_path)
+        assert out_path.exists()
 
-        # col A (width=20): px = int(20 * 7.0 + 5) = 145
-        # row 1 (height=30): px = int(30 * 96.0 / 72.0) = 40
-        box = mgr._calculate_crop_box(ws2, col1=1, row1=1, col2=1, row2=1)
-        assert box == (0, 0, int(20.0 * 7.0 + 5), int(30.0 * 96.0 / 72.0))
+    def test_auto_detect_no_borders_raises(self, tmp_path):
+        """Sin bordes gruesos y rango 'auto' -> ValueError."""
+        xlsx = self._make_xlsx(tmp_path)
+        mgr = ExcelManager(xlsx)
+        with pytest.raises(ValueError, match="No se detectaron bordes gruesos"):
+            mgr.capture_range("Hoja1", "auto")
+
+
+class TestExcelManagerDetectBorderedRange:
+    def test_detects_thick_borders(self, tmp_path):
+        from openpyxl.styles import Border, Side
+
+        xlsx = tmp_path / "borders.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Test"
+
+        thick = Side(style="medium")
+        ws.cell(row=2, column=2).border = Border(top=thick)
+        ws.cell(row=5, column=4).border = Border(bottom=thick)
+        wb.save(xlsx)
+
+        mgr = ExcelManager(xlsx)
+        result = mgr.detect_bordered_range("Test")
+        assert result == "B2:D5"
+
+    def test_no_borders_returns_none(self, tmp_path):
+        xlsx = tmp_path / "no_borders.xlsx"
+        wb = openpyxl.Workbook()
+        wb.active.title = "Test"
+        wb.save(xlsx)
+
+        mgr = ExcelManager(xlsx)
+        assert mgr.detect_bordered_range("Test") is None
+
+    def test_missing_sheet_returns_none(self, tmp_path):
+        xlsx = tmp_path / "test.xlsx"
+        wb = openpyxl.Workbook()
+        wb.save(xlsx)
+
+        mgr = ExcelManager(xlsx)
+        assert mgr.detect_bordered_range("NoExiste") is None
 
 
 class TestExcelManagerGetDataframe:
@@ -203,8 +222,5 @@ class TestExcelManagerGetDataframe:
         ws.title = "Vacio"
         wb.save(xlsx)
         mgr = ExcelManager(xlsx)
-        # Rango con fila inicio > fila fin → sin filas
         df = mgr.get_dataframe("Vacio", "A5:B4")
         assert df.empty
-
-

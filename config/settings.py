@@ -83,7 +83,7 @@ SMTP_CONFIG = {
 }
 
 # URL del servicio WhatsApp (Baileys microservice)
-WHATSAPP_SERVICE_URL = os.getenv("WHATSAPP_SERVICE_URL", "http://localhost:3000")
+WHATSAPP_SERVICE_URL = os.getenv("WHATSAPP_SERVICE_URL", "http://localhost:3001")
 
 DIAS_SEMANA = {
     0: "Lunes",

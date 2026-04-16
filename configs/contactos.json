@@ -1,14 +1,30 @@
 {
     "Walter Vilte": {
-        "email": "naguirre@danielmanzur.com"
+        "email": "wvilte@ccu.com.ar"
     },
     "Antonio Cabrerizo": {
-        "email": "naguirre@danielmanzur.com"
+        "email": "acabrerizo@ccu.com.ar"
     },
     "Adrian Garcia": {
-        "email": "naguirre@danielmanzur.com"
+        "email": "agarcia@ccu.com.ar"
     },
     "Hernan Yapura": {
-        "email": "naguirre@danielmanzur.com"
+        "email": "hyapura@ccu.com.ar"
+    },
+
+     "Sebastian Dellamea": {
+        "email": "sdellamea@danielmanzur.com",
+        "telefono": "5493885099320"
+    },
+     "Nicolas Diolli": {
+        "email": "ndioli@danielmanzur.com"
+    },
+     "Nahuel Aguirre": {
+        "email": "naguirre@danielmanzur.com",
+        "telefono": "5493876008331"
+    },
+    "Gonzalo Farah": {
+        "email": "gfarah@danielmanzur.com",
+        "telefono": "5493876008331"
     }
-}
+} 

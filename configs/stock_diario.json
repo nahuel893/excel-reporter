@@ -1,13 +1,14 @@
 {
     "tipo": "stock-diario",
     "filtros": {
-        "fecha_desde": "2026-04-10",
-        "fecha_hasta": "2026-04-10",
+        "fecha_desde": "2026-04-16",
+        "fecha_hasta": "2026-04-16",
         "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
     },
     "reportes": [
         {
             "nombre": "Stock CCU - WV",
+            "asunto_email": "INFORME STOCK DIARIO",
             "filtros": {
                 "supervisores": ["Walter Vilte"],
                 "sucursales": [
@@ -17,27 +18,45 @@
                     "SUCURSAL MAIMARA", "SUCURSAL GUEMES", "SUCURSAL LIBERTADOR",
                     "SUCURSAL PERICO", "CASA CENTRAL"
                 ]
+            },
+            "enviar_a": {
+                "Walter Vilte": { "via": ["email"] },
+                "Sebastian Dellamea": { "via": ["email_cc"] },
+                "Nahuel Aguirre": { "via": ["email_cc"] }
             }
         },
         {
             "nombre": "Stock Antonio Cabrerizo",
+            "asunto_email": "INFORME STOCK DIARIO",
             "filtros": {
                 "supervisores": ["Antonio Cabrerizo"],
                 "sucursales": ["CASA CENTRAL"]
+            },
+            "enviar_a": {
+                "Antonio Cabrerizo": { "via": ["email"] },
+                "Sebastian Dellamea": { "via": ["email_cc"] },
+                "Nahuel Aguirre": { "via": ["email_cc"] }
             }
         },
         {
             "nombre": "Stock Adrian Garcia",
+            "asunto_email": "INFORME STOCK DIARIO",
             "filtros": {
                 "supervisores": ["Adrian Garcia"],
                 "sucursales": [
                     "SUCURSAL CAFAYATE", "SUCURSAL JOAQUIN V GONZALEZ",
                     "SUCURSAL METAN", "SUCURSAL GUEMES"
                 ]
+            },
+            "enviar_a": {
+                "Adrian Garcia": { "via": ["email"] },
+                "Sebastian Dellamea": { "via": ["email_cc"] },
+                "Nahuel Aguirre": { "via": ["email_cc"] }
             }
         },
         {
             "nombre": "Stock Hernan Yapura",
+            "asunto_email": "INFORME STOCK DIARIO",
             "filtros": {
                 "supervisores": ["Hernan Yapura"],
                 "sucursales": [
@@ -45,6 +64,11 @@
                     "SUCURSAL HUMAHUACA", "SUCURSAL ORAN", "SUCURSAL TARTAGAL",
                     "SUCURSAL MAIMARA", "SUCURSAL LIBERTADOR", "SUCURSAL PERICO"
                 ]
+            },
+            "enviar_a": {
+                "Hernan Yapura": { "via": ["email"] },
+                "Sebastian Dellamea": { "via": ["email_cc"] },
+                "Nahuel Aguirre": { "via": ["email_cc"] }
             }
         }
     ]

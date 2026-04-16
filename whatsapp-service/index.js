@@ -59,9 +59,16 @@ async function initWhatsApp() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", ({ connection, lastDisconnect, qr }) => {
+  sock.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
     if (qr) {
       logger.info("Escanea el QR con WhatsApp para autenticar.");
+      try {
+        const { default: qrcodeTerminal } = await import("qrcode-terminal");
+        qrcodeTerminal.generate(qr, { small: true });
+      } catch {
+        // qrcode-terminal not installed, print raw QR string
+        console.log("\nQR (escanea con WhatsApp):\n" + qr + "\n");
+      }
     }
     if (connection === "close") {
       const shouldReconnect =

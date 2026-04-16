@@ -80,6 +80,18 @@ class WhatsAppClient:
             caption=caption,
         )
 
+    @staticmethod
+    def _guess_mimetype(file_path: Path) -> str:
+        """Guess MIME type from file extension."""
+        suffix = Path(file_path).suffix.lower()
+        return {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".pdf": "application/pdf",
+        }.get(suffix, "application/octet-stream")
+
     def _post_multipart(
         self,
         endpoint: str,
@@ -112,7 +124,7 @@ class WhatsAppClient:
                 response = client.post(
                     url,
                     data={"group_name": group_name, "caption": caption},
-                    files={file_field: (file_path.name, file_content)},
+                    files={file_field: (file_path.name, file_content, self._guess_mimetype(file_path))},
                 )
                 response.raise_for_status()
                 return response.json()
@@ -145,7 +157,7 @@ class WhatsAppClient:
             (
                 f"--{boundary}\r\nContent-Disposition: form-data; "
                 f'name="{file_field}"; filename="{file_path.name}"\r\n'
-                f"Content-Type: application/octet-stream\r\n\r\n"
+                f"Content-Type: {self._guess_mimetype(file_path)}\r\n\r\n"
             ).encode() + file_content,
             f"--{boundary}--".encode(),
         ]
