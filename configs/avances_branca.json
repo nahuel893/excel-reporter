@@ -1,0 +1,15 @@
+{
+    "tipo": "avances",
+    "filtros": {
+        "fecha_desde": "2026-04-01",
+        "fecha_hasta": "2026-04-30",
+        "archivo_plantilla": "data/input/avances/AVANCE BRANCA - ABRIL 2026.xlsx",
+        "enviar_email": false,
+        "enviar_whatsapp": false
+    },
+    "reportes": [
+        {
+            "nombre": "AVANCE BRANCA - ABRIL 2026"
+        }
+    ]
+}

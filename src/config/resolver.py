@@ -103,7 +103,7 @@ def resolve_delivery(
 
     return DeliveryConfig(
         capture_image=capture,
-        email=EmailConfig(destinatarios=email_recipients, cc=email_cc) if email_recipients else None,
+        email=EmailConfig(destinatarios=email_recipients, cc=email_cc, asunto=report.asunto_email) if email_recipients else None,
         whatsapp=WhatsAppConfig(grupos=whatsapp_targets) if whatsapp_targets else None,
     )
 
@@ -114,13 +114,14 @@ def merge_filters(global_f: GlobalFilters, report_f: ReportFilters | None) -> di
         "fecha_desde": global_f.fecha_desde,
         "fecha_hasta": global_f.fecha_hasta,
         "genericos": global_f.genericos,
-        "categorias": getattr(global_f, "categorias", None),
+        "categorias": global_f.categorias,
         "con_slicers": global_f.con_slicers,
         "con_cobertura": global_f.con_cobertura,
         "enviar_email": global_f.enviar_email,
         "enviar_whatsapp": global_f.enviar_whatsapp,
         "supervisores": None,
         "sucursales": None,
+        "archivo_plantilla": global_f.archivo_plantilla,
     }
     if report_f:
         if report_f.genericos is not None:

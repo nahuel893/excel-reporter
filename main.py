@@ -139,6 +139,10 @@ def _run_reportes(report_config, contactos) -> int:
             artifacts = _run_historico_fratelli_report(report, merged)
         elif report_config.tipo == "stock-diario":
             artifacts = _run_stock_diario_report(report, merged)
+        elif report_config.tipo == "cartesiano":
+            artifacts = _run_cartesiano_report(report, merged)
+        elif report_config.tipo == "avances":
+            artifacts = _run_avances_report(report, merged)
         else:
             print(f"Error: tipo de reporte desconocido: {report_config.tipo}")
             return 1
@@ -245,6 +249,7 @@ def _run_mision_report(report, merged: dict) -> list[tuple[Path, dict]]:
         fecha_desde=merged["fecha_desde"],
         fecha_hasta=merged["fecha_hasta"],
         genericos=merged["genericos"],
+        categorias=merged.get("categorias"),
         nombre_archivo=report.nombre,
     )
     result = MisionImposibleService().generar_reporte(config)
@@ -547,6 +552,86 @@ def cmd_stock_diario(args) -> int:
         return 1
 
 
+def _run_cartesiano_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate cartesiano report. Returns list of (path, metadata) tuples."""
+    from src.services.cartesiano import CartesianoConfig, CartesianoService
+
+    config = CartesianoConfig(
+        id_sucursal=merged.get("id_sucursal", 1),
+        genericos=merged.get("genericos"),
+        nombre_archivo=report.nombre,
+    )
+    result = CartesianoService().generar_reporte(config)
+    print("Cartesiano generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Rutas: {result.rutas}")
+    print(f"  - Genericos: {result.genericos}")
+    print(f"  - Combinaciones: {result.registros_procesados}")
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
+def _run_avances_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate avances report. Returns list of (path, metadata) tuples."""
+    import logging
+
+    from src.services.avances import AvancesConfig, AvancesService
+
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s"
+    )
+
+    archivo_plantilla = merged.get("archivo_plantilla")
+    if not archivo_plantilla:
+        print("Error: avances report requires 'archivo_plantilla' in filtros")
+        return []
+
+    config = AvancesConfig(
+        archivo_plantilla=archivo_plantilla,
+        fecha_desde=merged["fecha_desde"],
+        fecha_hasta=merged["fecha_hasta"],
+        nombre_archivo=report.nombre if report.nombre else None,
+    )
+
+    service = AvancesService()
+    try:
+        result = service.generar_reporte(config)
+    except FileNotFoundError as e:
+        print(f"Error: Template not found: {e}")
+        return []
+
+    print(f"Avances '{report.nombre}' generado exitosamente:")
+    for hoja, registros in result.registros_por_hoja.items():
+        print(f"  - {hoja}: {registros} registros")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
+def cmd_cartesiano(args) -> int:
+    """Ejecuta el comando cartesiano."""
+    if not args.config:
+        print("Error: cartesiano requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path)
+    else:
+        print("Error: cartesiano solo soporta el nuevo formato de configuracion JSON.")
+        return 1
+
+
 def _cmd_resumen_legacy(args, cfg: dict) -> int:
     """Legacy resumen mensual flow."""
     # Resolver parametros: JSON tiene precedencia sobre args individuales
@@ -610,6 +695,7 @@ def main():
         epilog="""
 Ejemplos:
   # Nuevo formato (recomendado)
+  python main.py --config configs/avances_branca.json
   python main.py ventas --config configs/ventas.json
   python main.py --config-dir configs/
 
@@ -620,6 +706,14 @@ Ejemplos:
   # Legacy (config flat)
   python main.py ventas --config config.json
 """,
+    )
+
+    # Global option: --config for running a single config file
+    parser.add_argument(
+        "--config",
+        default=None,
+        metavar="FILE",
+        help="Archivo JSON de configuracion. Ejecuta un solo informe.",
     )
 
     # Global option: --config-dir for running all configs
@@ -716,6 +810,19 @@ Ejemplos:
     historico_parser.set_defaults(func=cmd_historico_fratelli)
 
     # Subcomando: stock-diario
+    mision_parser = subparsers.add_parser(
+        "mision-imposible",
+        help="Reporte Mision Imposible con cobertura y categorias",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    mision_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    mision_parser.set_defaults(func=cmd_mision_imposible)
+
     stock_parser = subparsers.add_parser(
         "stock-diario",
         help="Reporte de stock diario por articulo y sucursal",
@@ -729,8 +836,25 @@ Ejemplos:
     )
     stock_parser.set_defaults(func=cmd_stock_diario)
 
+    cartesiano_parser = subparsers.add_parser(
+        "cartesiano",
+        help="Producto cartesiano de rutas x genericos",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    cartesiano_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    cartesiano_parser.set_defaults(func=cmd_cartesiano)
+
     # Parsear argumentos
     args = parser.parse_args()
+
+    # --config mode: process a single config file
+    if args.config:
+        return _run_report_config(Path(args.config))
 
     # --config-dir mode: process all configs in directory
     if args.config_dir:

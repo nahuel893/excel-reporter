@@ -7,7 +7,7 @@ Config structure:
     ├── ventas.json          ← tipo + filtros + reportes[]
     └── resumen_mensual.json ← tipo + filtros + reportes[]
 """
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, model_validator
 
@@ -53,10 +53,12 @@ class GlobalFilters(BaseModel):
     fecha_desde: str
     fecha_hasta: str
     genericos: list[str] | None = None
+    categorias: dict[str, Any] | None = None
     con_slicers: bool = True
     con_cobertura: bool = True
     enviar_email: bool = True
     enviar_whatsapp: bool = True
+    archivo_plantilla: str | None = None
 
 
 class ReportFilters(BaseModel):
@@ -78,12 +80,13 @@ class ReportEntry(BaseModel):
     filtros: ReportFilters | None = None
     capture_image: CaptureImageConfig | None = None
     enviar_a: dict[str, DeliveryTarget] | None = None
+    asunto_email: str | None = None
 
 
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "mision-imposible", "historico-fratelli", "stock-diario"]
+    tipo: Literal["ventas", "resumen-mensual", "mision-imposible", "historico-fratelli", "stock-diario", "cartesiano", "avances"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

@@ -496,6 +496,7 @@ class DataLoader:
             fv.id_cliente,
             COALESCE(dc.fantasia, dc.razon_social) AS cliente,
             da.marca,
+            da.calibre,
             fv.id_articulo,
             da.des_articulo,
             SUM(fv.cantidades_total) AS cantidad
@@ -509,7 +510,7 @@ class DataLoader:
         GROUP BY
             ds.descripcion, dc.id_ruta_fv1, fv.id_vendedor, dv.des_vendedor,
             fv.id_cliente, COALESCE(dc.fantasia, dc.razon_social),
-            da.marca, fv.id_articulo, da.des_articulo
+            da.marca, da.calibre, fv.id_articulo, da.des_articulo
         HAVING SUM(fv.cantidades_total) > 0
         """
         params = {"desde": fecha_desde, "hasta": fecha_hasta}
@@ -1136,6 +1137,69 @@ class DataLoader:
         ORDER BY a.des_articulo, a.marca, a.generico, d.des_sucursal
         """
         return self.execute_query(query, params)
+
+    def get_fact_ventas_raw(self, fecha_desde: str, fecha_hasta: str) -> pd.DataFrame:
+        """Raw fact_ventas dump for avances reports."""
+        return self.execute_query(
+            """
+            SELECT id_cliente, id_articulo, id_vendedor, id_sucursal,
+                   fecha_comprobante, id_documento, letra, serie, nro_doc,
+                   anulado, cantidades_total, bonificacion
+            FROM gold.fact_ventas
+            WHERE fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+              AND id_sucursal = 1
+            """,
+            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
+
+    def get_dim_articulo_raw(self) -> pd.DataFrame:
+        """Raw dim_articulo dump for avances reports."""
+        return self.execute_query(
+            """
+            SELECT id_articulo, des_articulo, marca, generico, calibre,
+                   proveedor, unidad_negocio, factor_hectolitros
+            FROM gold.dim_articulo
+            """
+        )
+
+    def get_dim_cliente_raw(self) -> pd.DataFrame:
+        """Raw dim_cliente dump for avances reports."""
+        return self.execute_query(
+            """
+            SELECT id_cliente, fantasia, razon_social, des_sucursal, id_sucursal,
+                   id_ruta_fv1, des_personal_fv1, id_ruta_fv4, des_personal_fv4
+            FROM gold.dim_cliente
+            WHERE anulado = false
+            """
+        )
+
+    def get_cob_preventista_generico_raw(self, fecha_desde: str, fecha_hasta: str) -> pd.DataFrame:
+        """Raw cob_preventista_generico dump for avances reports."""
+        return self.execute_query(
+            """
+            SELECT id, periodo, id_fuerza_ventas, id_vendedor, id_ruta,
+                   id_sucursal, ds_sucursal, generico, clientes_compradores,
+                   volumen_total
+            FROM gold.cob_preventista_generico
+            WHERE periodo BETWEEN :fecha_desde AND :fecha_hasta
+              AND id_fuerza_ventas = 1
+            """,
+            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
+
+    def get_cob_preventista_marca_raw(self, fecha_desde: str, fecha_hasta: str) -> pd.DataFrame:
+        """Raw cob_preventista_marca dump for avances reports."""
+        return self.execute_query(
+            """
+            SELECT id, periodo, id_fuerza_ventas, id_vendedor, id_ruta,
+                   id_sucursal, ds_sucursal, marca, clientes_compradores,
+                   volumen_total
+            FROM gold.cob_preventista_marca
+            WHERE periodo BETWEEN :fecha_desde AND :fecha_hasta
+              AND id_fuerza_ventas = 1
+            """,
+            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
 
 
 # Instancia por defecto para compatibilidad
