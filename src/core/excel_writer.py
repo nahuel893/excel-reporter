@@ -69,6 +69,7 @@ class SheetStyle:
     subtotal_columns: list[str] = field(default_factory=list)
     as_table: bool = True
     table_style: str = "TableStyleMedium9"
+    table_name: str | None = None
 
 
 # Estilo por defecto
@@ -268,7 +269,7 @@ def _apply_table_format(ws, df: pd.DataFrame, style: SheetStyle, header_row: int
     table_range = f"{start_cell}:{end_cell}"
 
     # Crear tabla con nombre unico
-    table_name = f"Tabla_{ws.title.replace(' ', '_')}"
+    table_name = style.table_name or f"Tabla_{ws.title.replace(' ', '_')}"
     table = Table(displayName=table_name, ref=table_range)
 
     # Aplicar estilo

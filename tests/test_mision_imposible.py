@@ -127,15 +127,13 @@ class TestMisionImposibleService:
             nombre_archivo="test_mision",
         )
 
-        with patch("src.services.mision_imposible.service.ExcelWriter") as mock_writer_cls:
-            mock_writer = MagicMock()
-            mock_writer.save.return_value = tmp_path / "test_mision.xlsx"
-            mock_writer_cls.return_value = mock_writer
-
+        with patch("src.services.mision_imposible.service.DATA_OUTPUT", tmp_path):
             result = service.generar_reporte(config)
 
         assert len(result.hojas) == 4
-        assert mock_writer.add_sheet.call_count == 4
+        import openpyxl
+        wb = openpyxl.load_workbook(str(result.ruta_archivo))
+        assert len(wb.sheetnames) == 4
 
     def test_filters_by_genericos(self, tmp_path):
         mock_loader = MagicMock(spec=DataLoader)
@@ -152,17 +150,17 @@ class TestMisionImposibleService:
             nombre_archivo="test_filtro",
         )
 
-        with patch("src.services.mision_imposible.service.ExcelWriter") as mock_writer_cls:
-            mock_writer = MagicMock()
-            mock_writer.save.return_value = tmp_path / "test_filtro.xlsx"
-            mock_writer_cls.return_value = mock_writer
-
+        with patch("src.services.mision_imposible.service.DATA_OUTPUT", tmp_path):
             result = service.generar_reporte(config)
 
-        # Prev generico sheet should only have CERVEZAS rows
-        prev_gen_call = mock_writer.add_sheet.call_args_list[0]
-        df_written = prev_gen_call[0][0]
-        assert all(df_written["Generico"] == "CERVEZAS")
+        # Verify the prev generico sheet only has CERVEZAS rows
+        import openpyxl
+        wb = openpyxl.load_workbook(str(result.ruta_archivo))
+        ws = wb["Cob Preventista Generico"]
+        # Column 4 is Generico (after Periodo, Sucursal, Vendedor)
+        generico_col = 4
+        for row in range(2, ws.max_row + 1):
+            assert ws.cell(row, generico_col).value == "CERVEZAS"
 
     def test_applies_zonas_virtuales(self, tmp_path):
         mock_loader = MagicMock(spec=DataLoader)
@@ -179,14 +177,10 @@ class TestMisionImposibleService:
         )
 
         with (
-            patch("src.services.mision_imposible.service.ExcelWriter") as mock_writer_cls,
+            patch("src.services.mision_imposible.service.DATA_OUTPUT", tmp_path),
             patch("src.services.mision_imposible.service.aplicar_zonas_virtuales") as mock_zonas,
         ):
             mock_zonas.return_value = self._make_prev_generico_df()
-            mock_writer = MagicMock()
-            mock_writer.save.return_value = tmp_path / "test_zonas.xlsx"
-            mock_writer_cls.return_value = mock_writer
-
             service.generar_reporte(config)
 
         mock_zonas.assert_called_once()
@@ -205,15 +199,10 @@ class TestMisionImposibleService:
             nombre_archivo="test_empty",
         )
 
-        with patch("src.services.mision_imposible.service.ExcelWriter") as mock_writer_cls:
-            mock_writer = MagicMock()
-            mock_writer.save.return_value = tmp_path / "test_empty.xlsx"
-            mock_writer_cls.return_value = mock_writer
-
+        with patch("src.services.mision_imposible.service.DATA_OUTPUT", tmp_path):
             result = service.generar_reporte(config)
 
         assert result.hojas == []
-        mock_writer.add_sheet.assert_not_called()
 
     def test_result_fields(self, tmp_path):
         mock_loader = MagicMock(spec=DataLoader)
@@ -229,11 +218,7 @@ class TestMisionImposibleService:
             nombre_archivo="test_result",
         )
 
-        with patch("src.services.mision_imposible.service.ExcelWriter") as mock_writer_cls:
-            mock_writer = MagicMock()
-            mock_writer.save.return_value = tmp_path / "test_result.xlsx"
-            mock_writer_cls.return_value = mock_writer
-
+        with patch("src.services.mision_imposible.service.DATA_OUTPUT", tmp_path):
             result = service.generar_reporte(config)
 
         assert result.sucursales == 2
