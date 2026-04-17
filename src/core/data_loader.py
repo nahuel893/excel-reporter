@@ -1201,6 +1201,191 @@ class DataLoader:
             {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
         )
 
+    # ──────────────────────────────────────────────────────────────
+    # Graficos-Cobertura queries
+    # Aggregated per (anio, mes, axis) from cob_* tables. Distinct from the
+    # preventista/sucursal queries above because the graficos service needs
+    # monthly rollups (not per-periodo rows) and its own 5-zone scheme.
+    # ──────────────────────────────────────────────────────────────
+
+    def table_exists(self, schema: str, table_name: str) -> bool:
+        """Check if a table exists in the given schema via information_schema."""
+        df = self.execute_query(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = :schema AND table_name = :table_name
+            ) AS existe
+            """,
+            {"schema": schema, "table_name": table_name},
+        )
+        if df.empty:
+            return False
+        return bool(df["existe"].iloc[0])
+
+    def get_cobertura_graficos_marca_ruta(
+        self,
+        id_fuerza_ventas: int,
+        anios: list[int],
+        id_sucursal: int,
+    ) -> pd.DataFrame:
+        """Preventista-grained marca data for a single sucursal (per id_ruta).
+
+        Returns columns: [anio, mes, id_ruta, marca, clientes].
+        """
+        placeholders = ", ".join(f":anio_{i}" for i in range(len(anios)))
+        params = {"fv": id_fuerza_ventas, "id_sucursal": id_sucursal}
+        params.update({f"anio_{i}": a for i, a in enumerate(anios)})
+        query = f"""
+        SELECT
+            EXTRACT(YEAR FROM periodo)::int  AS anio,
+            EXTRACT(MONTH FROM periodo)::int AS mes,
+            id_ruta, marca,
+            SUM(clientes_compradores) AS clientes
+        FROM gold.cob_preventista_marca
+        WHERE id_fuerza_ventas = :fv
+          AND id_sucursal = :id_sucursal
+          AND EXTRACT(YEAR FROM periodo) IN ({placeholders})
+        GROUP BY 1, 2, id_ruta, marca
+        """
+        return self.execute_query(query, params)
+
+    def get_cobertura_graficos_generico_ruta(
+        self,
+        id_fuerza_ventas: int,
+        anios: list[int],
+        id_sucursal: int,
+    ) -> pd.DataFrame:
+        """Preventista-grained generico data for a single sucursal (per id_ruta).
+
+        Returns columns: [anio, mes, id_ruta, generico, clientes].
+        """
+        placeholders = ", ".join(f":anio_{i}" for i in range(len(anios)))
+        params = {"fv": id_fuerza_ventas, "id_sucursal": id_sucursal}
+        params.update({f"anio_{i}": a for i, a in enumerate(anios)})
+        query = f"""
+        SELECT
+            EXTRACT(YEAR FROM periodo)::int  AS anio,
+            EXTRACT(MONTH FROM periodo)::int AS mes,
+            id_ruta, generico,
+            SUM(clientes_compradores) AS clientes
+        FROM gold.cob_preventista_generico
+        WHERE id_fuerza_ventas = :fv
+          AND id_sucursal = :id_sucursal
+          AND EXTRACT(YEAR FROM periodo) IN ({placeholders})
+        GROUP BY 1, 2, id_ruta, generico
+        """
+        return self.execute_query(query, params)
+
+    def get_cobertura_graficos_marca_sucursal(
+        self,
+        id_fuerza_ventas: int,
+        anios: list[int],
+        sucursales: list[int] | None = None,
+    ) -> pd.DataFrame:
+        """Aggregated marca data from cob_sucursal_marca.
+
+        If sucursales is None, aggregates across ALL sucursales (NOA NORTE).
+
+        Returns columns: [anio, mes, marca, clientes].
+        """
+        anio_ph = ", ".join(f":anio_{i}" for i in range(len(anios)))
+        params = {"fv": id_fuerza_ventas}
+        params.update({f"anio_{i}": a for i, a in enumerate(anios)})
+
+        filtro_suc = ""
+        if sucursales is not None:
+            suc_ph = ", ".join(f":suc_{i}" for i in range(len(sucursales)))
+            filtro_suc = f"AND id_sucursal IN ({suc_ph})"
+            params.update({f"suc_{i}": s for i, s in enumerate(sucursales)})
+
+        query = f"""
+        SELECT
+            EXTRACT(YEAR FROM periodo)::int  AS anio,
+            EXTRACT(MONTH FROM periodo)::int AS mes,
+            marca,
+            SUM(clientes_compradores) AS clientes
+        FROM gold.cob_sucursal_marca
+        WHERE id_fuerza_ventas = :fv
+          AND EXTRACT(YEAR FROM periodo) IN ({anio_ph})
+          {filtro_suc}
+        GROUP BY 1, 2, marca
+        """
+        return self.execute_query(query, params)
+
+    def get_cobertura_graficos_generico_sucursal(
+        self,
+        id_fuerza_ventas: int,
+        anios: list[int],
+        sucursales: list[int] | None = None,
+    ) -> pd.DataFrame:
+        """Aggregated generico data from cob_sucursal_generico.
+
+        Returns columns: [anio, mes, generico, clientes].
+        """
+        anio_ph = ", ".join(f":anio_{i}" for i in range(len(anios)))
+        params = {"fv": id_fuerza_ventas}
+        params.update({f"anio_{i}": a for i, a in enumerate(anios)})
+
+        filtro_suc = ""
+        if sucursales is not None:
+            suc_ph = ", ".join(f":suc_{i}" for i in range(len(sucursales)))
+            filtro_suc = f"AND id_sucursal IN ({suc_ph})"
+            params.update({f"suc_{i}": s for i, s in enumerate(sucursales)})
+
+        query = f"""
+        SELECT
+            EXTRACT(YEAR FROM periodo)::int  AS anio,
+            EXTRACT(MONTH FROM periodo)::int AS mes,
+            generico,
+            SUM(clientes_compradores) AS clientes
+        FROM gold.cob_sucursal_generico
+        WHERE id_fuerza_ventas = :fv
+          AND EXTRACT(YEAR FROM periodo) IN ({anio_ph})
+          {filtro_suc}
+        GROUP BY 1, 2, generico
+        """
+        return self.execute_query(query, params)
+
+    def get_cobertura_graficos_aguas_sucursal(
+        self,
+        id_fuerza_ventas: int,
+        anios: list[int],
+    ) -> pd.DataFrame:
+        """AGUAS DANONE subdivision data from gold.cob_sucursal_aguas.
+
+        Pre-checks table existence via information_schema. If the table is
+        absent, logs a WARNING and returns an empty DataFrame with the
+        expected schema (no raise — graceful degradation).
+
+        Returns columns: [anio, mes, id_sucursal, subdivision_aguas, clientes].
+        """
+        import logging
+
+        empty_cols = ["anio", "mes", "id_sucursal", "subdivision_aguas", "clientes"]
+        if not self.table_exists("gold", "cob_sucursal_aguas"):
+            logging.warning(
+                "gold.cob_sucursal_aguas not available — aguas subdivisions will be skipped"
+            )
+            return pd.DataFrame(columns=empty_cols)
+
+        placeholders = ", ".join(f":anio_{i}" for i in range(len(anios)))
+        params = {"fv": id_fuerza_ventas}
+        params.update({f"anio_{i}": a for i, a in enumerate(anios)})
+        query = f"""
+        SELECT
+            EXTRACT(YEAR FROM periodo)::int  AS anio,
+            EXTRACT(MONTH FROM periodo)::int AS mes,
+            id_sucursal,
+            subdivision_aguas,
+            SUM(clientes_compradores) AS clientes
+        FROM gold.cob_sucursal_aguas
+        WHERE id_fuerza_ventas = :fv
+          AND EXTRACT(YEAR FROM periodo) IN ({placeholders})
+        GROUP BY 1, 2, id_sucursal, subdivision_aguas
+        """
+        return self.execute_query(query, params)
+
 
 # Instancia por defecto para compatibilidad
 _default_loader = None
