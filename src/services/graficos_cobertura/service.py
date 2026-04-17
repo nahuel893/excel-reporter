@@ -91,11 +91,22 @@ class GraficosCoberturaService(BaseService):
 
         graficos += self._build_charts(data, gen_marcas, config, png_dir)
 
+        # Build xlsx sheet DataFrames
+        marca_por_zona_actual = self._fetch_marca_por_zona_anio(config, config.anio_actual)
+        marca_por_zona_anterior = self._fetch_marca_por_zona_anio(config, config.anio_anterior)
+        sheets_por_generico = self._build_sheets_por_generico(data, gen_marcas, config)
+        sheets_mensuales = self._build_sheets_mensuales(
+            data, gen_marcas, marca_por_zona_actual, config
+        )
+        sheet_comparativo = self._build_sheet_comparativo(
+            marca_por_zona_anterior, marca_por_zona_actual, gen_marcas, config
+        )
+
         xlsx_path = excel_builder.build_resumen_xlsx(
             output_path=run_dir / XLSX_FILENAME,
-            sheets_por_generico={},  # populated by later iterations if needed
-            sheets_mensuales={},
-            sheet_comparativo=None,
+            sheets_por_generico=sheets_por_generico,
+            sheets_mensuales=sheets_mensuales,
+            sheet_comparativo=sheet_comparativo,
         )
 
         pptx_paths = pptx_builder.build_decks(
@@ -315,3 +326,188 @@ class GraficosCoberturaService(BaseService):
             (src["anio"] == anio) & (src["mes"] == mes) & (src["marca"].isin(marcas))
         ]
         return filtered[["marca", "clientes"]].groupby("marca", as_index=False)["clientes"].sum()
+
+    # ── XLSX helpers ──────────────────────────────────────────────
+
+    def _fetch_marca_por_zona_anio(
+        self, config: GraficosCoberturaConfig, anio: int
+    ) -> dict[str, pd.DataFrame]:
+        """Fetch marca data for a single year across all 5 zones.
+
+        Returns {zona: DataFrame[mes, marca, clientes]}. Equivalent to the
+        standalone's fetch_marca_por_anio(anio).
+        """
+        fv = config.id_fuerza_ventas
+        loader = self.data_loader
+        zone_to_sucs: dict[str, list[int] | None] = {
+            "SALTA CAPITAL": [1],
+            "INTERIOR SALTA SUR": SUCS_INTERIOR,
+            "INTERIOR SALTA NORTE": SUCS_SALTA_NORTE,
+            "JUJUY INTERIOR": SUCS_JUJUY,
+            "NOA NORTE": None,
+        }
+        out: dict[str, pd.DataFrame] = {}
+        for zona, sucs in zone_to_sucs.items():
+            df = loader.get_cobertura_graficos_marca_sucursal(fv, [anio], sucursales=sucs)
+            # Drop anio since we filtered to one; match standalone's [mes, marca, clientes]
+            out[zona] = df[["mes", "marca", "clientes"]].copy() if not df.empty else df
+        return out
+
+    @staticmethod
+    def _marcas_order_for_generico(
+        generico: str, gen_marcas: dict[str, set[str]]
+    ) -> list[str]:
+        """Column order for a per-generico sheet: fixed list, subdivision, or sorted."""
+        if generico in MARCAS_POR_GENERICO:
+            return list(MARCAS_POR_GENERICO[generico])
+        if generico in SUBDIVISION_AGUAS:
+            return list(SUBDIVISION_AGUAS[generico])
+        return sorted(gen_marcas.get(generico, set()))
+
+    @staticmethod
+    def _all_marcas_order(gen_marcas: dict[str, set[str]]) -> list[str]:
+        """All marcas in generico order — for mensual and comparativo sheets."""
+        out: list[str] = []
+        for generico in GENERICOS_INCLUIDOS:
+            if generico in MARCAS_POR_GENERICO:
+                out.extend(MARCAS_POR_GENERICO[generico])
+            elif generico in SUBDIVISION_AGUAS:
+                out.extend(SUBDIVISION_AGUAS[generico])
+            elif generico in gen_marcas:
+                out.extend(sorted(gen_marcas[generico]))
+        return out
+
+    def _build_sheets_por_generico(
+        self,
+        data: dict,
+        gen_marcas: dict[str, set[str]],
+        config: GraficosCoberturaConfig,
+    ) -> dict[str, pd.DataFrame]:
+        """One sheet per generico: rows=(zona, mes), cols=marcas + Total {anio} per anios_lineas."""
+        sheets: dict[str, pd.DataFrame] = {}
+        for generico in GENERICOS_INCLUIDOS:
+            if generico not in gen_marcas:
+                continue
+            marcas_order = self._marcas_order_for_generico(generico, gen_marcas)
+
+            rows: list[dict] = []
+            for zona in ZONAS:
+                df_bars, df_gen = get_zona_data(
+                    zona=zona, generico=generico, gen_marcas=gen_marcas,
+                    df_marca_prev=data["marca_prev"],
+                    df_gen_prev=data["gen_prev"],
+                    df_marca_interior=data["marca_interior"],
+                    df_gen_interior=data["gen_interior"],
+                    df_marca_snorte=data["marca_snorte"],
+                    df_gen_snorte=data["gen_snorte"],
+                    df_marca_jujuy=data["marca_jujuy"],
+                    df_gen_jujuy=data["gen_jujuy"],
+                    df_marca_todas=data["marca_todas"],
+                    df_gen_todas=data["gen_todas"],
+                    df_gen_suc1=data["gen_suc1"],
+                    df_aguas=data["aguas"],
+                )
+                for mes in range(1, 13):
+                    row: dict = {"Zona": zona, "Mes": MESES[mes - 1]}
+                    for marca in marcas_order:
+                        sub = df_bars[(df_bars["mes"] == mes) & (df_bars["marca"] == marca)]
+                        val = int(sub["clientes"].sum()) if not sub.empty else 0
+                        row[marca] = val if val > 0 else ""
+                    for yr in config.anios_lineas:
+                        sub = df_gen[(df_gen["anio"] == yr) & (df_gen["mes"] == mes)]
+                        val = int(sub["clientes"].sum()) if not sub.empty else 0
+                        row[f"Total {yr}"] = val if val > 0 else ""
+                    rows.append(row)
+            sheets[generico] = pd.DataFrame(rows)
+        return sheets
+
+    def _build_sheets_mensuales(
+        self,
+        data: dict,
+        gen_marcas: dict[str, set[str]],
+        marca_por_zona_actual: dict[str, pd.DataFrame],
+        config: GraficosCoberturaConfig,
+    ) -> dict[str, pd.DataFrame]:
+        """One sheet per mes_con_datos: rows=zona, cols=genericos + all_marcas."""
+        anio_actual = config.anio_actual
+
+        # Pre-compute gen_data per zona x generico for anio_actual
+        gen_cache: dict[str, dict[str, pd.DataFrame]] = {}
+        for zona in ZONAS:
+            gen_cache[zona] = {}
+            for generico in GENERICOS_INCLUIDOS:
+                if generico not in gen_marcas:
+                    continue
+                _, df_gen = get_zona_data(
+                    zona=zona, generico=generico, gen_marcas=gen_marcas,
+                    df_marca_prev=data["marca_prev"], df_gen_prev=data["gen_prev"],
+                    df_marca_interior=data["marca_interior"], df_gen_interior=data["gen_interior"],
+                    df_marca_snorte=data["marca_snorte"], df_gen_snorte=data["gen_snorte"],
+                    df_marca_jujuy=data["marca_jujuy"], df_gen_jujuy=data["gen_jujuy"],
+                    df_marca_todas=data["marca_todas"], df_gen_todas=data["gen_todas"],
+                    df_gen_suc1=data["gen_suc1"], df_aguas=data["aguas"],
+                )
+                gen_cache[zona][generico] = df_gen[df_gen["anio"] == anio_actual] if not df_gen.empty else df_gen
+
+        # Collect meses with data
+        meses_con_datos: set[int] = set()
+        for zona in ZONAS:
+            z_df = marca_por_zona_actual.get(zona)
+            if z_df is not None and not z_df.empty:
+                meses_con_datos.update(z_df["mes"].unique().tolist())
+            for df in gen_cache[zona].values():
+                if not df.empty:
+                    meses_con_datos.update(df["mes"].unique().tolist())
+
+        all_marcas = self._all_marcas_order(gen_marcas)
+
+        sheets: dict[str, pd.DataFrame] = {}
+        for mes in sorted(meses_con_datos):
+            sheet_name = f"{MESES[mes - 1]} {anio_actual}"
+            rows: list[dict] = []
+            for zona in ZONAS:
+                row: dict = {"Zona": zona}
+                for generico in GENERICOS_INCLUIDOS:
+                    if generico not in gen_marcas:
+                        continue
+                    df_g = gen_cache[zona].get(generico, pd.DataFrame())
+                    val = int(df_g[df_g["mes"] == mes]["clientes"].sum()) if not df_g.empty else 0
+                    row[generico] = val if val > 0 else ""
+                df_z = marca_por_zona_actual.get(zona, pd.DataFrame())
+                for marca in all_marcas:
+                    if df_z.empty:
+                        row[marca] = ""
+                        continue
+                    sub = df_z[(df_z["mes"] == mes) & (df_z["marca"] == marca)]
+                    val = int(sub["clientes"].sum()) if not sub.empty else 0
+                    row[marca] = val if val > 0 else ""
+                rows.append(row)
+            sheets[sheet_name] = pd.DataFrame(rows)
+        return sheets
+
+    def _build_sheet_comparativo(
+        self,
+        marca_por_zona_anterior: dict[str, pd.DataFrame],
+        marca_por_zona_actual: dict[str, pd.DataFrame],
+        gen_marcas: dict[str, set[str]],
+        config: GraficosCoberturaConfig,
+    ) -> pd.DataFrame:
+        """One row per (zona, anio): (anio_anterior, anio_actual) for mes_corte."""
+        all_marcas = self._all_marcas_order(gen_marcas)
+        rows: list[dict] = []
+        for zona in ZONAS:
+            for anio_label, src in (
+                (config.anio_anterior, marca_por_zona_anterior),
+                (config.anio_actual, marca_por_zona_actual),
+            ):
+                row: dict = {"Zona": zona, "Año": anio_label}
+                df_z = src.get(zona, pd.DataFrame())
+                for marca in all_marcas:
+                    if df_z.empty:
+                        row[marca] = ""
+                        continue
+                    sub = df_z[(df_z["mes"] == config.mes_corte) & (df_z["marca"] == marca)]
+                    val = int(sub["clientes"].sum()) if not sub.empty else 0
+                    row[marca] = val if val > 0 else ""
+                rows.append(row)
+        return pd.DataFrame(rows)
