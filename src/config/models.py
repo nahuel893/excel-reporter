@@ -86,7 +86,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "mision-imposible", "historico-fratelli", "stock-diario", "cartesiano", "avances"]
+    tipo: Literal["ventas", "resumen-mensual", "mision-imposible", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

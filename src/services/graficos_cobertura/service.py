@@ -26,6 +26,11 @@ from src.services.graficos_cobertura.constants import (
     SUCS_SALTA_NORTE,
     SUCS_JUJUY,
 )
+from src.services.graficos_cobertura.constants import (
+    MARCAS_POR_GENERICO,
+    MAX_MARCAS,
+    SUBDIVISION_AGUAS,
+)
 from src.services.graficos_cobertura.processor import (
     build_gen_marcas_mapping,
     filtrar_barras_mixtas,
@@ -33,6 +38,8 @@ from src.services.graficos_cobertura.processor import (
     reassign_rutas_suc1,
     select_marcas_para_grafico,
 )
+
+import pandas as pd  # noqa: E402  (re-imported for type hints; already imported above)
 
 
 logger = logging.getLogger(__name__)
@@ -66,6 +73,10 @@ class GraficosCoberturaService(BaseService):
 
         gen_marcas = build_gen_marcas_mapping(data["articulos"])
 
+        # Keep marca data WITH anio column for comparison charts (needed before filtrar_barras_mixtas)
+        comp_sources = self._build_comparacion_sources(data)
+        graficos = self._build_comparacion_charts(comp_sources, gen_marcas, config, png_dir)
+
         # Filter bar-sources to the mixed (current-up-to-corte + prior-after-corte) window
         for key in (
             "marca_prev", "marca_interior", "marca_snorte", "marca_jujuy", "marca_todas",
@@ -78,7 +89,7 @@ class GraficosCoberturaService(BaseService):
                 df, config.anio_actual, config.anio_anterior, config.mes_corte
             )
 
-        graficos = self._build_charts(data, gen_marcas, config, png_dir)
+        graficos += self._build_charts(data, gen_marcas, config, png_dir)
 
         xlsx_path = excel_builder.build_resumen_xlsx(
             output_path=run_dir / XLSX_FILENAME,
@@ -218,3 +229,89 @@ class GraficosCoberturaService(BaseService):
                 )
                 count += 1
         return count
+
+    def _build_comparacion_sources(self, data: dict) -> dict[str, pd.DataFrame]:
+        """Build zone-keyed marca DataFrames (with anio column) for comparacion charts.
+
+        Comparacion needs (anio, mes, marca, clientes) — called BEFORE filtrar_barras_mixtas.
+        """
+        prev_grouped = (
+            data["marca_prev"].groupby(["anio", "mes", "marca"])["clientes"]
+            .sum().reset_index()
+        )
+        return {
+            "NOA NORTE": data["marca_todas"],
+            "SALTA CAPITAL": prev_grouped,
+            "INTERIOR SALTA SUR": data["marca_interior"],
+            "INTERIOR SALTA NORTE": data["marca_snorte"],
+            "JUJUY INTERIOR": data["marca_jujuy"],
+        }
+
+    def _build_comparacion_charts(
+        self,
+        comp_sources: dict[str, pd.DataFrame],
+        gen_marcas: dict[str, set[str]],
+        config: GraficosCoberturaConfig,
+        png_dir: Path,
+    ) -> int:
+        """Render comparacion_* PNGs: bar-per-marca comparing anio_anterior vs anio_actual at mes_corte."""
+        count = 0
+        for zona in ZONAS:
+            src = comp_sources.get(zona)
+            if src is None or src.empty:
+                continue
+
+            for generico in GENERICOS_INCLUIDOS:
+                if generico not in gen_marcas:
+                    continue
+                if not config.con_aguas and generico in ("AGUAS SABORIZADAS", "AGUAS MINERAL"):
+                    continue
+
+                marcas_gen = gen_marcas[generico]
+                df_prev = self._slice_marca_mes(src, marcas_gen, config.anio_anterior, config.mes_corte)
+                df_act = self._slice_marca_mes(src, marcas_gen, config.anio_actual, config.mes_corte)
+
+                if df_act.empty or df_act["clientes"].sum() == 0:
+                    continue
+
+                # Pick marcas_plot (fixed list | subdivision | top-N from anio_actual)
+                if generico in MARCAS_POR_GENERICO:
+                    marcas_plot = list(MARCAS_POR_GENERICO[generico])
+                elif generico in SUBDIVISION_AGUAS:
+                    marcas_plot = list(SUBDIVISION_AGUAS[generico])
+                else:
+                    marcas_plot = (
+                        df_act.groupby("marca")["clientes"].sum()
+                        .sort_values(ascending=False)
+                        .head(MAX_MARCAS).index.tolist()
+                    )
+
+                # Filter marcas_plot to those with data in either year
+                marcas_con_datos = set(df_prev["marca"].tolist()) | set(df_act["marca"].tolist())
+                marcas_plot = [m for m in marcas_plot if m in marcas_con_datos]
+                if not marcas_plot:
+                    continue
+
+                chart_generator.plot_comparacion_marca(
+                    zona=zona, generico=generico,
+                    marcas_plot=marcas_plot,
+                    df_anterior=df_prev, df_actual=df_act,
+                    mes_corte=config.mes_corte,
+                    anio_actual=config.anio_actual,
+                    anio_anterior=config.anio_anterior,
+                    output_dir=png_dir,
+                )
+                count += 1
+        return count
+
+    @staticmethod
+    def _slice_marca_mes(
+        src: pd.DataFrame, marcas: set[str], anio: int, mes: int
+    ) -> pd.DataFrame:
+        """Filter a (anio, mes, marca, clientes) df to a specific (anio, mes) slice."""
+        if src.empty:
+            return pd.DataFrame(columns=["marca", "clientes"])
+        filtered = src[
+            (src["anio"] == anio) & (src["mes"] == mes) & (src["marca"].isin(marcas))
+        ]
+        return filtered[["marca", "clientes"]].groupby("marca", as_index=False)["clientes"].sum()
