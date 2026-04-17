@@ -143,6 +143,8 @@ def _run_reportes(report_config, contactos) -> int:
             artifacts = _run_cartesiano_report(report, merged)
         elif report_config.tipo == "avances":
             artifacts = _run_avances_report(report, merged)
+        elif report_config.tipo == "graficos-cobertura":
+            artifacts = _run_graficos_cobertura_report(report, merged)
         else:
             print(f"Error: tipo de reporte desconocido: {report_config.tipo}")
             return 1
@@ -552,6 +554,43 @@ def cmd_stock_diario(args) -> int:
         return 1
 
 
+def cmd_graficos_cobertura(args) -> int:
+    """Ejecuta el comando de graficos-cobertura."""
+    if not args.config:
+        print("Error: graficos-cobertura requiere un archivo --config")
+        return 1
+    return _run_report_config(Path(args.config))
+
+
+def _run_graficos_cobertura_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate graficos-cobertura report. Returns list of (path, metadata) tuples."""
+    from src.services.graficos_cobertura.config import GraficosCoberturaConfig
+    from src.services.graficos_cobertura.service import GraficosCoberturaService
+
+    config = GraficosCoberturaConfig(
+        fecha_desde=merged["fecha_desde"],
+        fecha_hasta=merged["fecha_hasta"],
+        id_fuerza_ventas=merged.get("id_fuerza_ventas", 1),
+        nombre_archivo=report.nombre,
+        con_aguas=merged.get("con_aguas", True),
+    )
+    result = GraficosCoberturaService().generar_reporte(config)
+
+    print("Graficos Cobertura generado exitosamente:")
+    print(f"  - Directorio: {result.ruta_directorio}")
+    print(f"  - XLSX: {result.archivo_xlsx.name}")
+    print(f"  - Marca PPTX: {result.archivo_marca_pptx.name}")
+    print(f"  - Generico PPTX: {result.archivo_generico_pptx.name}")
+    print(f"  - Graficos generados: {result.graficos_generados}")
+
+    meta = {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")}
+    return [
+        (Path(result.archivo_xlsx), meta),
+        (Path(result.archivo_marca_pptx), meta),
+        (Path(result.archivo_generico_pptx), meta),
+    ]
+
+
 def _run_cartesiano_report(report, merged: dict) -> list[tuple[Path, dict]]:
     """Generate cartesiano report. Returns list of (path, metadata) tuples."""
     from src.services.cartesiano import CartesianoConfig, CartesianoService
@@ -848,6 +887,19 @@ Ejemplos:
         help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
     )
     cartesiano_parser.set_defaults(func=cmd_cartesiano)
+
+    graficos_parser = subparsers.add_parser(
+        "graficos-cobertura",
+        help="Graficos de cobertura (XLSX + 2 PPTX + PNGs)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    graficos_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    graficos_parser.set_defaults(func=cmd_graficos_cobertura)
 
     # Parsear argumentos
     args = parser.parse_args()

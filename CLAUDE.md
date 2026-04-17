@@ -9,6 +9,7 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 - Pandas (procesamiento)
 - OpenPyXL (generacion Excel)
 - pywin32 (slicers, solo Windows)
+- matplotlib + python-pptx (graficos-cobertura)
 - FastAPI (API REST)
 - pytest (testing)
 
@@ -29,9 +30,17 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 │   │   └── __init__.py
 │   └── services/
 │       ├── base_service.py   # BaseService (clase abstracta)
-│       └── ventas/           # Reporte de ventas
-│           ├── service.py    # VentasService, _aplicar_zonas_virtuales, _expandir_sucursales
-│           └── processor.py  # procesar_ventas_diarias, formatear_nombre_dia
+│       ├── ventas/           # Reporte de ventas
+│       │   ├── service.py    # VentasService, _aplicar_zonas_virtuales, _expandir_sucursales
+│       │   └── processor.py  # procesar_ventas_diarias, formatear_nombre_dia
+│       └── graficos_cobertura/   # Graficos cobertura (matplotlib + pptx)
+│           ├── config.py     # GraficosCoberturaConfig (fecha_desde/hasta, con_aguas, etc.)
+│           ├── constants.py  # ZONAS (5), GENERICOS_INCLUIDOS, RUTAS_A_SUC16, COLORES_MARCA
+│           ├── processor.py  # reassign_rutas_suc1, get_zona_data, build_matrix_*, compute_yoy
+│           ├── chart_generator.py  # matplotlib Agg + plot_cobertura_zona + plot_comparacion_marca
+│           ├── excel_builder.py    # build_resumen_xlsx (sheets por generico + mensual + comparativo)
+│           ├── pptx_builder.py     # build_decks -> Marca.pptx + Generico.pptx
+│           └── service.py    # GraficosCoberturaService orquesta todo
 ├── tests/
 ├── main.py                   # CLI con subcomandos (soporta --config JSON)
 ├── api.py                    # FastAPI application (v2.0.0)
@@ -74,6 +83,9 @@ python main.py ventas --desde 2026-02-01 --hasta 2026-02-28 --genericos "CERVEZA
 
 # Sin slicers (necesario en Linux, donde no hay Excel/pywin32)
 python main.py ventas --desde 2026-02-01 --hasta 2026-02-28 --no-slicers
+
+# Graficos Cobertura (XLSX + 2 PPTX + ~50 PNGs)
+python main.py graficos-cobertura --config configs/graficos_cobertura.json
 
 # Tests
 pytest -v
@@ -154,6 +166,24 @@ Sucursal | Generico | Cant(Gen) | Tend(Gen) | Monto(Gen) | Cob(Gen) | Marca | 01
 - **Tendencia**: `cantidad * (dias_totales_mes / dias_transcurridos_hasta_hoy)`
 - **Dias habiles**: Excluyen domingos y feriados (config/settings.py)
 - **Nombre archivo**: `Ventas {supervisor} - {dd-mm-yyyy}.xlsx` (fecha = ultima venta real)
+
+## Graficos Cobertura
+
+Servicio separado que genera un paquete visual mensual:
+- `data/output/graficos-cobertura/{YYYY-MM-DD_HHMMSS}/resumen.xlsx`
+- `data/output/graficos-cobertura/{YYYY-MM-DD_HHMMSS}/Marca.pptx` (CERVEZAS + AGUAS)
+- `data/output/graficos-cobertura/{YYYY-MM-DD_HHMMSS}/Generico.pptx` (los 5 genericos)
+- `data/output/graficos-cobertura/{YYYY-MM-DD_HHMMSS}/png/*.png` (~50 PNGs)
+
+**IMPORTANTE**: Este servicio usa su propio esquema de zonas (5 zonas: NOA NORTE,
+SALTA CAPITAL, INTERIOR SALTA SUR, INTERIOR SALTA NORTE, JUJUY INTERIOR) basado
+en id_sucursal / id_ruta de tablas `gold.cob_*`. NO usa `ZONAS_VIRTUALES` de
+`config/settings.py` (que splitea CASA CENTRAL en `fact_ventas`). Son esquemas
+distintos que coexisten.
+
+Tabla opcional: `gold.cob_sucursal_aguas` — si no existe en el ambiente se
+loguea WARN y las subdivisiones de AGUAS (SABORIZADAS/MINERAL) se omiten.
+Controlable tambien via `con_aguas: false` en el config.
 
 ## Zonas Virtuales (CASA CENTRAL / VALLE SALTA)
 
