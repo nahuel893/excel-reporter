@@ -5,7 +5,7 @@ from openpyxl import load_workbook
 import tempfile
 from unittest.mock import patch
 
-from src.core.excel_writer import generar_excel
+from src.core.excel_writer import generar_excel, ColumnFormat, SheetStyle
 
 
 class TestGenerarExcel:
@@ -131,3 +131,49 @@ class TestGenerarExcel:
             ruta = generar_excel(df_ejemplo, "test")
 
         assert isinstance(ruta, Path)
+
+
+class TestColumnFormatHidden:
+    """Tests para la opcion hidden de ColumnFormat."""
+
+    @pytest.fixture
+    def df_ejemplo(self):
+        return pd.DataFrame({
+            "Sucursal": ["SUC1", "SUC2"],
+            "Monto": [1000, 2000],
+            "Cantidad": [10, 20],
+        })
+
+    def test_hidden_oculta_columna(self, df_ejemplo, tmp_path):
+        """Una columna marcada hidden=True debe quedar oculta en el Excel."""
+        style = SheetStyle(
+            column_formats={
+                "Monto": ColumnFormat(number_format="$ #,##0", hidden=True),
+            }
+        )
+
+        with patch("src.core.excel_writer.DATA_OUTPUT", tmp_path):
+            ruta = generar_excel(df_ejemplo, "test_hidden", style=style)
+
+        wb = load_workbook(ruta)
+        ws = wb.active
+        # "Monto" es la columna B
+        assert ws.column_dimensions["B"].hidden is True
+        # "Sucursal" (A) y "Cantidad" (C) NO estan ocultas
+        assert ws.column_dimensions["A"].hidden is False
+        assert ws.column_dimensions["C"].hidden is False
+
+    def test_hidden_default_false(self, df_ejemplo, tmp_path):
+        """Sin setear hidden, la columna queda visible."""
+        style = SheetStyle(
+            column_formats={
+                "Monto": ColumnFormat(number_format="$ #,##0"),
+            }
+        )
+
+        with patch("src.core.excel_writer.DATA_OUTPUT", tmp_path):
+            ruta = generar_excel(df_ejemplo, "test_visible", style=style)
+
+        wb = load_workbook(ruta)
+        ws = wb.active
+        assert ws.column_dimensions["B"].hidden is False

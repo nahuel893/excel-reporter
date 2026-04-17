@@ -25,6 +25,7 @@ class ColumnFormat:
     width: int | float | None = None
     fill_color: str | None = None
     header_fill_color: str | None = None
+    hidden: bool = False
 
 
 @dataclass
@@ -138,6 +139,12 @@ def _auto_fit_columns(ws, style: SheetStyle, header_row: int = 1):
     for col_idx, column in enumerate(ws.columns):
         col_name = headers[col_idx] if col_idx < len(headers) else None
         column_letter = column[0].column_letter
+
+        # Ocultar columna si esta marcada como hidden
+        if col_name and col_name in style.column_formats:
+            fmt = style.column_formats[col_name]
+            if fmt.hidden:
+                ws.column_dimensions[column_letter].hidden = True
 
         # Ancho fijo si esta configurado
         if col_name and col_name in style.column_formats:
