@@ -1158,27 +1158,14 @@ class DataLoader:
             },
         )
 
-    def get_dim_articulo_raw(
-        self, fecha_desde: str, fecha_hasta: str, id_sucursal: int
-    ) -> pd.DataFrame:
-        """Raw dim_articulo for avances — only articles sold in the period/sucursal."""
+    def get_dim_articulo_raw(self) -> pd.DataFrame:
+        """Raw dim_articulo for avances — full dimension table, no filter."""
         return self.execute_query(
             """
             SELECT id_articulo, des_articulo, marca, generico, calibre,
                    proveedor, unidad_negocio, factor_hectolitros
             FROM gold.dim_articulo
-            WHERE id_articulo IN (
-                SELECT DISTINCT id_articulo
-                FROM gold.fact_ventas
-                WHERE fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
-                  AND id_sucursal = :id_sucursal
-            )
-            """,
-            {
-                "fecha_desde": fecha_desde,
-                "fecha_hasta": fecha_hasta,
-                "id_sucursal": id_sucursal,
-            },
+            """
         )
 
     def get_dim_cliente_raw(self, id_sucursal: int) -> pd.DataFrame:

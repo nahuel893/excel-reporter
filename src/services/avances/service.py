@@ -46,7 +46,6 @@ SHEET_CONFIGS = [
     SheetConfig(
         sheet_name="gold dim_articulo",
         query_method="get_dim_articulo_raw",
-        query_params=["fecha_desde", "fecha_hasta", "id_sucursal"],
         data_columns=[
             "id_articulo", "des_articulo", "marca", "generico", "calibre",
             "proveedor", "unidad_negocio", "factor_hectolitros",

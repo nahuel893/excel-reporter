@@ -208,13 +208,10 @@ class TestAvancesServiceHappyPath:
             "id_sucursal": 1,
         }
 
-        # dim_articulo: fechas + id_sucursal (subquery on fact_ventas)
+        # dim_articulo: no params — full dimension table (NOT filtered)
         da_call = mock_loader.get_dim_articulo_raw.call_args
-        assert da_call.kwargs == {
-            "fecha_desde": "2026-04-01",
-            "fecha_hasta": "2026-04-30",
-            "id_sucursal": 1,
-        }
+        assert da_call.kwargs == {}
+        assert da_call.args == ()
 
         # dim_cliente: id_sucursal only
         dc_call = mock_loader.get_dim_cliente_raw.call_args
