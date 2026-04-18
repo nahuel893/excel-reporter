@@ -28,7 +28,7 @@ def _make_artifact_with_image(tmp_path: Path) -> ReportArtifact:
     xlsx.write_bytes(b"fake")
     png = tmp_path / "reporte.png"
     png.write_bytes(b"fake-png")
-    return ReportArtifact(ruta_excel=xlsx, ruta_imagen=png)
+    return ReportArtifact(ruta_excel=xlsx, rutas_imagenes=[png])
 
 
 # ---------------------------------------------------------------------------

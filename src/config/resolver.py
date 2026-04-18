@@ -54,14 +54,15 @@ def resolve_delivery(
 
     Returns None if report has no enviar_a.
     """
-    if not report.enviar_a:
+    has_captures = bool(report.capture_images or report.capture_image)
+    if not report.enviar_a and not has_captures:
         return None
 
     email_recipients: list[str] = []
     email_cc: list[str] = []
     whatsapp_targets: list[str] = []
 
-    for contact_name, target in report.enviar_a.items():
+    for contact_name, target in (report.enviar_a or {}).items():
         contact = contactos.get(contact_name)
         if contact is None:
             logger.warning("Contact '%s' not found in catalog, skipping", contact_name)
@@ -94,15 +95,20 @@ def resolve_delivery(
                     contact_name,
                 )
 
-    capture = None
-    if report.capture_image:
-        capture = CaptureConfig(
-            hoja=report.capture_image.hoja,
-            rango=report.capture_image.rango,
-        )
+    # Normalize captures: plural wins, fall back to legacy singular.
+    capture_list: list[CaptureConfig] = []
+    if report.capture_images:
+        capture_list = [
+            CaptureConfig(hoja=c.hoja, rango=c.rango) for c in report.capture_images
+        ]
+    elif report.capture_image:
+        capture_list = [
+            CaptureConfig(hoja=report.capture_image.hoja, rango=report.capture_image.rango)
+        ]
 
     return DeliveryConfig(
-        capture_image=capture,
+        capture_image=capture_list[0] if capture_list else None,  # legacy field, first only
+        capture_images=capture_list,
         email=EmailConfig(destinatarios=email_recipients, cc=email_cc, asunto=report.asunto_email) if email_recipients else None,
         whatsapp=WhatsAppConfig(grupos=whatsapp_targets) if whatsapp_targets else None,
     )

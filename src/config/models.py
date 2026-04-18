@@ -80,9 +80,17 @@ class ReportEntry(BaseModel):
 
     nombre: str
     filtros: ReportFilters | None = None
-    capture_image: CaptureImageConfig | None = None
+    capture_image: CaptureImageConfig | None = None  # legacy, single
+    capture_images: list[CaptureImageConfig] | None = None  # N captures per report
     enviar_a: dict[str, DeliveryTarget] | None = None
     asunto_email: str | None = None
+
+    @model_validator(mode="after")
+    def normalize_captures(self):
+        # If both provided, plural wins and singular is cleared to avoid confusion.
+        if self.capture_images and self.capture_image is not None:
+            self.capture_image = None
+        return self
 
 
 class ReportConfig(BaseModel):

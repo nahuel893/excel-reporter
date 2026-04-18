@@ -47,7 +47,8 @@ class WhatsAppConfig(BaseModel):
 
 class DeliveryConfig(BaseModel):
     """Configuracion completa del pipeline de entrega."""
-    capture_image: CaptureConfig | None = None
+    capture_image: CaptureConfig | None = None  # legacy singular (use capture_images)
+    capture_images: list[CaptureConfig] = []     # N captures per report
     email: EmailConfig | None = None
     whatsapp: WhatsAppConfig | None = None
     log_steps: bool = True
@@ -80,8 +81,18 @@ class PipelineResult:
 class ReportArtifact:
     """Artefactos generados por un reporte (archivos en disco)."""
     ruta_excel: Path
-    ruta_imagen: Path | None = None
+    rutas_imagenes: list[Path] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
+
+    @property
+    def ruta_imagen(self) -> Path | None:
+        """Legacy single-image accessor — returns first if any, else None."""
+        return self.rutas_imagenes[0] if self.rutas_imagenes else None
+
+    @ruta_imagen.setter
+    def ruta_imagen(self, path: Path | None) -> None:
+        """Legacy setter — replaces list with [path] or empty."""
+        self.rutas_imagenes = [path] if path is not None else []
 
 
 # ---------------------------------------------------------------------------

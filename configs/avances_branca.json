@@ -11,7 +11,11 @@
     },
     "reportes": [
         {
-            "nombre": "AVANCE BRANCA - ABRIL 2026"
+            "nombre": "AVANCE BRANCA - ABRIL 2026",
+            "capture_images": [
+                { "hoja": "AVANCE",    "rango": "auto" },
+                { "hoja": "Cobertura", "rango": "auto" }
+            ]
         }
     ]
 }

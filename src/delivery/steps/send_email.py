@@ -30,13 +30,13 @@ class SendEmailStep(DeliveryStep):
             if item == "excel":
                 adjuntos.append(artifact.ruta_excel)
             elif item == "imagen":
-                if artifact.ruta_imagen is None:
+                if not artifact.rutas_imagenes:
                     logger.warning(
-                        "Se pidio adjuntar imagen pero ruta_imagen es None "
+                        "Se pidio adjuntar imagen pero rutas_imagenes esta vacio "
                         "(captura no ejecutada o fallida). Se omite adjunto de imagen."
                     )
                 else:
-                    adjuntos.append(artifact.ruta_imagen)
+                    adjuntos.extend(artifact.rutas_imagenes)
 
         asunto = config.email.asunto or _generar_asunto(artifact)
 
