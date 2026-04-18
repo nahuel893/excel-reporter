@@ -1138,8 +1138,10 @@ class DataLoader:
         """
         return self.execute_query(query, params)
 
-    def get_fact_ventas_raw(self, fecha_desde: str, fecha_hasta: str) -> pd.DataFrame:
-        """Raw fact_ventas dump for avances reports."""
+    def get_fact_ventas_raw(
+        self, fecha_desde: str, fecha_hasta: str, id_sucursal: int
+    ) -> pd.DataFrame:
+        """Raw fact_ventas dump for avances reports, filtered by date + sucursal."""
         return self.execute_query(
             """
             SELECT id_cliente, id_articulo, id_vendedor, id_sucursal,
@@ -1147,34 +1149,59 @@ class DataLoader:
                    anulado, cantidades_total, bonificacion
             FROM gold.fact_ventas
             WHERE fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
-              AND id_sucursal = 1
+              AND id_sucursal = :id_sucursal
             """,
-            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+            {
+                "fecha_desde": fecha_desde,
+                "fecha_hasta": fecha_hasta,
+                "id_sucursal": id_sucursal,
+            },
         )
 
-    def get_dim_articulo_raw(self) -> pd.DataFrame:
-        """Raw dim_articulo dump for avances reports."""
+    def get_dim_articulo_raw(
+        self, fecha_desde: str, fecha_hasta: str, id_sucursal: int
+    ) -> pd.DataFrame:
+        """Raw dim_articulo for avances — only articles sold in the period/sucursal."""
         return self.execute_query(
             """
             SELECT id_articulo, des_articulo, marca, generico, calibre,
                    proveedor, unidad_negocio, factor_hectolitros
             FROM gold.dim_articulo
-            """
+            WHERE id_articulo IN (
+                SELECT DISTINCT id_articulo
+                FROM gold.fact_ventas
+                WHERE fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+                  AND id_sucursal = :id_sucursal
+            )
+            """,
+            {
+                "fecha_desde": fecha_desde,
+                "fecha_hasta": fecha_hasta,
+                "id_sucursal": id_sucursal,
+            },
         )
 
-    def get_dim_cliente_raw(self) -> pd.DataFrame:
-        """Raw dim_cliente dump for avances reports."""
+    def get_dim_cliente_raw(self, id_sucursal: int) -> pd.DataFrame:
+        """Raw dim_cliente dump for avances — filtered by sucursal + anulado=false."""
         return self.execute_query(
             """
             SELECT id_cliente, fantasia, razon_social, des_sucursal, id_sucursal,
                    id_ruta_fv1, des_personal_fv1, id_ruta_fv4, des_personal_fv4
             FROM gold.dim_cliente
             WHERE anulado = false
-            """
+              AND id_sucursal = :id_sucursal
+            """,
+            {"id_sucursal": id_sucursal},
         )
 
-    def get_cob_preventista_generico_raw(self, fecha_desde: str, fecha_hasta: str) -> pd.DataFrame:
-        """Raw cob_preventista_generico dump for avances reports."""
+    def get_cob_preventista_generico_raw(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        id_fuerza_ventas: int,
+        id_sucursal: int,
+    ) -> pd.DataFrame:
+        """Raw cob_preventista_generico — filtered by period + FV + sucursal."""
         return self.execute_query(
             """
             SELECT id, periodo, id_fuerza_ventas, id_vendedor, id_ruta,
@@ -1182,13 +1209,25 @@ class DataLoader:
                    volumen_total
             FROM gold.cob_preventista_generico
             WHERE periodo BETWEEN :fecha_desde AND :fecha_hasta
-              AND id_fuerza_ventas = 1
+              AND id_fuerza_ventas = :id_fuerza_ventas
+              AND id_sucursal = :id_sucursal
             """,
-            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+            {
+                "fecha_desde": fecha_desde,
+                "fecha_hasta": fecha_hasta,
+                "id_fuerza_ventas": id_fuerza_ventas,
+                "id_sucursal": id_sucursal,
+            },
         )
 
-    def get_cob_preventista_marca_raw(self, fecha_desde: str, fecha_hasta: str) -> pd.DataFrame:
-        """Raw cob_preventista_marca dump for avances reports."""
+    def get_cob_preventista_marca_raw(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        id_fuerza_ventas: int,
+        id_sucursal: int,
+    ) -> pd.DataFrame:
+        """Raw cob_preventista_marca — filtered by period + FV + sucursal."""
         return self.execute_query(
             """
             SELECT id, periodo, id_fuerza_ventas, id_vendedor, id_ruta,
@@ -1196,9 +1235,15 @@ class DataLoader:
                    volumen_total
             FROM gold.cob_preventista_marca
             WHERE periodo BETWEEN :fecha_desde AND :fecha_hasta
-              AND id_fuerza_ventas = 1
+              AND id_fuerza_ventas = :id_fuerza_ventas
+              AND id_sucursal = :id_sucursal
             """,
-            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+            {
+                "fecha_desde": fecha_desde,
+                "fecha_hasta": fecha_hasta,
+                "id_fuerza_ventas": id_fuerza_ventas,
+                "id_sucursal": id_sucursal,
+            },
         )
 
     # ──────────────────────────────────────────────────────────────

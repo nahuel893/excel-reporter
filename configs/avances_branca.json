@@ -4,6 +4,8 @@
         "fecha_desde": "2026-04-01",
         "fecha_hasta": "2026-04-30",
         "archivo_plantilla": "data/input/avances/AVANCE BRANCA - ABRIL 2026.xlsx",
+        "id_sucursal": 1,
+        "id_fuerza_ventas": 4,
         "enviar_email": false,
         "enviar_whatsapp": false
     },

@@ -185,6 +185,59 @@ class TestAvancesServiceHappyPath:
         ]) + 1
         assert ws.cell(row=2, column=formula_col_idx).value == "=A2*2"
 
+    def test_loader_methods_called_with_filter_params(self, tmp_path):
+        """Service MUST pass id_sucursal + id_fuerza_ventas to the loader methods."""
+        plantilla = _make_template(tmp_path)
+        mock_loader = _make_mock_loader()
+
+        service = AvancesService(data_loader=mock_loader)
+        config = AvancesConfig(
+            archivo_plantilla=str(plantilla),
+            fecha_desde="2026-04-01",
+            fecha_hasta="2026-04-30",
+            id_sucursal=1,
+            id_fuerza_ventas=4,
+        )
+        service.generar_reporte(config)
+
+        # fact_ventas: fechas + id_sucursal
+        fv_call = mock_loader.get_fact_ventas_raw.call_args
+        assert fv_call.kwargs == {
+            "fecha_desde": "2026-04-01",
+            "fecha_hasta": "2026-04-30",
+            "id_sucursal": 1,
+        }
+
+        # dim_articulo: fechas + id_sucursal (subquery on fact_ventas)
+        da_call = mock_loader.get_dim_articulo_raw.call_args
+        assert da_call.kwargs == {
+            "fecha_desde": "2026-04-01",
+            "fecha_hasta": "2026-04-30",
+            "id_sucursal": 1,
+        }
+
+        # dim_cliente: id_sucursal only
+        dc_call = mock_loader.get_dim_cliente_raw.call_args
+        assert dc_call.kwargs == {"id_sucursal": 1}
+
+        # cob_preventista_generico: fechas + FV + sucursal
+        cg_call = mock_loader.get_cob_preventista_generico_raw.call_args
+        assert cg_call.kwargs == {
+            "fecha_desde": "2026-04-01",
+            "fecha_hasta": "2026-04-30",
+            "id_fuerza_ventas": 4,
+            "id_sucursal": 1,
+        }
+
+        # cob_preventista_marca: same
+        cm_call = mock_loader.get_cob_preventista_marca_raw.call_args
+        assert cm_call.kwargs == {
+            "fecha_desde": "2026-04-01",
+            "fecha_hasta": "2026-04-30",
+            "id_fuerza_ventas": 4,
+            "id_sucursal": 1,
+        }
+
     def test_no_new_files_created(self, tmp_path):
         """In-place mode must not create any new xlsx file elsewhere."""
         plantilla = _make_template(tmp_path)

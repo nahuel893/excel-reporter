@@ -122,6 +122,8 @@ def merge_filters(global_f: GlobalFilters, report_f: ReportFilters | None) -> di
         "supervisores": None,
         "sucursales": None,
         "archivo_plantilla": global_f.archivo_plantilla,
+        "id_sucursal": global_f.id_sucursal,
+        "id_fuerza_ventas": global_f.id_fuerza_ventas,
     }
     if report_f:
         if report_f.genericos is not None:

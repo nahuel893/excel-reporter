@@ -59,6 +59,8 @@ class GlobalFilters(BaseModel):
     enviar_email: bool = True
     enviar_whatsapp: bool = True
     archivo_plantilla: str | None = None
+    id_sucursal: int | None = None
+    id_fuerza_ventas: int | None = None
 
 
 class ReportFilters(BaseModel):

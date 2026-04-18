@@ -35,7 +35,7 @@ SHEET_CONFIGS = [
     SheetConfig(
         sheet_name="gold fact_ventas",
         query_method="get_fact_ventas_raw",
-        query_params=["fecha_desde", "fecha_hasta"],
+        query_params=["fecha_desde", "fecha_hasta", "id_sucursal"],
         data_columns=[
             "id_cliente", "id_articulo", "id_vendedor", "id_sucursal",
             "fecha_comprobante", "id_documento", "letra", "serie", "nro_doc",
@@ -46,6 +46,7 @@ SHEET_CONFIGS = [
     SheetConfig(
         sheet_name="gold dim_articulo",
         query_method="get_dim_articulo_raw",
+        query_params=["fecha_desde", "fecha_hasta", "id_sucursal"],
         data_columns=[
             "id_articulo", "des_articulo", "marca", "generico", "calibre",
             "proveedor", "unidad_negocio", "factor_hectolitros",
@@ -55,6 +56,7 @@ SHEET_CONFIGS = [
     SheetConfig(
         sheet_name="gold dim_cliente",
         query_method="get_dim_cliente_raw",
+        query_params=["id_sucursal"],
         data_columns=[
             "id_cliente", "fantasia", "razon_social", "des_sucursal", "id_sucursal",
             "id_ruta_fv1", "des_personal_fv1", "id_ruta_fv4", "des_personal_fv4",
@@ -64,7 +66,7 @@ SHEET_CONFIGS = [
     SheetConfig(
         sheet_name="gold cob_preventista_generico",
         query_method="get_cob_preventista_generico_raw",
-        query_params=["fecha_desde", "fecha_hasta"],
+        query_params=["fecha_desde", "fecha_hasta", "id_fuerza_ventas", "id_sucursal"],
         data_columns=[
             "id", "periodo", "id_fuerza_ventas", "id_vendedor", "id_ruta",
             "id_sucursal", "ds_sucursal", "generico", "clientes_compradores",
@@ -75,7 +77,7 @@ SHEET_CONFIGS = [
     SheetConfig(
         sheet_name="gold cob_preventista_marca",
         query_method="get_cob_preventista_marca_raw",
-        query_params=["fecha_desde", "fecha_hasta"],
+        query_params=["fecha_desde", "fecha_hasta", "id_fuerza_ventas", "id_sucursal"],
         data_columns=[
             "id", "periodo", "id_fuerza_ventas", "id_vendedor", "id_ruta",
             "id_sucursal", "ds_sucursal", "marca", "clientes_compradores",
@@ -88,11 +90,19 @@ SHEET_CONFIGS = [
 
 @dataclass
 class AvancesConfig:
-    """Configuracion para el reporte de avances."""
+    """Configuracion para el reporte de avances.
 
-    archivo_plantilla: str  # path to template Excel
+    Filtros de datos aplicados a las queries crudas:
+      - id_sucursal: filtra fact_ventas, dim_cliente, cob_preventista_*
+      - id_fuerza_ventas: filtra cob_preventista_*
+      - dim_articulo se filtra por articulos vendidos en el rango + sucursal
+    """
+
+    archivo_plantilla: str  # path to working/template Excel
     fecha_desde: str
     fecha_hasta: str
+    id_sucursal: int = 1
+    id_fuerza_ventas: int = 1
     nombre_archivo: str | None = None
 
 

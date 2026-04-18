@@ -633,6 +633,8 @@ def _run_avances_report(report, merged: dict) -> list[tuple[Path, dict]]:
         archivo_plantilla=archivo_plantilla,
         fecha_desde=merged["fecha_desde"],
         fecha_hasta=merged["fecha_hasta"],
+        id_sucursal=merged.get("id_sucursal") or 1,
+        id_fuerza_ventas=merged.get("id_fuerza_ventas") or 1,
         nombre_archivo=report.nombre if report.nombre else None,
     )
 
