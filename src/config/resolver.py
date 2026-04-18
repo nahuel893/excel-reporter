@@ -99,11 +99,16 @@ def resolve_delivery(
     capture_list: list[CaptureConfig] = []
     if report.capture_images:
         capture_list = [
-            CaptureConfig(hoja=c.hoja, rango=c.rango) for c in report.capture_images
+            CaptureConfig(hoja=c.hoja, rango=c.rango, renderer=c.renderer)
+            for c in report.capture_images
         ]
     elif report.capture_image:
         capture_list = [
-            CaptureConfig(hoja=report.capture_image.hoja, rango=report.capture_image.rango)
+            CaptureConfig(
+                hoja=report.capture_image.hoja,
+                rango=report.capture_image.rango,
+                renderer=report.capture_image.renderer,
+            )
         ]
 
     return DeliveryConfig(

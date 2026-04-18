@@ -55,7 +55,7 @@ class TestCaptureImageStepSkip:
         mock_mgr.capture_range.side_effect = RuntimeError("LibreOffice no encontrado")
 
         with patch(
-            "src.core.excel_manager.ExcelManager", return_value=mock_mgr
+            "src.core.excel_renderers.libreoffice_renderer.ExcelManager", return_value=mock_mgr
         ):
             result = CaptureImageStep().execute(
                 artifact, config, logging.getLogger("test")
@@ -74,7 +74,7 @@ class TestCaptureImageStepSkip:
         mock_mgr.capture_range.side_effect = ImportError("Pillow es requerido")
 
         with patch(
-            "src.core.excel_manager.ExcelManager", return_value=mock_mgr
+            "src.core.excel_renderers.libreoffice_renderer.ExcelManager", return_value=mock_mgr
         ):
             result = CaptureImageStep().execute(
                 artifact, config, logging.getLogger("test")
@@ -97,7 +97,7 @@ class TestCaptureImageStepSuccess:
         mock_mgr.capture_range.return_value = fake_png
 
         with patch(
-            "src.core.excel_manager.ExcelManager", return_value=mock_mgr
+            "src.core.excel_renderers.libreoffice_renderer.ExcelManager", return_value=mock_mgr
         ):
             result = CaptureImageStep().execute(
                 artifact, config, logging.getLogger("test")
@@ -119,7 +119,7 @@ class TestCaptureImageStepError:
         mock_mgr.capture_range.side_effect = ValueError("Hoja no encontrada")
 
         with patch(
-            "src.core.excel_manager.ExcelManager", return_value=mock_mgr
+            "src.core.excel_renderers.libreoffice_renderer.ExcelManager", return_value=mock_mgr
         ):
             result = CaptureImageStep().execute(
                 artifact, config, logging.getLogger("test")

@@ -22,6 +22,7 @@ class CaptureConfig(BaseModel):
     """Configuracion para captura de rango Excel como imagen."""
     hoja: str
     rango: str  # Ej: "A1:H20"
+    renderer: str = "libreoffice"  # backend key, resolved by excel_renderers.get_renderer
 
 
 class EmailConfig(BaseModel):

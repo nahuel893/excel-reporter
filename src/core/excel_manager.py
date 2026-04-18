@@ -186,20 +186,26 @@ class ExcelManager:
         sheet_name: str,
         range_addr: str,
         output_dir: Path | None = None,
+        dpi: int = 300,
     ) -> Path:
         """
-        Captura un rango de una hoja como imagen PNG usando LibreOffice + Pillow.
+        Captura un rango de una hoja como imagen PNG de alta calidad.
 
         Proceso:
         1. LibreOffice recalcula formulas y re-guarda el xlsx
-        2. Se crea un xlsx temporal con SOLO la hoja target (para que LO exporte esa)
-        3. LibreOffice exporta ese xlsx temporal a PNG
-        4. Pillow recorta al rango detectado por bordes o especificado
+        2. Se crea un xlsx temporal con SOLO la hoja target activada, fit-to-page
+        3. LibreOffice exporta a PDF (escala vectorial)
+        4. pdftoppm rasteriza el PDF a PNG en el DPI pedido (default 300)
+        5. Pillow recorta bordes blancos alrededor del contenido
+
+        Requiere `pdftoppm` (paquete poppler-utils) en el PATH.
 
         Args:
             sheet_name: Nombre de la hoja del Excel
             range_addr: Rango en formato 'A1:H20' o 'auto' para auto-deteccion
             output_dir: Directorio de salida (por defecto DATA_OUTPUT)
+            dpi: Resolucion de salida en puntos por pulgada (default 300).
+                 Valores tipicos: 150 draft, 300 calidad de email, 600 impresion.
 
         Returns:
             Path al archivo PNG generado
@@ -214,7 +220,7 @@ class ExcelManager:
             )
         wb_check.close()
 
-        # Auto-deteccion de bordes
+        # Auto-deteccion de bordes (informativo; el filename lo usa)
         if range_addr == "auto":
             detected = self.detect_bordered_range(sheet_name)
             if detected is None:
@@ -231,7 +237,14 @@ class ExcelManager:
                 "LibreOffice no encontrado. Instalar con: sudo pacman -S libreoffice-fresh"
             )
 
-        from PIL import Image, ImageChops
+        # Verificar pdftoppm
+        pdftoppm = shutil.which("pdftoppm")
+        if pdftoppm is None:
+            raise RuntimeError(
+                "pdftoppm no encontrado. Instalar poppler: sudo pacman -S poppler"
+            )
+
+        from PIL import Image
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_dir = Path(tmp_dir)
@@ -246,30 +259,50 @@ class ExcelManager:
                 recalc_path, sheet_name, tmp_dir
             )
 
-            # Paso 3: LibreOffice exporta a PNG
-            png_dir = tmp_dir / "png"
-            png_dir.mkdir()
+            # Paso 3: LibreOffice exporta a PDF (escala vectorial)
+            pdf_dir = tmp_dir / "pdf"
+            pdf_dir.mkdir()
             result = subprocess.run(
-                [soffice, "--headless", "--convert-to", "png", "--outdir", str(png_dir), str(export_path)],
+                [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(pdf_dir), str(export_path)],
                 capture_output=True,
                 text=True,
                 timeout=120,
             )
             if result.returncode != 0:
                 raise RuntimeError(
-                    f"LibreOffice fallo al exportar PNG: {result.stderr.strip()}"
+                    f"LibreOffice fallo al exportar PDF: {result.stderr.strip()}"
                 )
 
-            png_candidates = list(png_dir.glob("*.png"))
+            pdf_candidates = list(pdf_dir.glob("*.pdf"))
+            if not pdf_candidates:
+                raise RuntimeError("LibreOffice no genero ningun archivo PDF")
+            pdf_path = pdf_candidates[0]
+
+            # Paso 4: pdftoppm rasteriza PDF → PNG a DPI alta
+            png_dir = tmp_dir / "png"
+            png_dir.mkdir()
+            png_prefix = png_dir / "page"
+            result = subprocess.run(
+                [pdftoppm, "-r", str(dpi), "-png", "-f", "1", "-l", "1",
+                 str(pdf_path), str(png_prefix)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"pdftoppm fallo al rasterizar PDF: {result.stderr.strip()}"
+                )
+
+            png_candidates = list(png_dir.glob("page-*.png"))
             if not png_candidates:
-                raise RuntimeError("LibreOffice no genero ningun archivo PNG")
+                raise RuntimeError("pdftoppm no genero ningun archivo PNG")
 
             img = Image.open(png_candidates[0])
 
-            # Recortar espacio blanco/casi-blanco alrededor del contenido
+            # Paso 5: Recortar bordes blancos alrededor del contenido
             import numpy as np
             arr = np.array(img.convert("RGB"))
-            # Pixel no-blanco: cualquier canal < 250
             non_white = np.any(arr < 250, axis=2)
             rows = np.any(non_white, axis=1)
             cols = np.any(non_white, axis=0)
@@ -285,9 +318,12 @@ class ExcelManager:
         output_dir.mkdir(parents=True, exist_ok=True)
         range_slug = range_addr.replace(":", "_")
         out_path = output_dir / f"{self.ruta_excel.stem}_{sheet_name}_{range_slug}.png"
-        cropped.save(out_path, "PNG")
+        cropped.save(out_path, "PNG", dpi=(dpi, dpi))
 
-        logger.info("Imagen capturada: %s (%dx%d px)", out_path.name, cropped.width, cropped.height)
+        logger.info(
+            "Imagen capturada: %s (%dx%d px @ %d DPI)",
+            out_path.name, cropped.width, cropped.height, dpi,
+        )
         return out_path
 
     @staticmethod

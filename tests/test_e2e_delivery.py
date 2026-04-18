@@ -124,7 +124,7 @@ class TestE2EDeliveryPipeline:
             patch("src.core.email_sender.EmailSender.send", mock_email_sender.send),
             patch("src.core.whatsapp_client.WhatsAppClient.send_image", mock_wa_client.send_image),
             patch("src.core.whatsapp_client.WhatsAppClient.send_file", mock_wa_client.send_file),
-            patch("src.core.excel_manager.ExcelManager", return_value=mock_excel_mgr),
+            patch("src.core.excel_renderers.libreoffice_renderer.ExcelManager", return_value=mock_excel_mgr),
         ):
             from main import _run_report_config
             result = _run_report_config(config_path)

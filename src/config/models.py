@@ -45,6 +45,7 @@ class CaptureImageConfig(BaseModel):
 
     hoja: str
     rango: str
+    renderer: Literal["libreoffice", "html_playwright"] = "libreoffice"
 
 
 class GlobalFilters(BaseModel):

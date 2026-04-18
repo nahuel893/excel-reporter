@@ -4,6 +4,7 @@ CaptureImageStep - Paso de captura de rango Excel como imagen PNG.
 import logging
 from pathlib import Path
 
+from config.settings import DATA_OUTPUT
 from src.delivery.pipeline import DeliveryConfig, DeliveryStep, ReportArtifact, StepResult
 
 
@@ -32,40 +33,37 @@ class CaptureImageStep(DeliveryStep):
                 message="capture_images no configurado",
             )
 
-        from src.core.excel_manager import ExcelManager
-
-        try:
-            manager = ExcelManager(artifact.ruta_excel)
-        except Exception as exc:  # bad file path etc.
-            logger.error("Error abriendo Excel para captura: %s", exc)
-            return StepResult(
-                status="error",
-                step_name="CaptureImageStep",
-                message=str(exc),
-            )
+        from src.core.excel_renderers import get_renderer
 
         produced: list[str] = []
         errores: list[str] = []
 
         for cfg in captures:
+            renderer_name = getattr(cfg, "renderer", "libreoffice")
             try:
-                png_path = manager.capture_range(
-                    sheet_name=cfg.hoja,
+                renderer = get_renderer(renderer_name)
+                png_path = renderer.render(
+                    xlsx_path=artifact.ruta_excel,
+                    sheet=cfg.hoja,
                     range_addr=cfg.rango,
+                    output_dir=DATA_OUTPUT,
                 )
                 artifact.rutas_imagenes.append(png_path)
-                produced.append(f"{cfg.hoja}:{png_path.name}")
+                produced.append(f"{cfg.hoja}[{renderer_name}]:{png_path.name}")
             except (RuntimeError, ImportError) as exc:
-                # LibreOffice / Pillow no disponible → no tiene sentido seguir
-                logger.warning("Dependencia faltante, omitiendo capturas: %s", exc)
+                # Dep faltante en el backend elegido → no tiene sentido seguir
+                logger.warning(
+                    "Dependencia faltante en renderer '%s', omitiendo capturas: %s",
+                    renderer_name, exc,
+                )
                 return StepResult(
                     status="skipped",
                     step_name="CaptureImageStep",
                     message=str(exc),
                 )
             except Exception as exc:  # per-capture error
-                logger.error("Captura fallida [%s]: %s", cfg.hoja, exc)
-                errores.append(f"{cfg.hoja}: {exc}")
+                logger.error("Captura fallida [%s/%s]: %s", cfg.hoja, renderer_name, exc)
+                errores.append(f"{cfg.hoja}/{renderer_name}: {exc}")
 
         if produced and not errores:
             return StepResult(

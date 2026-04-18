@@ -11,3 +11,5 @@ python-multipart>=0.0.6  # Para form data en FastAPI
 httpx>=0.24.0  # FastAPI TestClient dependency
 matplotlib>=3.8.0,<4.0.0  # Graficos cobertura (PNG charts)
 python-pptx>=0.6.23,<1.0.0  # Graficos cobertura (PPTX decks)
+xlsx2html>=0.6.0,<1.0.0  # Alt image renderer (xlsx -> HTML)
+playwright>=1.40.0,<2.0.0  # Alt image renderer (Chrome headless); requires: playwright install chromium
