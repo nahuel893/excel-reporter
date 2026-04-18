@@ -1,17 +1,19 @@
 """
 AvancesService - Refreshes raw DB data in existing avances Excel files,
 preserving formulas and table definitions.
+
+The service updates the working file IN-PLACE. No per-run output copy —
+the file passed as `archivo_plantilla` IS the working file and is
+overwritten with refreshed data on every run.
 """
 
 import logging
-import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from openpyxl import load_workbook
 
-from config.settings import DATA_OUTPUT
 from src.core.excel_updater import replace_sheet_data
 from src.services.base_service import BaseService
 
@@ -60,7 +62,7 @@ SHEET_CONFIGS = [
         header_row=2,
     ),
     SheetConfig(
-        sheet_name="cob_preventista_generico",
+        sheet_name="gold cob_preventista_generico",
         query_method="get_cob_preventista_generico_raw",
         query_params=["fecha_desde", "fecha_hasta"],
         data_columns=[
@@ -71,7 +73,7 @@ SHEET_CONFIGS = [
         header_row=1,
     ),
     SheetConfig(
-        sheet_name="cob_preventista_marca",
+        sheet_name="gold cob_preventista_marca",
         query_method="get_cob_preventista_marca_raw",
         query_params=["fecha_desde", "fecha_hasta"],
         data_columns=[
@@ -106,22 +108,13 @@ class AvancesService(BaseService):
     """Refreshes raw DB data in existing avances Excel files."""
 
     def generar_reporte(self, config: AvancesConfig) -> AvancesResult:
-        plantilla = Path(config.archivo_plantilla)
-        if not plantilla.exists():
-            raise FileNotFoundError(f"Template not found: {plantilla}")
+        working_path = Path(config.archivo_plantilla)
+        if not working_path.exists():
+            raise FileNotFoundError(f"Working file not found: {working_path}")
 
-        # Output path — copy template to data/output
-        nombre = config.nombre_archivo or plantilla.stem
-        output_path = DATA_OUTPUT / f"{nombre}.xlsx"
-
-        if output_path.resolve() == plantilla.resolve():
-            raise ValueError("Output path must differ from template")
-
-        shutil.copy2(plantilla, output_path)
-
-        logger.info("Cargando workbook %s ...", output_path.name)
+        logger.info("Cargando workbook %s ...", working_path.name)
         t0 = time.perf_counter()
-        wb = load_workbook(output_path, data_only=False, keep_links=False)
+        wb = load_workbook(working_path, data_only=False, keep_links=False)
         logger.info("Workbook cargado en %.1fs", time.perf_counter() - t0)
 
         registros = {}
@@ -149,10 +142,10 @@ class AvancesService(BaseService):
             logger.info("Sheet '%s': %d filas escritas en %.1fs", sc.sheet_name, rows, time.perf_counter() - t2)
             registros[sc.sheet_name] = rows
 
-        logger.info("Guardando workbook ...")
+        logger.info("Guardando workbook (in-place) ...")
         t3 = time.perf_counter()
-        wb.save(output_path)
+        wb.save(working_path)
         wb.close()
-        logger.info("Guardado en %.1fs -> %s", time.perf_counter() - t3, output_path)
+        logger.info("Guardado en %.1fs -> %s", time.perf_counter() - t3, working_path)
 
-        return AvancesResult(ruta_archivo=output_path, registros_por_hoja=registros)
+        return AvancesResult(ruta_archivo=working_path, registros_por_hoja=registros)

@@ -2,8 +2,8 @@
 import pytest
 import pandas as pd
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-from openpyxl import Workbook
+from unittest.mock import MagicMock
+from openpyxl import Workbook, load_workbook
 from openpyxl.worksheet.table import Table
 from openpyxl.utils import get_column_letter
 
@@ -149,9 +149,9 @@ def _make_mock_loader():
 
 
 class TestAvancesServiceHappyPath:
-    def test_happy_path(self, tmp_path):
-        """Template with 3 gold sheets + mocked DataLoader → output file exists,
-        registros_por_hoja has correct counts, formula columns in fact_ventas untouched."""
+    def test_in_place_update(self, tmp_path):
+        """Template with 3 gold sheets + mocked DataLoader → SAME file updated,
+        registros_por_hoja has correct counts, formula columns preserved."""
         plantilla = _make_template(tmp_path)
         mock_loader = _make_mock_loader()
 
@@ -160,25 +160,23 @@ class TestAvancesServiceHappyPath:
             archivo_plantilla=str(plantilla),
             fecha_desde="2026-04-01",
             fecha_hasta="2026-04-15",
-            nombre_archivo="avances_test",
         )
 
-        with patch("src.services.avances.service.DATA_OUTPUT", tmp_path):
-            result = service.generar_reporte(config)
+        result = service.generar_reporte(config)
 
-        # Output file exists
-        assert result.ruta_archivo.exists()
+        # Result points to the SAME file (not a copy in data/output)
+        assert result.ruta_archivo == plantilla
+        assert plantilla.exists()
 
-        # registros_por_hoja has correct counts
+        # registros_por_hoja has correct counts for all 5 gold-* sheets
         assert result.registros_por_hoja["gold fact_ventas"] == 2
         assert result.registros_por_hoja["gold dim_articulo"] == 2
         assert result.registros_por_hoja["gold dim_cliente"] == 2
-        assert result.registros_por_hoja["cob_preventista_generico"] == 2
-        assert result.registros_por_hoja["cob_preventista_marca"] == 2
+        assert result.registros_por_hoja["gold cob_preventista_generico"] == 2
+        assert result.registros_por_hoja["gold cob_preventista_marca"] == 2
 
         # Formula column in fact_ventas untouched
-        import openpyxl
-        wb = openpyxl.load_workbook(str(result.ruta_archivo))
+        wb = load_workbook(str(result.ruta_archivo))
         ws = wb["gold fact_ventas"]
         formula_col_idx = len([
             "id_cliente", "id_articulo", "id_vendedor", "id_sucursal",
@@ -186,6 +184,23 @@ class TestAvancesServiceHappyPath:
             "anulado", "cantidades_total", "bonificacion",
         ]) + 1
         assert ws.cell(row=2, column=formula_col_idx).value == "=A2*2"
+
+    def test_no_new_files_created(self, tmp_path):
+        """In-place mode must not create any new xlsx file elsewhere."""
+        plantilla = _make_template(tmp_path)
+        mock_loader = _make_mock_loader()
+
+        service = AvancesService(data_loader=mock_loader)
+        config = AvancesConfig(
+            archivo_plantilla=str(plantilla),
+            fecha_desde="2026-04-01",
+            fecha_hasta="2026-04-15",
+        )
+        service.generar_reporte(config)
+
+        # Only the original template file should exist in tmp_path
+        xlsx_files = list(tmp_path.glob("*.xlsx"))
+        assert xlsx_files == [plantilla]
 
 
 class TestAvancesServiceErrors:
@@ -198,27 +213,8 @@ class TestAvancesServiceErrors:
             fecha_hasta="2026-04-15",
         )
 
-        with patch("src.services.avances.service.DATA_OUTPUT", tmp_path):
-            with pytest.raises(FileNotFoundError):
-                service.generar_reporte(config)
-
-    def test_output_equals_template_raises(self, tmp_path):
-        """output_path == plantilla → ValueError."""
-        plantilla = _make_template(tmp_path)
-        service = AvancesService(data_loader=MagicMock(spec=DataLoader))
-
-        # nombre_archivo matches plantilla stem so output_path == plantilla
-        config = AvancesConfig(
-            archivo_plantilla=str(plantilla),
-            fecha_desde="2026-04-01",
-            fecha_hasta="2026-04-15",
-            nombre_archivo=plantilla.stem,
-        )
-
-        # DATA_OUTPUT must be same dir as plantilla so paths resolve equal
-        with patch("src.services.avances.service.DATA_OUTPUT", tmp_path):
-            with pytest.raises(ValueError, match="differ"):
-                service.generar_reporte(config)
+        with pytest.raises(FileNotFoundError):
+            service.generar_reporte(config)
 
 
 class TestAvancesServiceMissingSheet:
@@ -242,7 +238,7 @@ class TestAvancesServiceMissingSheet:
         ], 1):
             ws_art.cell(row=1, column=col_idx, value=h)
 
-        # gold dim_cliente, cob_preventista_generico, cob_preventista_marca omitted
+        # gold dim_cliente, gold cob_preventista_generico, gold cob_preventista_marca omitted
         plantilla = tmp_path / "plantilla_incompleta.xlsx"
         wb.save(str(plantilla))
 
@@ -252,17 +248,16 @@ class TestAvancesServiceMissingSheet:
             archivo_plantilla=str(plantilla),
             fecha_desde="2026-04-01",
             fecha_hasta="2026-04-15",
-            nombre_archivo="avances_incompleto",
         )
 
         import logging
-        with caplog.at_level(logging.INFO), patch("src.services.avances.service.DATA_OUTPUT", tmp_path):
+        with caplog.at_level(logging.INFO):
             result = service.generar_reporte(config)
 
         # All 5 sheets processed (3 created on the fly)
         assert len(result.registros_por_hoja) == 5
         assert "gold dim_cliente" in result.registros_por_hoja
-        assert "cob_preventista_generico" in result.registros_por_hoja
-        assert "cob_preventista_marca" in result.registros_por_hoja
+        assert "gold cob_preventista_generico" in result.registros_por_hoja
+        assert "gold cob_preventista_marca" in result.registros_por_hoja
         # Log says sheets were created
         assert any("not found, creating" in record.message for record in caplog.records)
