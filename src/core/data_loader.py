@@ -1095,6 +1095,44 @@ class DataLoader:
         """
         return self.execute_query(query, {"periodo": periodo})
 
+    # ── Ventas Articulo Diario ──────────────────────────────────
+
+    def get_ventas_diarias_articulo(
+        self,
+        id_articulo: int,
+        id_sucursal: int,
+        fecha_desde: str,
+        fecha_hasta: str,
+    ) -> pd.DataFrame:
+        """Daily sales (bultos) for a single article x sucursal in a date range."""
+        query = """
+        SELECT
+            fv.fecha_comprobante,
+            SUM(fv.cantidades_total) AS bultos
+        FROM gold.fact_ventas fv
+        WHERE fv.id_articulo = :id_articulo
+          AND fv.id_sucursal = :id_sucursal
+          AND fv.fecha_comprobante BETWEEN :desde AND :hasta
+        GROUP BY fv.fecha_comprobante
+        ORDER BY fv.fecha_comprobante
+        """
+        return self.execute_query(query, {
+            "id_articulo": id_articulo,
+            "id_sucursal": id_sucursal,
+            "desde": fecha_desde,
+            "hasta": fecha_hasta,
+        })
+
+    def get_articulo_descripcion(self, id_articulo: int) -> str | None:
+        """Lookup des_articulo for a single id_articulo."""
+        df = self.execute_query(
+            "SELECT des_articulo FROM gold.dim_articulo WHERE id_articulo = :id LIMIT 1",
+            {"id": id_articulo},
+        )
+        if df.empty or pd.isna(df["des_articulo"].iloc[0]):
+            return None
+        return str(df["des_articulo"].iloc[0])
+
     # ── Stock Diario ────────────────────────────────────────────
 
     def get_stock_diario(

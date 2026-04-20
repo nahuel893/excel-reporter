@@ -11,6 +11,7 @@ from pathlib import Path
 
 from src.config.models import (
     ContactInfo,
+    DeliveryTarget,
     GlobalFilters,
     ReportConfig,
     ReportEntry,
@@ -24,6 +25,55 @@ from src.delivery.pipeline import (
 )
 
 logger = logging.getLogger(__name__)
+
+TEST_CONTACT_NAME = "Nahuel Aguirre"
+
+
+def _collapse_enviar_a_for_test(
+    enviar_a: dict | None,
+    contactos: dict,
+) -> dict | None:
+    """Collapse enviar_a to a single test-safe contact (TEST_CONTACT_NAME).
+
+    Takes the union of all requested channels across all original recipients,
+    promoting 'email_cc' to 'email', then returns a new enviar_a dict with
+    only TEST_CONTACT_NAME as the recipient.
+
+    Returns None if the resulting channel union is empty (nothing to send).
+    Raises ValueError if TEST_CONTACT_NAME is not present in contactos.
+    Logs a WARNING and drops 'whatsapp' if the test contact has no telefono
+    and no whatsapp_grupo.
+    """
+    channels: set[str] = set()
+    for target in (enviar_a or {}).values():
+        for ch in target.via:
+            # Promote email_cc -> email so the test contact receives as To:
+            channels.add("email" if ch == "email_cc" else ch)
+
+    if not channels:
+        return None
+
+    if TEST_CONTACT_NAME not in contactos:
+        raise ValueError(
+            f"test_mode requires contact '{TEST_CONTACT_NAME}' in contactos catalog, "
+            f"but it was not found. Available: {list(contactos.keys())}"
+        )
+
+    test_contact = contactos[TEST_CONTACT_NAME]
+    if "whatsapp" in channels and not (test_contact.telefono or test_contact.whatsapp_grupo):
+        logger.warning(
+            "test_mode: contact '%s' has no telefono or whatsapp_grupo; "
+            "dropping whatsapp channel",
+            TEST_CONTACT_NAME,
+        )
+        channels.discard("whatsapp")
+
+    if not channels:
+        return None
+
+    # Deterministic order: email always before whatsapp
+    via_list = [ch for ch in ("email", "whatsapp") if ch in channels]
+    return {TEST_CONTACT_NAME: DeliveryTarget(via=via_list)}
 
 
 def load_contacts(path: Path) -> dict[str, ContactInfo]:
@@ -47,22 +97,35 @@ def resolve_delivery(
     contactos: dict[str, ContactInfo],
     enviar_email: bool = True,
     enviar_whatsapp: bool = True,
+    test_mode: bool = False,
 ) -> DeliveryConfig | None:
     """
     Translate named contacts + channels into the concrete DeliveryConfig
     that DeliveryPipeline.run() expects.
 
-    Returns None if report has no enviar_a.
+    Returns None if report has no enviar_a (and no captures).
+
+    When test_mode=True, collapses enviar_a to a single entry for
+    TEST_CONTACT_NAME before processing, so no real recipients are contacted.
     """
     has_captures = bool(report.capture_images or report.capture_image)
-    if not report.enviar_a and not has_captures:
+
+    # In test mode, collapse all recipients to the safe test contact BEFORE
+    # the main loop. This is the single chokepoint: all channels that would
+    # have been sent to real contacts are redirected to TEST_CONTACT_NAME.
+    if test_mode and report.enviar_a:
+        effective_enviar_a = _collapse_enviar_a_for_test(report.enviar_a, contactos)
+    else:
+        effective_enviar_a = report.enviar_a
+
+    if not effective_enviar_a and not has_captures:
         return None
 
     email_recipients: list[str] = []
     email_cc: list[str] = []
     whatsapp_targets: list[str] = []
 
-    for contact_name, target in (report.enviar_a or {}).items():
+    for contact_name, target in (effective_enviar_a or {}).items():
         contact = contactos.get(contact_name)
         if contact is None:
             logger.warning("Contact '%s' not found in catalog, skipping", contact_name)
@@ -135,6 +198,7 @@ def merge_filters(global_f: GlobalFilters, report_f: ReportFilters | None) -> di
         "archivo_plantilla": global_f.archivo_plantilla,
         "id_sucursal": global_f.id_sucursal,
         "id_fuerza_ventas": global_f.id_fuerza_ventas,
+        "id_articulo": global_f.id_articulo,
     }
     if report_f:
         if report_f.genericos is not None:
@@ -153,4 +217,8 @@ def merge_filters(global_f: GlobalFilters, report_f: ReportFilters | None) -> di
             merged["supervisores"] = report_f.supervisores
         if report_f.sucursales is not None:
             merged["sucursales"] = report_f.sucursales
+        if report_f.id_articulo is not None:
+            merged["id_articulo"] = report_f.id_articulo
+        if report_f.id_sucursal is not None:
+            merged["id_sucursal"] = report_f.id_sucursal
     return merged

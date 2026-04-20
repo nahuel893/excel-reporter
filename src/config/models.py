@@ -62,6 +62,7 @@ class GlobalFilters(BaseModel):
     archivo_plantilla: str | None = None
     id_sucursal: int | None = None
     id_fuerza_ventas: int | None = None
+    id_articulo: int | None = None
 
 
 class ReportFilters(BaseModel):
@@ -74,6 +75,8 @@ class ReportFilters(BaseModel):
     con_cobertura: bool | None = None
     enviar_email: bool | None = None
     enviar_whatsapp: bool | None = None
+    id_articulo: int | None = None
+    id_sucursal: int | None = None
 
 
 class ReportEntry(BaseModel):
@@ -97,7 +100,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "mision-imposible", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura"]
+    tipo: Literal["ventas", "resumen-mensual", "mision-imposible", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

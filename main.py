@@ -23,12 +23,20 @@ Subcomandos disponibles:
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
 from src.services import VentasService, ResumenMensualService, ResumenMensualConfig
 from src.services.ventas import ReporteVentasConfig
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_test_mode(cli_flag: bool) -> bool:
+    """Test mode activates if --test-mode CLI flag OR INFORMES_TEST_MODE=1 env var."""
+    return bool(cli_flag) or os.getenv("INFORMES_TEST_MODE", "0") == "1"
 
 
 def validar_fecha(fecha_str: str) -> bool:
@@ -57,7 +65,9 @@ SERVICIOS = {
 }
 
 
-def _run_report_config(config_path: Path, contactos_path: Path | None = None) -> int:
+def _run_report_config(
+    config_path: Path, contactos_path: Path | None = None, test_mode: bool = False
+) -> int:
     """Execute a single report config file (new format)."""
     from pydantic import ValidationError
 
@@ -88,10 +98,10 @@ def _run_report_config(config_path: Path, contactos_path: Path | None = None) ->
         print(f"Error: {exc}")
         return 1
 
-    return _run_reportes(report_config, contactos)
+    return _run_reportes(report_config, contactos, test_mode=test_mode)
 
 
-def _run_config_dir(config_dir: Path) -> int:
+def _run_config_dir(config_dir: Path, test_mode: bool = False) -> int:
     """Execute all report config files in a directory."""
     config_dir = Path(config_dir)
     if not config_dir.is_dir():
@@ -113,14 +123,14 @@ def _run_config_dir(config_dir: Path) -> int:
         print(f"\n{'=' * 60}")
         print(f"Config: {config_file.name}")
         print(f"{'=' * 60}")
-        result = _run_report_config(config_file, contactos_path)
+        result = _run_report_config(config_file, contactos_path, test_mode=test_mode)
         if result != 0:
             exit_code = result
 
     return exit_code
 
 
-def _run_reportes(report_config, contactos) -> int:
+def _run_reportes(report_config, contactos, test_mode: bool = False) -> int:
     """Iterate over reportes[], generate each file, run delivery pipeline."""
     from src.config.resolver import merge_filters, resolve_delivery
 
@@ -145,6 +155,8 @@ def _run_reportes(report_config, contactos) -> int:
             artifacts = _run_avances_report(report, merged)
         elif report_config.tipo == "graficos-cobertura":
             artifacts = _run_graficos_cobertura_report(report, merged)
+        elif report_config.tipo == "ventas-articulo":
+            artifacts = _run_ventas_articulo_report(report, merged)
         else:
             print(f"Error: tipo de reporte desconocido: {report_config.tipo}")
             return 1
@@ -158,6 +170,7 @@ def _run_reportes(report_config, contactos) -> int:
             contactos,
             enviar_email=merged["enviar_email"],
             enviar_whatsapp=merged["enviar_whatsapp"],
+            test_mode=test_mode,
         )
         if delivery_config:
             for ruta_archivo, metadata in artifacts:
@@ -393,7 +406,7 @@ def _is_new_format(cfg: dict) -> bool:
     return "reportes" in cfg
 
 
-def cmd_ventas(args) -> int:
+def cmd_ventas(args, test_mode: bool = False) -> int:
     """Ejecuta el comando de reporte de ventas."""
 
     # Cargar configuracion desde JSON si se provee --config
@@ -402,17 +415,22 @@ def cmd_ventas(args) -> int:
         # Try new format first
         cfg = _cargar_config_json(args.config)
         if _is_new_format(cfg):
-            return _run_report_config(config_path)
+            return _run_report_config(config_path, test_mode=test_mode)
 
         # Legacy format
-        return _cmd_ventas_legacy(args, cfg)
+        return _cmd_ventas_legacy(args, cfg, test_mode=test_mode)
 
     # No config file — use CLI args (legacy)
-    return _cmd_ventas_legacy(args, {})
+    return _cmd_ventas_legacy(args, {}, test_mode=test_mode)
 
 
-def _cmd_ventas_legacy(args, cfg: dict) -> int:
+def _cmd_ventas_legacy(args, cfg: dict, test_mode: bool = False) -> int:
     """Legacy ventas flow with flat config."""
+    if test_mode:
+        logger.warning(
+            "test-mode no tiene efecto en el flujo legacy. "
+            "Usa --config <config.json> con formato nuevo para activarlo."
+        )
     # Resolver parametros: JSON tiene precedencia sobre args individuales
     fecha_desde = cfg.get("fecha_desde") or args.desde
     fecha_hasta = cfg.get("fecha_hasta") or args.hasta
@@ -483,7 +501,7 @@ def _imprimir_resultado(result, con_slicers: bool):
         print("  - Slicers: No disponibles (requiere Windows + Excel)")
 
 
-def cmd_resumen_mensual(args) -> int:
+def cmd_resumen_mensual(args, test_mode: bool = False) -> int:
     """Ejecuta el comando de resumen mensual."""
 
     # Try new format first
@@ -491,16 +509,16 @@ def cmd_resumen_mensual(args) -> int:
         config_path = Path(args.config)
         cfg = _cargar_config_json(args.config)
         if _is_new_format(cfg):
-            return _run_report_config(config_path)
+            return _run_report_config(config_path, test_mode=test_mode)
 
         # Legacy format
-        return _cmd_resumen_legacy(args, cfg)
+        return _cmd_resumen_legacy(args, cfg, test_mode=test_mode)
 
     # No config file — use CLI args (legacy)
-    return _cmd_resumen_legacy(args, {})
+    return _cmd_resumen_legacy(args, {}, test_mode=test_mode)
 
 
-def cmd_mision_imposible(args) -> int:
+def cmd_mision_imposible(args, test_mode: bool = False) -> int:
     """Ejecuta el comando de mision imposible."""
     if not args.config:
         print("Error: mision-imposible requiere un archivo --config")
@@ -510,7 +528,7 @@ def cmd_mision_imposible(args) -> int:
     cfg = _cargar_config_json(args.config)
 
     if _is_new_format(cfg):
-        return _run_report_config(config_path)
+        return _run_report_config(config_path, test_mode=test_mode)
     else:
         print(
             "Error: mision-imposible solo soporta el nuevo formato de configuracion JSON."
@@ -518,7 +536,7 @@ def cmd_mision_imposible(args) -> int:
         return 1
 
 
-def cmd_historico_fratelli(args) -> int:
+def cmd_historico_fratelli(args, test_mode: bool = False) -> int:
     """Ejecuta el comando de historico fratelli."""
     if not args.config:
         print("Error: historico-fratelli requiere un archivo --config")
@@ -528,7 +546,7 @@ def cmd_historico_fratelli(args) -> int:
     cfg = _cargar_config_json(args.config)
 
     if _is_new_format(cfg):
-        return _run_report_config(config_path)
+        return _run_report_config(config_path, test_mode=test_mode)
     else:
         print(
             "Error: historico-fratelli solo soporta el nuevo formato de configuracion JSON."
@@ -536,7 +554,7 @@ def cmd_historico_fratelli(args) -> int:
         return 1
 
 
-def cmd_stock_diario(args) -> int:
+def cmd_stock_diario(args, test_mode: bool = False) -> int:
     """Ejecuta el comando de stock diario."""
     if not args.config:
         print("Error: stock-diario requiere un archivo --config")
@@ -546,7 +564,7 @@ def cmd_stock_diario(args) -> int:
     cfg = _cargar_config_json(args.config)
 
     if _is_new_format(cfg):
-        return _run_report_config(config_path)
+        return _run_report_config(config_path, test_mode=test_mode)
     else:
         print(
             "Error: stock-diario solo soporta el nuevo formato de configuracion JSON."
@@ -554,12 +572,54 @@ def cmd_stock_diario(args) -> int:
         return 1
 
 
-def cmd_graficos_cobertura(args) -> int:
+def cmd_graficos_cobertura(args, test_mode: bool = False) -> int:
     """Ejecuta el comando de graficos-cobertura."""
     if not args.config:
         print("Error: graficos-cobertura requiere un archivo --config")
         return 1
-    return _run_report_config(Path(args.config))
+    return _run_report_config(Path(args.config), test_mode=test_mode)
+
+
+def cmd_ventas_articulo(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando de ventas-articulo-diario."""
+    if not args.config:
+        print("Error: ventas-articulo requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    return _run_report_config(config_path, test_mode=test_mode)
+
+
+def _run_ventas_articulo_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate ventas-articulo-diario report. Returns list of (path, metadata) tuples."""
+    from src.services.ventas_articulo import VentasArticuloConfig, VentasArticuloService
+
+    config = VentasArticuloConfig(
+        fecha_desde=merged["fecha_desde"],
+        fecha_hasta=merged["fecha_hasta"],
+        id_articulo=merged.get("id_articulo"),
+        id_sucursal=merged.get("id_sucursal"),
+        nombre_archivo=report.nombre if report.nombre else None,
+    )
+
+    try:
+        result = VentasArticuloService().generar_reporte(config)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return []
+
+    print("Ventas Articulo Diario generado exitosamente:")
+    print(f"  - Articulo: {result.articulo_nombre}")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Dias con venta: {result.dias_con_venta} / {result.registros_procesados}")
+    print(f"  - Total bultos: {result.total_bultos}")
+
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
 
 
 def _run_graficos_cobertura_report(report, merged: dict) -> list[tuple[Path, dict]]:
@@ -657,7 +717,7 @@ def _run_avances_report(report, merged: dict) -> list[tuple[Path, dict]]:
     ]
 
 
-def cmd_cartesiano(args) -> int:
+def cmd_cartesiano(args, test_mode: bool = False) -> int:
     """Ejecuta el comando cartesiano."""
     if not args.config:
         print("Error: cartesiano requiere un archivo --config")
@@ -667,14 +727,19 @@ def cmd_cartesiano(args) -> int:
     cfg = _cargar_config_json(args.config)
 
     if _is_new_format(cfg):
-        return _run_report_config(config_path)
+        return _run_report_config(config_path, test_mode=test_mode)
     else:
         print("Error: cartesiano solo soporta el nuevo formato de configuracion JSON.")
         return 1
 
 
-def _cmd_resumen_legacy(args, cfg: dict) -> int:
+def _cmd_resumen_legacy(args, cfg: dict, test_mode: bool = False) -> int:
     """Legacy resumen mensual flow."""
+    if test_mode:
+        logger.warning(
+            "test-mode no tiene efecto en el flujo legacy. "
+            "Usa --config <config.json> con formato nuevo para activarlo."
+        )
     # Resolver parametros: JSON tiene precedencia sobre args individuales
     fecha_desde = cfg.get("fecha_desde") or args.desde
     fecha_hasta = cfg.get("fecha_hasta") or args.hasta
@@ -763,6 +828,14 @@ Ejemplos:
         default=None,
         metavar="DIR",
         help="Directorio con configs JSON y contactos.json. Ejecuta todos los informes.",
+    )
+
+    # Global option: --test-mode to redirect all delivery to Nahuel Aguirre
+    parser.add_argument(
+        "--test-mode",
+        action="store_true",
+        default=False,
+        help="Redirige TODA la entrega (email + whatsapp) a Nahuel Aguirre. Tambien activable con INFORMES_TEST_MODE=1.",
     )
 
     subparsers = parser.add_subparsers(
@@ -903,22 +976,39 @@ Ejemplos:
     )
     graficos_parser.set_defaults(func=cmd_graficos_cobertura)
 
+    ventas_articulo_parser = subparsers.add_parser(
+        "ventas-articulo",
+        help="Reporte diario de ventas para un articulo especifico",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ventas_articulo_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    ventas_articulo_parser.set_defaults(func=cmd_ventas_articulo)
+
     # Parsear argumentos
     args = parser.parse_args()
 
+    test_mode = _resolve_test_mode(args.test_mode)
+    if test_mode:
+        print("[TEST MODE ACTIVO] delivery redirigido a Nahuel Aguirre", flush=True)
+
     # --config mode: process a single config file
     if args.config:
-        return _run_report_config(Path(args.config))
+        return _run_report_config(Path(args.config), test_mode=test_mode)
 
     # --config-dir mode: process all configs in directory
     if args.config_dir:
-        return _run_config_dir(Path(args.config_dir))
+        return _run_config_dir(Path(args.config_dir), test_mode=test_mode)
 
     if args.comando is None:
         parser.print_help()
         return 1
 
-    return args.func(args)
+    return args.func(args, test_mode=test_mode)
 
 
 if __name__ == "__main__":
