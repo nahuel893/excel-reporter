@@ -116,6 +116,9 @@ class AvancesResult:
 class AvancesService(BaseService):
     """Refreshes raw DB data in existing avances Excel files."""
 
+    SERVICE_SLUG = "avances"
+    GRANULARITY = "month"
+
     def generar_reporte(self, config: AvancesConfig) -> AvancesResult:
         working_path = Path(config.archivo_plantilla)
         if not working_path.exists():

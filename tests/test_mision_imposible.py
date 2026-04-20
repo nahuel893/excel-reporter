@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
+import config.settings as _settings
 from src.core.data_loader import DataLoader
 from src.services.mision_imposible.service import (
     MisionImposibleConfig,
@@ -127,7 +128,7 @@ class TestMisionImposibleService:
             nombre_archivo="test_mision",
         )
 
-        with patch("src.services.mision_imposible.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             result = service.generar_reporte(config)
 
         assert len(result.hojas) == 4
@@ -150,7 +151,7 @@ class TestMisionImposibleService:
             nombre_archivo="test_filtro",
         )
 
-        with patch("src.services.mision_imposible.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             result = service.generar_reporte(config)
 
         # Verify the prev generico sheet only has CERVEZAS rows
@@ -177,7 +178,7 @@ class TestMisionImposibleService:
         )
 
         with (
-            patch("src.services.mision_imposible.service.DATA_OUTPUT", tmp_path),
+            patch.object(_settings, "DATA_OUTPUT", tmp_path),
             patch("src.services.mision_imposible.service.aplicar_zonas_virtuales") as mock_zonas,
         ):
             mock_zonas.return_value = self._make_prev_generico_df()
@@ -199,7 +200,7 @@ class TestMisionImposibleService:
             nombre_archivo="test_empty",
         )
 
-        with patch("src.services.mision_imposible.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             result = service.generar_reporte(config)
 
         assert result.hojas == []
@@ -218,7 +219,7 @@ class TestMisionImposibleService:
             nombre_archivo="test_result",
         )
 
-        with patch("src.services.mision_imposible.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             result = service.generar_reporte(config)
 
         assert result.sucursales == 2

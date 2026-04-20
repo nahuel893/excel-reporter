@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from openpyxl import Workbook
 
+import config.settings as _settings
 from src.core.data_loader import DataLoader
 from src.services.historico_fratelli.service import (
     HistoricoFratelliConfig,
@@ -190,7 +191,7 @@ class TestHistoricoFratelliService:
         mock_loader = MagicMock(spec=DataLoader)
         mock_loader.get_ventas_historico_fratelli.return_value = _make_test_data()
 
-        with patch("src.services.historico_fratelli.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             service = HistoricoFratelliService(data_loader=mock_loader)
             config = HistoricoFratelliConfig(nombre_archivo="test_historico")
             result = service.generar_reporte(config)
@@ -205,7 +206,7 @@ class TestHistoricoFratelliService:
             columns=["anio", "mes", "marca", "id_lista_precio", "cantidad", "descuentos"]
         )
 
-        with patch("src.services.historico_fratelli.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             service = HistoricoFratelliService(data_loader=mock_loader)
             config = HistoricoFratelliConfig(nombre_archivo="test_empty")
             result = service.generar_reporte(config)
@@ -217,7 +218,7 @@ class TestHistoricoFratelliService:
         mock_loader = MagicMock(spec=DataLoader)
         mock_loader.get_ventas_historico_fratelli.return_value = _make_test_data()
 
-        with patch("src.services.historico_fratelli.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             service = HistoricoFratelliService(data_loader=mock_loader)
             config = HistoricoFratelliConfig(nombre_archivo="test_fields")
             result = service.generar_reporte(config)

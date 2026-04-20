@@ -45,7 +45,26 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 ├── main.py                   # CLI con subcomandos (soporta --config JSON)
 ├── api.py                    # FastAPI application (v2.0.0)
 ├── config.json               # Config de produccion (fechas, genericos, supervisores)
-└── data/output/              # Archivos generados
+└── data/output/              # Archivos generados por servicio
+    ├── ventas/{YYYY-MM}/     # VentasService (mensual)
+    ├── resumen-mensual/{YYYY-MM}/
+    ├── mision-imposible/{YYYY-MM}/
+    ├── cartesiano/{YYYY-MM}/
+    ├── historico-fratelli/{YYYY-MM}/
+    ├── ventas-articulo/{YYYY-MM}/
+    ├── stock-diario/{YYYY-MM-DD}/  # StockDiarioService (diario)
+    ├── graficos-cobertura/{YYYY-MM}/  # sin timestamp (reemplaza ejecucion anterior)
+    └── avances/              # AvancesService no escribe aqui (actualiza in-place)
+```
+
+### Estructura de Output
+
+Todos los servicios escriben bajo `data/output/{tipo-servicio}/{periodo}/`:
+- **Granularidad mes** (la mayoria): `data/output/{slug}/{YYYY-MM}/`
+- **Granularidad dia** (stock-diario): `data/output/stock-diario/{YYYY-MM-DD}/`
+- **avances**: excepcion — actualiza el archivo externo in-place (no genera en data/output)
+- **Capturas PNG** (CaptureImageStep): se escriben junto al xlsx (sibling directory)
+- Implementado en `src/core/output_paths.py` via `service_output_dir(slug, fecha_desde, granularity)`
 ```
 
 ## Setup en Linux
@@ -170,10 +189,12 @@ Sucursal | Generico | Cant(Gen) | Tend(Gen) | Monto(Gen) | Cob(Gen) | Marca | 01
 ## Graficos Cobertura
 
 Servicio separado que genera un paquete visual mensual:
-- `data/output/graficos-cobertura/{YYYY-MM-DD_HHMMSS}/resumen.xlsx`
-- `data/output/graficos-cobertura/{YYYY-MM-DD_HHMMSS}/Marca.pptx` (CERVEZAS + AGUAS)
-- `data/output/graficos-cobertura/{YYYY-MM-DD_HHMMSS}/Generico.pptx` (los 5 genericos)
-- `data/output/graficos-cobertura/{YYYY-MM-DD_HHMMSS}/png/*.png` (~50 PNGs)
+- `data/output/graficos-cobertura/{YYYY-MM}/resumen.xlsx`
+- `data/output/graficos-cobertura/{YYYY-MM}/Marca.pptx` (CERVEZAS + AGUAS)
+- `data/output/graficos-cobertura/{YYYY-MM}/Generico.pptx` (los 5 genericos)
+- `data/output/graficos-cobertura/{YYYY-MM}/png/*.png` (~50 PNGs)
+
+Nota: Ya no usa subdirectorio con timestamp. Cada ejecucion del mismo mes sobreescribe la anterior.
 
 **IMPORTANTE**: Este servicio usa su propio esquema de zonas (5 zonas: NOA NORTE,
 SALTA CAPITAL, INTERIOR SALTA SUR, INTERIOR SALTA NORTE, JUJUY INTERIOR) basado

@@ -95,6 +95,9 @@ class ResumenMensualService(BaseService):
     zonas virtuales, procesamiento y generacion del Excel con una hoja por generico.
     """
 
+    SERVICE_SLUG = "resumen-mensual"
+    GRANULARITY = "month"
+
     def generar_reporte(self, config: ResumenMensualConfig) -> ResumenMensualResult:
         """
         Genera un reporte de resumen mensual.
@@ -188,7 +191,9 @@ class ResumenMensualService(BaseService):
         # 5. Generar Excel: una hoja por generico
         # -----------------------------------------------------------------
         nombre = config.nombre_archivo or _nombre_reporte(df_dias, config.fecha_hasta)
-        writer = ExcelWriter(nombre)
+        out = self._output_dir(config.fecha_desde)
+        out.mkdir(parents=True, exist_ok=True)
+        writer = ExcelWriter(nombre, output_dir=out)
         genericos_resultado = (
             df_resultado["Generico"].unique().tolist() if not df_resultado.empty else []
         )

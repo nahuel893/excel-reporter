@@ -4,7 +4,6 @@ CaptureImageStep - Paso de captura de rango Excel como imagen PNG.
 import logging
 from pathlib import Path
 
-from config.settings import DATA_OUTPUT
 from src.delivery.pipeline import DeliveryConfig, DeliveryStep, ReportArtifact, StepResult
 
 
@@ -46,7 +45,7 @@ class CaptureImageStep(DeliveryStep):
                     xlsx_path=artifact.ruta_excel,
                     sheet=cfg.hoja,
                     range_addr=cfg.rango,
-                    output_dir=DATA_OUTPUT,
+                    output_dir=artifact.ruta_excel.parent,
                 )
                 artifact.rutas_imagenes.append(png_path)
                 produced.append(f"{cfg.hoja}[{renderer_name}]:{png_path.name}")

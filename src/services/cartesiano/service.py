@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from config.settings import DATA_OUTPUT
 from src.core.data_loader import DataLoader
 from src.core.excel_writer import ExcelWriter, SheetStyle, ColumnFormat
 from src.services.base_service import BaseService
@@ -53,6 +52,9 @@ _STYLE = SheetStyle(
 class CartesianoService(BaseService):
     """Genera producto cartesiano de rutas × genéricos."""
 
+    SERVICE_SLUG = "cartesiano"
+    GRANULARITY = "month"
+
     def generar_reporte(self, config: CartesianoConfig) -> CartesianoResult:
         """Genera el Excel con el producto cartesiano."""
         # Obtener rutas únicas con preventista
@@ -90,7 +92,9 @@ class CartesianoService(BaseService):
 
         # Escribir Excel
         nombre = config.nombre_archivo or "Cartesiano Rutas x Genericos"
-        writer = ExcelWriter(nombre)
+        out = self._output_dir(None)
+        out.mkdir(parents=True, exist_ok=True)
+        writer = ExcelWriter(nombre, output_dir=out)
         writer.add_sheet(df_cartesiano, sheet_name="Cartesiano", style=_STYLE)
         ruta = writer.save()
 

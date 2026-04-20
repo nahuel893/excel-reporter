@@ -7,9 +7,10 @@ Proporciona funcionalidad comun para todos los servicios:
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from src.core.data_loader import DataLoader
+from src.core.output_paths import Granularity, service_output_dir
 
 
 @dataclass
@@ -39,6 +40,9 @@ class BaseService(ABC):
     e implementar el metodo generar_reporte.
     """
 
+    SERVICE_SLUG: ClassVar[str] = ""
+    GRANULARITY: ClassVar[Granularity] = "month"
+
     def __init__(self, data_loader: DataLoader | None = None):
         """
         Inicializa el servicio.
@@ -67,6 +71,24 @@ class BaseService(ABC):
             Resultado del reporte (especifico de cada servicio)
         """
         pass
+
+    def _output_dir(self, fecha_desde: str | None) -> Path:
+        """Compute the service-scoped output directory path (does NOT create it).
+
+        Args:
+            fecha_desde: Date string (YYYY-MM-DD or ISO format) or None for today.
+
+        Returns:
+            Path under DATA_OUTPUT/{SERVICE_SLUG}/{period}.
+
+        Raises:
+            NotImplementedError: If subclass has not set SERVICE_SLUG.
+        """
+        if not self.SERVICE_SLUG:
+            raise NotImplementedError(
+                f"{type(self).__name__} must set SERVICE_SLUG class attribute"
+            )
+        return service_output_dir(self.SERVICE_SLUG, fecha_desde, self.GRANULARITY)
 
     def validar_fechas(self, fecha_desde: str, fecha_hasta: str) -> bool:
         """

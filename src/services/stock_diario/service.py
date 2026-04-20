@@ -37,6 +37,9 @@ class StockDiarioResult:
 class StockDiarioService(BaseService):
     """Generates daily stock snapshot Excel files, one per date."""
 
+    SERVICE_SLUG = "stock-diario"
+    GRANULARITY = "day"
+
     def generar_reporte(self, config: StockDiarioConfig) -> StockDiarioResult:
         """Generate one Excel file per date in [fecha_desde, fecha_hasta].
 
@@ -62,7 +65,9 @@ class StockDiarioService(BaseService):
                 logger.warning("Sin datos de stock para %s, omitiendo", fecha_str)
                 result.fechas_sin_datos.append(fecha_str)
             else:
-                ruta = build_excel(fecha_str, df, nombre_prefijo=nombre_prefijo)
+                out_dir = self._output_dir(fecha_str)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                ruta = build_excel(fecha_str, df, output_dir=out_dir, nombre_prefijo=nombre_prefijo)
                 result.archivos_generados.append(ruta)
                 logger.info("Stock generado: %s (%d registros)", ruta.name, len(df))
 

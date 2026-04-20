@@ -3,12 +3,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
-from config.settings import DATA_OUTPUT
 from src.services.base_service import BaseService
 from src.services.graficos_cobertura import chart_generator, excel_builder, pptx_builder
 from src.services.graficos_cobertura.config import GraficosCoberturaConfig
@@ -60,14 +58,17 @@ class GraficosCoberturaResult:
 class GraficosCoberturaService(BaseService):
     """Generates the complete coverage visual package.
 
-    Per run: ~50 PNGs + 1 XLSX + 2 PPTX decks in a timestamped subdir of
-    data/output/graficos-cobertura/.
+    Per run: ~50 PNGs + 1 XLSX + 2 PPTX decks under
+    data/output/graficos-cobertura/{YYYY-MM}/.
     """
+
+    SERVICE_SLUG = "graficos-cobertura"
+    GRANULARITY = "month"
 
     def generar_reporte(
         self, config: GraficosCoberturaConfig
     ) -> GraficosCoberturaResult:
-        run_dir, png_dir = self._resolve_output_dir()
+        run_dir, png_dir = self._resolve_output_dir(config.fecha_desde)
         data = self._fetch_data(config)
         data = self._apply_zonas(data)
 
@@ -127,9 +128,8 @@ class GraficosCoberturaService(BaseService):
 
     # ── Private helpers ──
 
-    def _resolve_output_dir(self) -> tuple[Path, Path]:
-        ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        run_dir = DATA_OUTPUT / "graficos-cobertura" / ts
+    def _resolve_output_dir(self, fecha_desde: str) -> tuple[Path, Path]:
+        run_dir = self._output_dir(fecha_desde)
         png_dir = run_dir / PNG_SUBDIR
         run_dir.mkdir(parents=True, exist_ok=True)
         png_dir.mkdir(parents=True, exist_ok=True)

@@ -13,7 +13,7 @@ import pandas as pd
 
 from openpyxl import load_workbook
 
-from config.settings import DATA_OUTPUT, ZONAS_VIRTUALES
+from config.settings import ZONAS_VIRTUALES
 from src.core.data_loader import DataLoader
 from src.core.excel_writer import ExcelWriter, SheetStyle, ColumnFormat, _write_sheet
 from src.core.zonas import aplicar_zonas_virtuales
@@ -383,6 +383,9 @@ class MisionImposibleResult:
 class MisionImposibleService(BaseService):
     """Servicio para generar el informe Mision Imposible con datos de cobertura."""
 
+    SERVICE_SLUG = "mision-imposible"
+    GRANULARITY = "month"
+
     # Prefijos/nombres de hojas gestionadas por el servicio
     _MANAGED_PREFIXES = ("Cob ", "Cat ", SHEET_INFO)
 
@@ -410,7 +413,7 @@ class MisionImposibleService(BaseService):
             )
 
         nombre = config.nombre_archivo or f"Mision Imposible {config.fecha_hasta}"
-        output_dir = DATA_OUTPUT
+        output_dir = self._output_dir(config.fecha_desde)
         output_dir.mkdir(parents=True, exist_ok=True)
         ruta_archivo = output_dir / f"{nombre}.xlsx"
 

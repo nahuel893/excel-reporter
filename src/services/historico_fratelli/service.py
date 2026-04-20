@@ -16,7 +16,6 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from config.settings import DATA_OUTPUT
 from src.core.data_loader import DataLoader
 from src.services.base_service import BaseService
 
@@ -269,6 +268,9 @@ class HistoricoFratelliResult:
 class HistoricoFratelliService(BaseService):
     """Servicio para generar el informe historico de FRATELLI B."""
 
+    SERVICE_SLUG = "historico-fratelli"
+    GRANULARITY = "month"
+
     def generar_reporte(
         self, config: HistoricoFratelliConfig
     ) -> HistoricoFratelliResult:
@@ -399,9 +401,10 @@ class HistoricoFratelliService(BaseService):
             hojas.append(ws_cob.title)
 
         # Save file
-        DATA_OUTPUT.mkdir(parents=True, exist_ok=True)
+        out = self._output_dir(None)
+        out.mkdir(parents=True, exist_ok=True)
         nombre = config.nombre_archivo or "Historico FRATELLI B"
-        ruta = DATA_OUTPUT / f"{nombre}.xlsx"
+        ruta = out / f"{nombre}.xlsx"
         wb.save(ruta)
 
         return HistoricoFratelliResult(

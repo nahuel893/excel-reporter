@@ -62,7 +62,7 @@ class DeliveryConfig(BaseModel):
 @dataclass
 class StepResult:
     """Resultado de la ejecucion de un paso del pipeline."""
-    status: Literal["success", "skipped", "error"]
+    status: Literal["success", "skipped", "error", "partial"]
     step_name: str
     message: str = ""
     artifact_path: Path | None = None
@@ -75,7 +75,7 @@ class PipelineResult:
 
     @property
     def success(self) -> bool:
-        return all(s.status != "error" for s in self.steps)
+        return all(s.status not in ("error", "partial") for s in self.steps)
 
 
 @dataclass

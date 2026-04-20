@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
+import config.settings as _settings
 from src.core.data_loader import DataLoader
 from src.services.graficos_cobertura.config import GraficosCoberturaConfig
 from src.services.graficos_cobertura.service import (
@@ -72,24 +73,25 @@ def _basic_config(tmp_path, con_aguas=True) -> GraficosCoberturaConfig:
 
 
 class TestOutputDirectory:
-    """RF-021: output directory is timestamped under data/output/graficos-cobertura/."""
+    """RF-021: output directory is YYYY-MM period under data/output/graficos-cobertura/."""
 
-    def test_creates_timestamped_dir(self, tmp_path):
+    def test_creates_period_dir(self, tmp_path):
         config = _basic_config(tmp_path)
         service = GraficosCoberturaService(data_loader=_mock_loader())
 
-        with patch("src.services.graficos_cobertura.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             result = service.generar_reporte(config)
 
         parent = result.ruta_directorio.parent
         assert parent.name == "graficos-cobertura"
-        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}_\d{6}", result.ruta_directorio.name)
+        # New structure: YYYY-MM (derived from fecha_desde="2026-01-01")
+        assert re.fullmatch(r"\d{4}-\d{2}", result.ruta_directorio.name)
 
     def test_creates_png_subdir(self, tmp_path):
         config = _basic_config(tmp_path)
         service = GraficosCoberturaService(data_loader=_mock_loader())
 
-        with patch("src.services.graficos_cobertura.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             result = service.generar_reporte(config)
 
         assert (result.ruta_directorio / "png").is_dir()
@@ -103,7 +105,7 @@ class TestDataLoaderCalls:
         service = GraficosCoberturaService(data_loader=loader)
         config = _basic_config(tmp_path)
 
-        with patch("src.services.graficos_cobertura.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             service.generar_reporte(config)
 
         assert loader.get_articulos.called
@@ -122,7 +124,7 @@ class TestDataLoaderCalls:
             id_fuerza_ventas=2,
         )
 
-        with patch("src.services.graficos_cobertura.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             service.generar_reporte(config)
 
         call = loader.get_cobertura_graficos_marca_sucursal.call_args
@@ -141,7 +143,7 @@ class TestAguasConditional:
         service = GraficosCoberturaService(data_loader=loader)
         config = _basic_config(tmp_path, con_aguas=True)
 
-        with patch("src.services.graficos_cobertura.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             service.generar_reporte(config)
 
         assert loader.get_cobertura_graficos_aguas_sucursal.called
@@ -151,7 +153,7 @@ class TestAguasConditional:
         service = GraficosCoberturaService(data_loader=loader)
         config = _basic_config(tmp_path, con_aguas=False)
 
-        with patch("src.services.graficos_cobertura.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             service.generar_reporte(config)
 
         # With con_aguas=False, aguas query is not called
@@ -165,7 +167,7 @@ class TestResultArtifacts:
         service = GraficosCoberturaService(data_loader=_mock_loader())
         config = _basic_config(tmp_path)
 
-        with patch("src.services.graficos_cobertura.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             result = service.generar_reporte(config)
 
         assert isinstance(result, GraficosCoberturaResult)
@@ -179,7 +181,7 @@ class TestResultArtifacts:
         service = GraficosCoberturaService(data_loader=_mock_loader())
         config = _basic_config(tmp_path)
 
-        with patch("src.services.graficos_cobertura.service.DATA_OUTPUT", tmp_path):
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             result = service.generar_reporte(config)
 
         assert result.archivo_xlsx.name == "resumen.xlsx"

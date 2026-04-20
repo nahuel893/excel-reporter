@@ -231,6 +231,9 @@ class VentasService(BaseService):
     Orquesta el flujo completo: extraccion, procesamiento y generacion de Excel.
     """
 
+    SERVICE_SLUG = "ventas"
+    GRANULARITY = "month"
+
     def _fetch_data(self, config: ReporteVentasConfig) -> tuple:
         """
         Extrae todos los datos necesarios para el reporte.
@@ -331,6 +334,7 @@ class VentasService(BaseService):
         df_cupos: pd.DataFrame | None,
         info_dias: dict,
         con_slicers: bool,
+        output_dir: Path | None = None,
     ) -> tuple[Path, int, bool, list[str]]:
         """
         Genera el archivo Excel con hojas de ventas y cobertura.
@@ -338,7 +342,7 @@ class VentasService(BaseService):
         Returns:
             (ruta_archivo, total_procesados, slicers_ok, hojas)
         """
-        writer = ExcelWriter(nombre_archivo)
+        writer = ExcelWriter(nombre_archivo, output_dir=output_dir)
         total_procesados = 0
         hojas = []
 
@@ -413,6 +417,9 @@ class VentasService(BaseService):
 
         nombre = _nombre_reporte(df_ventas, config.fecha_hasta, nombre_explicito=config.nombre_archivo)
 
+        out = self._output_dir(config.fecha_desde)
+        out.mkdir(parents=True, exist_ok=True)
+
         ruta, total_procesados, slicers_ok, hojas = self._build_workbook(
             nombre,
             config.fecha_desde,
@@ -426,6 +433,7 @@ class VentasService(BaseService):
             df_cupos,
             info_dias,
             config.con_slicers,
+            output_dir=out,
         )
 
         genericos_incluidos = (
@@ -488,6 +496,9 @@ class VentasService(BaseService):
             # Nombre de archivo: "Ventas {supervisor} - {ultima_fecha}"
             nombre = _nombre_reporte(df_ventas_sup, config.fecha_hasta, supervisor=supervisor)
 
+            out = self._output_dir(config.fecha_desde)
+            out.mkdir(parents=True, exist_ok=True)
+
             ruta, total_procesados, slicers_ok, hojas = self._build_workbook(
                 nombre,
                 config.fecha_desde,
@@ -501,6 +512,7 @@ class VentasService(BaseService):
                 df_cupos_sup,
                 info_dias,
                 config.con_slicers,
+                output_dir=out,
             )
 
             genericos_incluidos = (

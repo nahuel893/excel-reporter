@@ -415,3 +415,37 @@ class TestSendWhatsAppStepErrors:
 
         assert result.status == "error"
         assert "3 grupo(s)" in result.message
+
+
+# ---------------------------------------------------------------------------
+# CaptureImageStep — output_dir sibling of xlsx
+# ---------------------------------------------------------------------------
+
+
+class TestCaptureImageStepOutputDir:
+    def test_captures_written_next_to_xlsx(self, tmp_path):
+        """output_dir passed to renderer must equal artifact.ruta_excel.parent."""
+        xlsx = tmp_path / "sub" / "reporte.xlsx"
+        xlsx.parent.mkdir(parents=True)
+        xlsx.write_bytes(b"fake")
+        artifact = ReportArtifact(ruta_excel=xlsx)
+
+        config = DeliveryConfig(
+            capture_image=CaptureConfig(hoja="Ventas", rango="A1:H20")
+        )
+
+        fake_png = xlsx.parent / "captura.png"
+        fake_png.write_bytes(b"png-data")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render.return_value = fake_png
+
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        call_kwargs = mock_renderer.render.call_args
+        received_output_dir = call_kwargs.kwargs.get(
+            "output_dir",
+            call_kwargs.args[3] if len(call_kwargs.args) > 3 else None,
+        )
+        assert received_output_dir == xlsx.parent
