@@ -11,7 +11,7 @@ Usage:
     python scripts/run_daily.py --date 2026-04-18     # override today (for testing)
     python scripts/run_daily.py --dry-run             # show patched fechas, don't execute
     python scripts/run_daily.py --only stock-diario   # run a subset
-    python scripts/run_daily.py --only stock-diario mision-imposible
+    python scripts/run_daily.py --only stock-diario champions-league
 
 Add a new service:
     Append a `Servicio(...)` entry to SERVICIOS below. Three date modes:
@@ -76,18 +76,18 @@ SERVICIOS: list[Servicio] = [
         fecha_modo="hoy",
     ),
     Servicio(
-        nombre="mision-imposible",
-        config_path=CONFIGS_DIR / "mision_imposible.json",
+        nombre="champions-league",
+        config_path=CONFIGS_DIR / "champions_league.json",
         fecha_modo="mes_a_hoy",
     ),
     Servicio(
         nombre="graficos-cobertura",
-        config_path=CONFIGS_DIR / "graficos_cobertura_gonzalo.json",
+        config_path=CONFIGS_DIR / "graficos_cobertura.json",
         fecha_modo="mes_a_hoy",
     ),
     Servicio(
         nombre="schneider-710",
-        config_path=CONFIGS_DIR / "schneider710_gonzalo.json",
+        config_path=CONFIGS_DIR / "schneider710.json",
         fecha_modo="mes_a_hoy",
     ),
 ]

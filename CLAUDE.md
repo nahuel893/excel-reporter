@@ -48,7 +48,7 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 └── data/output/              # Archivos generados por servicio
     ├── ventas/{YYYY-MM}/     # VentasService (mensual)
     ├── resumen-mensual/{YYYY-MM}/
-    ├── mision-imposible/{YYYY-MM}/
+    ├── champions-league/{YYYY-MM}/
     ├── cartesiano/{YYYY-MM}/
     ├── historico-fratelli/{YYYY-MM}/
     ├── ventas-articulo/{YYYY-MM}/

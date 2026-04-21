@@ -1,11 +1,51 @@
 """Service-scoped output directory computation."""
 from __future__ import annotations
 
+import logging
+import shutil
 from datetime import date
 from pathlib import Path
 from typing import Literal
 
+logger = logging.getLogger(__name__)
+
 Granularity = Literal["month", "day"]
+
+
+def prepare_accumulative_file(target_path: Path) -> bool:
+    """Migration + backup helper for services that accumulate sheets over time.
+
+    For services that load an existing xlsx and ADD new sheets each run
+    (e.g. mision-imposible), this function:
+
+    1. Checks if the file already exists at ``target_path`` (new per-period path).
+    2. If NOT found, looks for a legacy flat copy at ``DATA_OUTPUT / filename``
+       and migrates it to ``target_path`` automatically.
+    3. If found (either originally or after migration), creates a backup at
+       ``{stem}_backup.xlsx`` next to the file so the prior state is preserved.
+
+    Call this BEFORE opening the workbook. Returns True if a file is ready to
+    load (i.e. the caller should ``load_workbook``), False if the caller must
+    create a fresh workbook.
+    """
+    import config.settings as _settings
+
+    if not target_path.exists():
+        # Try legacy flat path: DATA_OUTPUT / filename
+        legacy = _settings.DATA_OUTPUT / target_path.name
+        if legacy.exists():
+            logger.info(
+                "Migrando archivo a carpeta de periodo: %s -> %s", legacy, target_path
+            )
+            shutil.copy2(str(legacy), str(target_path))
+        else:
+            return False  # no file found anywhere — caller must create fresh
+
+    # File exists at target_path. Backup before modifying.
+    backup = target_path.with_stem(target_path.stem + "_backup")
+    shutil.copy2(str(target_path), str(backup))
+    logger.info("Backup creado: %s", backup.name)
+    return True
 
 
 def service_output_dir(

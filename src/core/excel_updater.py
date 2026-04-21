@@ -5,6 +5,7 @@ Proporciona funcionalidad para actualizar datos en worksheets existentes
 preservando columnas de formulas y definiciones de tablas Excel.
 """
 import logging
+import re
 from datetime import datetime
 
 import numpy as np
@@ -13,6 +14,62 @@ from openpyxl import Workbook
 from openpyxl.utils import column_index_from_string, get_column_letter
 
 logger = logging.getLogger(__name__)
+
+
+def _adjust_formula_row(formula: str, delta: int) -> str:
+    """Increment relative row references in a formula string by delta rows.
+
+    Absolute row references (prefixed with $) are left unchanged.
+    Examples:
+        _adjust_formula_row("=BUSCARV(A2,$B$1:$D$100,3,0)", 1) -> "=BUSCARV(A3,$B$1:$D$100,3,0)"
+        _adjust_formula_row("=SUMA($A$1:A2)", 2)               -> "=SUMA($A$1:A4)"
+    """
+    def _replacer(m: re.Match) -> str:
+        col_abs, col, row_abs, row = m.group(1), m.group(2), m.group(3), m.group(4)
+        if row_abs == "$":
+            return f"{col_abs}{col}{row_abs}{row}"  # absolute row — keep
+        return f"{col_abs}{col}{row_abs}{int(row) + delta}"  # relative — adjust
+
+    return re.sub(r"(\$?)([A-Z]+)(\$?)(\d+)", _replacer, formula)
+
+
+def _extend_formula_columns(
+    ws,
+    header_row: int,
+    rows_written: int,
+    data_col_indices: set[int],
+) -> int:
+    """Extend formula columns (adjacent to data) to cover all written data rows.
+
+    Scans the first data row for formula cells that are NOT in data_col_indices,
+    then copies each formula to all subsequent data rows, adjusting relative row
+    references. Idempotent — safe to call on reruns.
+
+    Returns the number of formula columns extended.
+    """
+    if rows_written <= 1:
+        return 0
+
+    first_data_row = header_row + 1
+    last_data_row = header_row + rows_written
+    extended = 0
+
+    for col_idx in range(1, ws.max_column + 1):
+        if col_idx in data_col_indices:
+            continue
+        template = ws.cell(row=first_data_row, column=col_idx).value
+        if not isinstance(template, str) or not template.startswith("="):
+            continue
+        for row in range(first_data_row + 1, last_data_row + 1):
+            ws.cell(row=row, column=col_idx).value = _adjust_formula_row(
+                template, row - first_data_row
+            )
+        extended += 1
+
+    if extended:
+        logger.debug("Columnas de formula extendidas hasta fila %d: %d", last_data_row, extended)
+
+    return extended
 
 
 def _coerce_value(val):
@@ -104,6 +161,10 @@ def replace_sheet_data(
             raw_val = row[col_name]
             ws.cell(row=data_row, column=col_idx, value=_coerce_value(raw_val))
         rows_written += 1
+
+    # 5b. Extender columnas de fórmulas adyacentes (BUSCARVs, etc.)
+    data_col_indices = {col_map[c] for c in data_columns}
+    _extend_formula_columns(ws, header_row, rows_written, data_col_indices)
 
     # 6. Redimensionar ref de tabla Excel si existe
     tables = list(ws.tables.values())

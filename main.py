@@ -143,7 +143,7 @@ def _run_reportes(report_config, contactos, test_mode: bool = False) -> int:
             artifacts = _run_ventas_report(report, merged)
         elif report_config.tipo == "resumen-mensual":
             artifacts = _run_resumen_report(report, merged)
-        elif report_config.tipo == "mision-imposible":
+        elif report_config.tipo == "champions-league":
             artifacts = _run_mision_report(report, merged)
         elif report_config.tipo == "historico-fratelli":
             artifacts = _run_historico_fratelli_report(report, merged)
@@ -171,6 +171,7 @@ def _run_reportes(report_config, contactos, test_mode: bool = False) -> int:
             enviar_email=merged["enviar_email"],
             enviar_whatsapp=merged["enviar_whatsapp"],
             test_mode=test_mode,
+            whatsapp_enviar_como=merged.get("whatsapp_enviar_como", "imagen"),
         )
         if delivery_config:
             for ruta_archivo, metadata in artifacts:
@@ -255,20 +256,20 @@ def _run_resumen_report(report, merged: dict) -> list[tuple[Path, dict]]:
 
 
 def _run_mision_report(report, merged: dict) -> list[tuple[Path, dict]]:
-    from src.services.mision_imposible import (
-        MisionImposibleConfig,
-        MisionImposibleService,
+    from src.services.champions_league import (
+        ChampionsLeagueConfig,
+        ChampionsLeagueService,
     )
 
-    config = MisionImposibleConfig(
+    config = ChampionsLeagueConfig(
         fecha_desde=merged["fecha_desde"],
         fecha_hasta=merged["fecha_hasta"],
         genericos=merged["genericos"],
         categorias=merged.get("categorias"),
         nombre_archivo=report.nombre,
     )
-    result = MisionImposibleService().generar_reporte(config)
-    print("Mision Imposible generado exitosamente:")
+    result = ChampionsLeagueService().generar_reporte(config)
+    print("Champions League generado exitosamente:")
     print(f"  - Archivo: {result.ruta_archivo}")
     print(f"  - Hojas: {', '.join(result.hojas)}")
     print(f"  - Registros procesados: {result.registros_procesados}")
@@ -518,10 +519,10 @@ def cmd_resumen_mensual(args, test_mode: bool = False) -> int:
     return _cmd_resumen_legacy(args, {}, test_mode=test_mode)
 
 
-def cmd_mision_imposible(args, test_mode: bool = False) -> int:
-    """Ejecuta el comando de mision imposible."""
+def cmd_champions_league(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando de champions league."""
     if not args.config:
-        print("Error: mision-imposible requiere un archivo --config")
+        print("Error: champions-league requiere un archivo --config")
         return 1
 
     config_path = Path(args.config)
@@ -531,7 +532,7 @@ def cmd_mision_imposible(args, test_mode: bool = False) -> int:
         return _run_report_config(config_path, test_mode=test_mode)
     else:
         print(
-            "Error: mision-imposible solo soporta el nuevo formato de configuracion JSON."
+            "Error: champions-league solo soporta el nuevo formato de configuracion JSON."
         )
         return 1
 
@@ -644,7 +645,6 @@ def _run_graficos_cobertura_report(report, merged: dict) -> list[tuple[Path, dic
 
     meta = {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")}
     return [
-        (Path(result.archivo_xlsx), meta),
         (Path(result.archivo_generico_pptx), meta),
     ]
 
@@ -921,10 +921,10 @@ Ejemplos:
     )
     historico_parser.set_defaults(func=cmd_historico_fratelli)
 
-    # Subcomando: stock-diario
+    # Subcomando: champions-league
     mision_parser = subparsers.add_parser(
-        "mision-imposible",
-        help="Reporte Mision Imposible con cobertura y categorias",
+        "champions-league",
+        help="Reporte Champions League con cobertura y categorias",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     mision_parser.add_argument(
@@ -933,7 +933,7 @@ Ejemplos:
         metavar="config.json",
         help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
     )
-    mision_parser.set_defaults(func=cmd_mision_imposible)
+    mision_parser.set_defaults(func=cmd_champions_league)
 
     stock_parser = subparsers.add_parser(
         "stock-diario",

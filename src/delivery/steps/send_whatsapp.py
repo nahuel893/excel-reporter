@@ -33,13 +33,12 @@ class SendWhatsAppStep(DeliveryStep):
                 caption = artifact.metadata.get("nombre", artifact.ruta_excel.stem)
                 if config.whatsapp.enviar_como == "imagen":
                     if artifact.ruta_imagen is None:
-                        logger.warning(
-                            "Se configuro enviar_como='imagen' pero ruta_imagen es None. "
-                            "Enviando archivo Excel en su lugar."
+                        logger.info(
+                            "WhatsApp: sin imagen para '%s', omitiendo.",
+                            artifact.ruta_excel.name,
                         )
-                        client.send_file(grupo, artifact.ruta_excel, caption=caption)
-                    else:
-                        client.send_image(grupo, artifact.ruta_imagen, caption=caption)
+                        continue
+                    client.send_image(grupo, artifact.ruta_imagen, caption=caption)
                 else:
                     client.send_file(grupo, artifact.ruta_excel, caption=caption)
             except Exception as exc:

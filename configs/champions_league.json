@@ -1,5 +1,5 @@
 {
-    "tipo": "mision-imposible",
+    "tipo": "champions-league",
     "filtros": {
         "fecha_desde": "2026-04-01",
         "fecha_hasta": "2026-04-30",
@@ -52,7 +52,7 @@
     },
     "reportes": [
         {
-            "nombre": "Mision Imposible Test",
+            "nombre": "Champions League Test",
             "capture_image": {
                 "hoja": "REPORTE",
                 "rango": "auto"

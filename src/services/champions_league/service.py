@@ -1,5 +1,5 @@
 """
-MisionImposibleService - Genera Excel con datos de cobertura para formulas manuales.
+ChampionsLeagueService - Genera Excel con datos de cobertura para formulas manuales.
 
 Crea un archivo Excel con hojas de datos crudos (cobertura por preventista y sucursal).
 El usuario agrega formulas y vistas manualmente sobre estos datos.
@@ -17,6 +17,7 @@ from config.settings import ZONAS_VIRTUALES
 from src.core.data_loader import DataLoader
 from src.core.excel_writer import ExcelWriter, SheetStyle, ColumnFormat, _write_sheet
 from src.core.zonas import aplicar_zonas_virtuales
+from src.core.output_paths import prepare_accumulative_file
 from src.services.base_service import BaseService
 
 logger = logging.getLogger(__name__)
@@ -350,8 +351,8 @@ class CategoriaConfig:
 
 
 @dataclass
-class MisionImposibleConfig:
-    """Configuracion para el informe Mision Imposible."""
+class ChampionsLeagueConfig:
+    """Configuracion para el informe Champions League."""
 
     fecha_desde: str
     fecha_hasta: str
@@ -370,8 +371,8 @@ class MisionImposibleConfig:
 
 
 @dataclass
-class MisionImposibleResult:
-    """Resultado de la generacion del informe Mision Imposible."""
+class ChampionsLeagueResult:
+    """Resultado de la generacion del informe Champions League."""
 
     ruta_archivo: Path
     registros_procesados: int
@@ -380,16 +381,16 @@ class MisionImposibleResult:
     hojas: list[str]
 
 
-class MisionImposibleService(BaseService):
-    """Servicio para generar el informe Mision Imposible con datos de cobertura."""
+class ChampionsLeagueService(BaseService):
+    """Servicio para generar el informe Champions League con datos de cobertura."""
 
-    SERVICE_SLUG = "mision-imposible"
+    SERVICE_SLUG = "champions-league"
     GRANULARITY = "month"
 
     # Prefijos/nombres de hojas gestionadas por el servicio
     _MANAGED_PREFIXES = ("Cob ", "Cat ", SHEET_INFO)
 
-    def generar_reporte(self, config: MisionImposibleConfig) -> MisionImposibleResult:
+    def generar_reporte(self, config: ChampionsLeagueConfig) -> ChampionsLeagueResult:
         """Genera el Excel con hojas de cobertura y categorias.
 
         Si el archivo ya existe, actualiza solo las hojas gestionadas
@@ -412,13 +413,15 @@ class MisionImposibleService(BaseService):
                 df_suc_gen, config.genericos, "generico"
             )
 
-        nombre = config.nombre_archivo or f"Mision Imposible {config.fecha_hasta}"
+        nombre = config.nombre_archivo or f"Champions League {config.fecha_hasta}"
         output_dir = self._output_dir(config.fecha_desde)
         output_dir.mkdir(parents=True, exist_ok=True)
         ruta_archivo = output_dir / f"{nombre}.xlsx"
 
-        # Si el archivo existe, cargarlo y borrar solo hojas gestionadas
-        if ruta_archivo.exists():
+        # Migra desde path plano viejo si es primer run del periodo + crea backup
+        file_exists = prepare_accumulative_file(ruta_archivo)
+
+        if file_exists:
             wb = load_workbook(str(ruta_archivo))
             hojas_borradas = []
             for sheet_name in wb.sheetnames[:]:
@@ -532,7 +535,7 @@ class MisionImposibleService(BaseService):
         if df_prev_gen is not None and not df_prev_gen.empty:
             sucursales = df_prev_gen["sucursal"].nunique()
 
-        return MisionImposibleResult(
+        return ChampionsLeagueResult(
             ruta_archivo=ruta_archivo,
             registros_procesados=total,
             sucursales=sucursales,

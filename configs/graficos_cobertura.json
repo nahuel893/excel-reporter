@@ -5,14 +5,18 @@
         "fecha_hasta": "2026-04-30",
         "id_fuerza_ventas": 1,
         "con_aguas": true,
-        "enviar_email": false,
-        "enviar_whatsapp": false
+        "enviar_email": true,
+        "enviar_whatsapp": true,
+        "whatsapp_enviar_como": "archivo"
     },
     "reportes": [
         {
             "nombre": "Graficos Cobertura Abril 2026",
             "asunto_email": "INFORME GRAFICOS COBERTURA",
-            "enviar_a": {}
+            "enviar_a": {
+                "Gonzalo Farah": {"via": ["email", "whatsapp"]},
+                "Sebastian Dellamea": {"via": ["email", "whatsapp"]}
+            }
         }
     ]
 }

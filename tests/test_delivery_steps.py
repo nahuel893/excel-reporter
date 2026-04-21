@@ -325,7 +325,8 @@ class TestSendWhatsAppStepSendModes:
         assert result.status == "success"
         mock_client.send_file.assert_called_once()
 
-    def test_falls_back_to_file_when_image_missing(self, tmp_path, caplog):
+    def test_skips_when_imagen_mode_and_no_image(self, tmp_path):
+        """enviar_como='imagen' sin imagen -> omite, no envia nada."""
         config = DeliveryConfig(
             whatsapp=WhatsAppConfig(grupos=["Grupo"], enviar_como="imagen")
         )
@@ -336,10 +337,29 @@ class TestSendWhatsAppStepSendModes:
             patch("src.core.whatsapp_client.WhatsAppClient", return_value=mock_client),
             patch("config.settings.WHATSAPP_SERVICE_URL", "http://localhost:3000"),
         ):
-            with caplog.at_level(logging.WARNING):
-                result = SendWhatsAppStep().execute(
-                    artifact, config, logging.getLogger("test")
-                )
+            result = SendWhatsAppStep().execute(
+                artifact, config, logging.getLogger("test")
+            )
+
+        assert result.status == "success"
+        mock_client.send_file.assert_not_called()
+        mock_client.send_image.assert_not_called()
+
+    def test_sends_file_when_archivo_mode(self, tmp_path):
+        """enviar_como='archivo' siempre envia el archivo, sin importar si hay imagen."""
+        config = DeliveryConfig(
+            whatsapp=WhatsAppConfig(grupos=["Grupo"], enviar_como="archivo")
+        )
+        artifact = _make_artifact(tmp_path)  # xlsx, no ruta_imagen
+
+        mock_client = MagicMock()
+        with (
+            patch("src.core.whatsapp_client.WhatsAppClient", return_value=mock_client),
+            patch("config.settings.WHATSAPP_SERVICE_URL", "http://localhost:3000"),
+        ):
+            result = SendWhatsAppStep().execute(
+                artifact, config, logging.getLogger("test")
+            )
 
         assert result.status == "success"
         mock_client.send_file.assert_called_once()

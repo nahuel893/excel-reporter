@@ -63,6 +63,7 @@ class GlobalFilters(BaseModel):
     id_sucursal: int | None = None
     id_fuerza_ventas: int | None = None
     id_articulo: int | None = None
+    whatsapp_enviar_como: str = "imagen"  # "imagen" | "archivo"
 
 
 class ReportFilters(BaseModel):
@@ -100,7 +101,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "mision-imposible", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

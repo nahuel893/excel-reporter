@@ -1,4 +1,4 @@
-"""Tests para MisionImposibleService."""
+"""Tests para ChampionsLeagueService."""
 import pandas as pd
 import pytest
 from unittest.mock import MagicMock, patch
@@ -6,9 +6,9 @@ from pathlib import Path
 
 import config.settings as _settings
 from src.core.data_loader import DataLoader
-from src.services.mision_imposible.service import (
-    MisionImposibleConfig,
-    MisionImposibleService,
+from src.services.champions_league.service import (
+    ChampionsLeagueConfig,
+    ChampionsLeagueService,
     _aplicar_zonas_categoria,
     _pivotear_categoria,
     _preparar_hoja,
@@ -58,14 +58,14 @@ class TestPrepararHoja:
         assert "id_vendedor" not in result.columns
 
 
-class TestMisionImposibleConfig:
+class TestChampionsLeagueConfig:
     def test_defaults(self):
-        cfg = MisionImposibleConfig(fecha_desde="2026-03-01", fecha_hasta="2026-03-31")
+        cfg = ChampionsLeagueConfig(fecha_desde="2026-03-01", fecha_hasta="2026-03-31")
         assert cfg.genericos is None
         assert cfg.nombre_archivo is None
 
     def test_with_genericos(self):
-        cfg = MisionImposibleConfig(
+        cfg = ChampionsLeagueConfig(
             fecha_desde="2026-03-01",
             fecha_hasta="2026-03-31",
             genericos=["CERVEZAS"],
@@ -73,7 +73,7 @@ class TestMisionImposibleConfig:
         assert cfg.genericos == ["CERVEZAS"]
 
 
-class TestMisionImposibleService:
+class TestChampionsLeagueService:
     def _make_prev_generico_df(self):
         return pd.DataFrame({
             "periodo": ["2026-03-01"] * 4,
@@ -121,11 +121,11 @@ class TestMisionImposibleService:
         mock_loader.get_cobertura_sucursal_generico.return_value = self._make_suc_generico_df()
         mock_loader.get_cobertura_sucursal_marca.return_value = self._make_suc_marca_df()
 
-        service = MisionImposibleService(data_loader=mock_loader)
-        config = MisionImposibleConfig(
+        service = ChampionsLeagueService(data_loader=mock_loader)
+        config = ChampionsLeagueConfig(
             fecha_desde="2026-03-01",
             fecha_hasta="2026-03-31",
-            nombre_archivo="test_mision",
+            nombre_archivo="test_champions",
         )
 
         with patch.object(_settings, "DATA_OUTPUT", tmp_path):
@@ -143,8 +143,8 @@ class TestMisionImposibleService:
         mock_loader.get_cobertura_sucursal_generico.return_value = self._make_suc_generico_df()
         mock_loader.get_cobertura_sucursal_marca.return_value = self._make_suc_marca_df()
 
-        service = MisionImposibleService(data_loader=mock_loader)
-        config = MisionImposibleConfig(
+        service = ChampionsLeagueService(data_loader=mock_loader)
+        config = ChampionsLeagueConfig(
             fecha_desde="2026-03-01",
             fecha_hasta="2026-03-31",
             genericos=["CERVEZAS"],
@@ -170,8 +170,8 @@ class TestMisionImposibleService:
         mock_loader.get_cobertura_sucursal_generico.return_value = pd.DataFrame()
         mock_loader.get_cobertura_sucursal_marca.return_value = pd.DataFrame()
 
-        service = MisionImposibleService(data_loader=mock_loader)
-        config = MisionImposibleConfig(
+        service = ChampionsLeagueService(data_loader=mock_loader)
+        config = ChampionsLeagueConfig(
             fecha_desde="2026-03-01",
             fecha_hasta="2026-03-31",
             nombre_archivo="test_zonas",
@@ -179,7 +179,7 @@ class TestMisionImposibleService:
 
         with (
             patch.object(_settings, "DATA_OUTPUT", tmp_path),
-            patch("src.services.mision_imposible.service.aplicar_zonas_virtuales") as mock_zonas,
+            patch("src.services.champions_league.service.aplicar_zonas_virtuales") as mock_zonas,
         ):
             mock_zonas.return_value = self._make_prev_generico_df()
             service.generar_reporte(config)
@@ -193,8 +193,8 @@ class TestMisionImposibleService:
         mock_loader.get_cobertura_sucursal_generico.return_value = pd.DataFrame()
         mock_loader.get_cobertura_sucursal_marca.return_value = pd.DataFrame()
 
-        service = MisionImposibleService(data_loader=mock_loader)
-        config = MisionImposibleConfig(
+        service = ChampionsLeagueService(data_loader=mock_loader)
+        config = ChampionsLeagueConfig(
             fecha_desde="2026-03-01",
             fecha_hasta="2026-03-31",
             nombre_archivo="test_empty",
@@ -212,8 +212,8 @@ class TestMisionImposibleService:
         mock_loader.get_cobertura_sucursal_generico.return_value = self._make_suc_generico_df()
         mock_loader.get_cobertura_sucursal_marca.return_value = self._make_suc_marca_df()
 
-        service = MisionImposibleService(data_loader=mock_loader)
-        config = MisionImposibleConfig(
+        service = ChampionsLeagueService(data_loader=mock_loader)
+        config = ChampionsLeagueConfig(
             fecha_desde="2026-03-01",
             fecha_hasta="2026-03-31",
             nombre_archivo="test_result",
@@ -333,7 +333,7 @@ class TestProcesarCategoriaIntegration:
         mock_loader = MagicMock(spec=DataLoader)
         mock_loader.get_ventas_mision_imposible_categorias.return_value = pd.DataFrame()
 
-        service = MisionImposibleService(data_loader=mock_loader)
+        service = ChampionsLeagueService(data_loader=mock_loader)
         result = service._procesar_categoria("2026-03-01", "2026-03-31", [1001])
         assert result is None
 
@@ -343,7 +343,7 @@ class TestProcesarCategoriaIntegration:
             _make_ventas_categoria_df()
         )
 
-        service = MisionImposibleService(data_loader=mock_loader)
+        service = ChampionsLeagueService(data_loader=mock_loader)
         result = service._procesar_categoria("2026-03-01", "2026-03-31", [1001, 1002])
         assert result is not None
         assert len(result) > 0
@@ -354,6 +354,6 @@ class TestProcesarCategoriaIntegration:
         mock_loader = MagicMock(spec=DataLoader)
         mock_loader.get_ventas_mision_imposible_categorias.side_effect = RuntimeError("DB down")
 
-        service = MisionImposibleService(data_loader=mock_loader)
+        service = ChampionsLeagueService(data_loader=mock_loader)
         with pytest.raises(RuntimeError, match="DB down"):
             service._procesar_categoria("2026-03-01", "2026-03-31", [1001])
