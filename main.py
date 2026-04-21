@@ -639,14 +639,12 @@ def _run_graficos_cobertura_report(report, merged: dict) -> list[tuple[Path, dic
     print("Graficos Cobertura generado exitosamente:")
     print(f"  - Directorio: {result.ruta_directorio}")
     print(f"  - XLSX: {result.archivo_xlsx.name}")
-    print(f"  - Marca PPTX: {result.archivo_marca_pptx.name}")
-    print(f"  - Generico PPTX: {result.archivo_generico_pptx.name}")
+    print(f"  - PPTX: {result.archivo_generico_pptx.name}")
     print(f"  - Graficos generados: {result.graficos_generados}")
 
     meta = {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")}
     return [
         (Path(result.archivo_xlsx), meta),
-        (Path(result.archivo_marca_pptx), meta),
         (Path(result.archivo_generico_pptx), meta),
     ]
 

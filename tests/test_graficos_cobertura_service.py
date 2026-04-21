@@ -172,7 +172,6 @@ class TestResultArtifacts:
 
         assert isinstance(result, GraficosCoberturaResult)
         assert result.archivo_xlsx.exists()
-        assert result.archivo_marca_pptx.exists()
         assert result.archivo_generico_pptx.exists()
         assert result.graficos_generados > 0
         assert "CERVEZAS" in result.genericos_incluidos
@@ -185,5 +184,4 @@ class TestResultArtifacts:
             result = service.generar_reporte(config)
 
         assert result.archivo_xlsx.name == "resumen.xlsx"
-        assert result.archivo_marca_pptx.name == "Marca.pptx"
-        assert result.archivo_generico_pptx.name == "Generico.pptx"
+        assert result.archivo_generico_pptx.name == "cobertura_todos.pptx"

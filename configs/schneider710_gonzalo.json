@@ -1,0 +1,27 @@
+{
+    "tipo": "ventas-articulo",
+    "filtros": {
+        "fecha_desde": "2026-04-01",
+        "fecha_hasta": "2026-04-30",
+        "id_articulo": 23179,
+        "id_sucursal": 1,
+        "enviar_email": true,
+        "enviar_whatsapp": true
+    },
+    "reportes": [
+        {
+            "nombre": "Schneider 710 - Abril 2026",
+            "asunto_email": "Reporte Schneider 710 - Abril 2026",
+            "capture_images": [
+                {
+                    "hoja": "SCHNEIDER 71024 LATA - Abr 2026",
+                    "rango": "A1:C34",
+                    "renderer": "libreoffice"
+                }
+            ],
+            "enviar_a": {
+                "Gonzalo Farah": {"via": ["email", "whatsapp"]}
+            }
+        }
+    ]
+}

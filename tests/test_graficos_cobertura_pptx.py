@@ -115,10 +115,9 @@ class TestBuildPptx:
 
 
 class TestBuildDecks:
-    """RF-016, RF-017: build_decks produces Marca.pptx + Generico.pptx."""
+    """RF-016: build_decks produces cobertura_todos.pptx with all genericos."""
 
-    def test_creates_both_decks(self, tmp_path):
-        # Create PNGs for Marca deck (cervezas + aguas) and Generico (all)
+    def test_creates_todos_deck(self, tmp_path):
         png_dir = tmp_path / "png"
         zonas = [("NOA NORTE", "noa_norte")]
         all_gens = [
@@ -133,23 +132,19 @@ class TestBuildDecks:
         out_dir = tmp_path / "out"
         result = build_decks(png_dir=png_dir, output_dir=out_dir, con_aguas=True)
 
-        assert "marca" in result
         assert "generico" in result
-        assert result["marca"].exists()
         assert result["generico"].exists()
+        assert result["generico"].name == "cobertura_todos.pptx"
 
-    def test_con_aguas_false_excludes_aguas_from_marca_deck(self, tmp_path):
+    def test_con_aguas_false_excludes_aguas_from_todos_deck(self, tmp_path):
         png_dir = tmp_path / "png"
         zonas = [("NOA NORTE", "noa_norte")]
-        gens = [
-            ("CERVEZAS", "cervezas"),
-            ("AGUAS SABORIZADAS", "aguas_saborizadas"),
-        ]
+        gens = [("CERVEZAS", "cervezas"), ("AGUAS SABORIZADAS", "aguas_saborizadas")]
         _populate_png_dir(png_dir, zonas, gens, include_comparacion=False)
 
         out_dir = tmp_path / "out"
         result = build_decks(png_dir=png_dir, output_dir=out_dir, con_aguas=False)
 
-        prs_marca = Presentation(str(result["marca"]))
-        # With con_aguas=False, marca deck has only CERVEZAS (1 zone × 1 gen = 1 slide)
-        assert len(prs_marca.slides) == 1
+        prs = Presentation(str(result["generico"]))
+        # con_aguas=False: only CERVEZAS in 1 zone = 1 slide
+        assert len(prs.slides) == 1

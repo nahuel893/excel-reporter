@@ -82,7 +82,12 @@ SERVICIOS: list[Servicio] = [
     ),
     Servicio(
         nombre="graficos-cobertura",
-        config_path=CONFIGS_DIR / "graficos_cobertura.json",
+        config_path=CONFIGS_DIR / "graficos_cobertura_gonzalo.json",
+        fecha_modo="mes_a_hoy",
+    ),
+    Servicio(
+        nombre="schneider-710",
+        config_path=CONFIGS_DIR / "schneider710_gonzalo.json",
         fecha_modo="mes_a_hoy",
     ),
 ]

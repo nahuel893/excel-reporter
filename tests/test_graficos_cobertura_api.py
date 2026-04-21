@@ -15,21 +15,18 @@ def client():
 
 
 def _fake_result(tmp_path):
-    run_dir = tmp_path / "2026-04-17_143022"
+    run_dir = tmp_path / "2026-01"
     png_dir = run_dir / "png"
     png_dir.mkdir(parents=True)
     xlsx = run_dir / "resumen.xlsx"
     xlsx.write_bytes(b"fake xlsx content")
-    marca = run_dir / "Marca.pptx"
-    marca.write_bytes(b"fake marca content")
-    generico = run_dir / "Generico.pptx"
+    generico = run_dir / "cobertura_todos.pptx"
     generico.write_bytes(b"fake generico content")
     (png_dir / "cobertura_noa_norte_cervezas.png").write_bytes(b"\x89PNG fake")
 
     return GraficosCoberturaResult(
         ruta_directorio=run_dir,
         archivo_xlsx=xlsx,
-        archivo_marca_pptx=marca,
         archivo_generico_pptx=generico,
         graficos_generados=25,
         zonas_incluidas=["NOA NORTE", "SALTA CAPITAL"],
@@ -59,8 +56,7 @@ class TestReporteEndpoint:
         assert response.status_code == 200
         body = response.json()
         assert body["archivo_xlsx"].endswith("resumen.xlsx")
-        assert body["archivo_marca_pptx"].endswith("Marca.pptx")
-        assert body["archivo_generico_pptx"].endswith("Generico.pptx")
+        assert body["archivo_generico_pptx"].endswith("cobertura_todos.pptx")
         assert body["graficos_generados"] == 25
         assert "NOA NORTE" in body["zonas_incluidas"]
 
@@ -105,8 +101,7 @@ class TestDownloadEndpoint:
         zf = zipfile.ZipFile(io.BytesIO(response.content))
         names = zf.namelist()
         assert "resumen.xlsx" in names
-        assert "Marca.pptx" in names
-        assert "Generico.pptx" in names
+        assert "cobertura_todos.pptx" in names
         # png subdir preserved
         assert any(n.startswith("png/") for n in names)
 

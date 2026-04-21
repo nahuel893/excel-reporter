@@ -17,7 +17,6 @@ from pptx.util import Inches, Pt
 from src.services.graficos_cobertura.constants import (
     PPTX_FONT_NAME,
     PPTX_GENERICO_FILENAME,
-    PPTX_MARCA_FILENAME,
     PPTX_SLIDE_HEIGHT_IN,
     PPTX_SLIDE_WIDTH_IN,
     PPTX_TITLE_COLOR,
@@ -141,28 +140,16 @@ def build_decks(
     con_aguas: bool = True,
     zonas: list[tuple[str, str]] | None = None,
 ) -> dict[str, Path]:
-    """Build Marca.pptx and Generico.pptx from the PNG directory.
-
-    Marca.pptx: CERVEZAS + AGUAS subdivisions (subject to con_aguas).
-    Generico.pptx: all 5 genericos (subject to con_aguas).
-    """
+    """Build cobertura_todos.pptx from the PNG directory (all 5 genericos)."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     zonas = zonas or _DEFAULT_ZONAS
 
     if con_aguas:
-        gens_marca = _GENERICOS_MARCA
         gens_all = _GENERICOS_ALL
     else:
-        gens_marca = [g for g in _GENERICOS_MARCA if "AGUAS" not in g[0]]
         gens_all = [g for g in _GENERICOS_ALL if "AGUAS" not in g[0]]
 
-    marca_path = build_pptx(
-        genericos=gens_marca,
-        zonas=zonas,
-        png_dir=png_dir,
-        output_path=output_dir / PPTX_MARCA_FILENAME,
-    )
     generico_path = build_pptx(
         genericos=gens_all,
         zonas=zonas,
@@ -170,4 +157,4 @@ def build_decks(
         output_path=output_dir / PPTX_GENERICO_FILENAME,
     )
 
-    return {"marca": marca_path, "generico": generico_path}
+    return {"generico": generico_path}

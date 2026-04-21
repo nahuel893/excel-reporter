@@ -14,7 +14,6 @@ from src.services.graficos_cobertura.constants import (
     GENERICOS_INCLUIDOS,
     MESES,
     PPTX_GENERICO_FILENAME,
-    PPTX_MARCA_FILENAME,
     PNG_SUBDIR,
     XLSX_FILENAME,
     ZONAS,
@@ -48,7 +47,6 @@ class GraficosCoberturaResult:
     """Artifacts produced by a graficos-cobertura run."""
     ruta_directorio: Path
     archivo_xlsx: Path
-    archivo_marca_pptx: Path
     archivo_generico_pptx: Path
     graficos_generados: int
     zonas_incluidas: list[str] = field(default_factory=list)
@@ -119,7 +117,6 @@ class GraficosCoberturaService(BaseService):
         return GraficosCoberturaResult(
             ruta_directorio=run_dir,
             archivo_xlsx=xlsx_path,
-            archivo_marca_pptx=pptx_paths["marca"],
             archivo_generico_pptx=pptx_paths["generico"],
             graficos_generados=graficos,
             zonas_incluidas=list(ZONAS),

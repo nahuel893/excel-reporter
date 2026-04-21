@@ -115,7 +115,6 @@ PPTX_SLIDE_WIDTH_IN: float = 13.333
 PPTX_SLIDE_HEIGHT_IN: float = 7.5
 
 # File naming
-PPTX_MARCA_FILENAME: str = "Marca.pptx"
-PPTX_GENERICO_FILENAME: str = "Generico.pptx"
+PPTX_GENERICO_FILENAME: str = "cobertura_todos.pptx"
 XLSX_FILENAME: str = "resumen.xlsx"
 PNG_SUBDIR: str = "png"

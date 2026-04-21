@@ -29,7 +29,6 @@ class GraficosCoberturaInfo(BaseModel):
     """Metadata de los artefactos generados."""
     ruta_directorio: str
     archivo_xlsx: str
-    archivo_marca_pptx: str
     archivo_generico_pptx: str
     graficos_generados: int
     zonas_incluidas: list[str]
@@ -57,7 +56,6 @@ def generar_reporte(request: GraficosCoberturaRequest) -> GraficosCoberturaInfo:
     return GraficosCoberturaInfo(
         ruta_directorio=str(result.ruta_directorio),
         archivo_xlsx=str(result.archivo_xlsx),
-        archivo_marca_pptx=str(result.archivo_marca_pptx),
         archivo_generico_pptx=str(result.archivo_generico_pptx),
         graficos_generados=result.graficos_generados,
         zonas_incluidas=result.zonas_incluidas,
