@@ -114,6 +114,7 @@ def build_pptx(
     prs.slide_height = Inches(PPTX_SLIDE_HEIGHT_IN)
 
     for gen_name, gen_slug in genericos:
+        # Primero TODAS las coberturas del genérico (5 zonas)
         for zona_name, zona_slug in zonas:
             cob_png = png_dir / f"cobertura_{zona_slug}_{gen_slug}.png"
             _add_slide_with_image(
@@ -122,7 +123,9 @@ def build_pptx(
                 margin_top=0.95,
             )
 
-            if include_comparacion:
+        # Después TODAS las comparaciones del genérico (5 zonas)
+        if include_comparacion:
+            for zona_name, zona_slug in zonas:
                 comp_png = png_dir / f"comparacion_{zona_slug}_{gen_slug}.png"
                 _add_slide_with_image(
                     prs, comp_png,

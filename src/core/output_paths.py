@@ -12,34 +12,51 @@ logger = logging.getLogger(__name__)
 Granularity = Literal["month", "day"]
 
 
-def prepare_accumulative_file(target_path: Path) -> bool:
+def prepare_accumulative_file(
+    target_path: Path,
+    legacy_slugs: list[str] | None = None,
+) -> bool:
     """Migration + backup helper for services that accumulate sheets over time.
 
-    For services that load an existing xlsx and ADD new sheets each run
-    (e.g. mision-imposible), this function:
+    For services that load an existing xlsx and ADD new sheets each run, this:
 
-    1. Checks if the file already exists at ``target_path`` (new per-period path).
-    2. If NOT found, looks for a legacy flat copy at ``DATA_OUTPUT / filename``
-       and migrates it to ``target_path`` automatically.
-    3. If found (either originally or after migration), creates a backup at
-       ``{stem}_backup.xlsx`` next to the file so the prior state is preserved.
+    1. Checks if the file exists at ``target_path`` (new per-period path).
+    2. If NOT found, searches in order:
+       a. Legacy flat path: ``DATA_OUTPUT / filename``
+       b. Legacy slug folders (for renamed services): any .xlsx in
+          ``DATA_OUTPUT / legacy_slug / period /`` — useful when both the
+          service slug AND the file name changed after a rename.
+    3. If found anywhere, migrates to ``target_path`` and creates a backup.
 
-    Call this BEFORE opening the workbook. Returns True if a file is ready to
-    load (i.e. the caller should ``load_workbook``), False if the caller must
-    create a fresh workbook.
+    Returns True if a file is ready to load, False if caller must create fresh.
     """
     import config.settings as _settings
 
     if not target_path.exists():
-        # Try legacy flat path: DATA_OUTPUT / filename
-        legacy = _settings.DATA_OUTPUT / target_path.name
-        if legacy.exists():
-            logger.info(
-                "Migrando archivo a carpeta de periodo: %s -> %s", legacy, target_path
-            )
-            shutil.copy2(str(legacy), str(target_path))
+        found_legacy: Path | None = None
+
+        # a. Legacy flat path (old pre-output-per-service layout)
+        flat = _settings.DATA_OUTPUT / target_path.name
+        if flat.exists():
+            found_legacy = flat
         else:
-            return False  # no file found anywhere — caller must create fresh
+            # b. Legacy slug folders (service was renamed — slug + filename both changed)
+            period = target_path.parent.name  # e.g. "2026-04"
+            for slug in (legacy_slugs or []):
+                slug_dir = _settings.DATA_OUTPUT / slug / period
+                if slug_dir.is_dir():
+                    candidates = sorted(slug_dir.glob("*.xlsx"))
+                    # Exclude backup files
+                    candidates = [p for p in candidates if "_backup" not in p.stem]
+                    if candidates:
+                        found_legacy = candidates[0]
+                        break
+
+        if found_legacy is None:
+            return False
+
+        logger.info("Migrando archivo a nueva carpeta: %s -> %s", found_legacy, target_path)
+        shutil.copy2(str(found_legacy), str(target_path))
 
     # File exists at target_path. Backup before modifying.
     backup = target_path.with_stem(target_path.stem + "_backup")

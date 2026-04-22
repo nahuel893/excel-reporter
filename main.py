@@ -172,6 +172,7 @@ def _run_reportes(report_config, contactos, test_mode: bool = False) -> int:
             enviar_whatsapp=merged["enviar_whatsapp"],
             test_mode=test_mode,
             whatsapp_enviar_como=merged.get("whatsapp_enviar_como", "imagen"),
+            email_adjuntos=merged.get("email_adjuntos", ["excel"]),
         )
         if delivery_config:
             for ruta_archivo, metadata in artifacts:

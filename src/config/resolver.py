@@ -99,6 +99,7 @@ def resolve_delivery(
     enviar_whatsapp: bool = True,
     test_mode: bool = False,
     whatsapp_enviar_como: str = "imagen",
+    email_adjuntos: list[str] | None = None,
 ) -> DeliveryConfig | None:
     """
     Translate named contacts + channels into the concrete DeliveryConfig
@@ -178,7 +179,7 @@ def resolve_delivery(
     return DeliveryConfig(
         capture_image=capture_list[0] if capture_list else None,  # legacy field, first only
         capture_images=capture_list,
-        email=EmailConfig(destinatarios=email_recipients, cc=email_cc, asunto=report.asunto_email) if email_recipients else None,
+        email=EmailConfig(destinatarios=email_recipients, cc=email_cc, asunto=report.asunto_email, adjuntos=email_adjuntos or ["excel"]) if email_recipients else None,
         whatsapp=WhatsAppConfig(grupos=whatsapp_targets, enviar_como=whatsapp_enviar_como) if whatsapp_targets else None,
     )
 
@@ -201,6 +202,7 @@ def merge_filters(global_f: GlobalFilters, report_f: ReportFilters | None) -> di
         "id_fuerza_ventas": global_f.id_fuerza_ventas,
         "id_articulo": global_f.id_articulo,
         "whatsapp_enviar_como": global_f.whatsapp_enviar_como,
+        "email_adjuntos": global_f.email_adjuntos,
     }
     if report_f:
         if report_f.genericos is not None:

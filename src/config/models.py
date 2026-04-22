@@ -63,7 +63,8 @@ class GlobalFilters(BaseModel):
     id_sucursal: int | None = None
     id_fuerza_ventas: int | None = None
     id_articulo: int | None = None
-    whatsapp_enviar_como: str = "imagen"  # "imagen" | "archivo"
+    whatsapp_enviar_como: str = "imagen"  # "imagen" | "archivo" | "ambos"
+    email_adjuntos: list[str] = ["excel"]  # ["excel"] | ["imagen"] | ["excel", "imagen"]
 
 
 class ReportFilters(BaseModel):

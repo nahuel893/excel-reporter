@@ -386,6 +386,7 @@ class ChampionsLeagueService(BaseService):
 
     SERVICE_SLUG = "champions-league"
     GRANULARITY = "month"
+    LEGACY_SLUGS = ["mision-imposible"]  # slugs anteriores para migración automática
 
     # Prefijos/nombres de hojas gestionadas por el servicio
     _MANAGED_PREFIXES = ("Cob ", "Cat ", SHEET_INFO)
@@ -418,8 +419,8 @@ class ChampionsLeagueService(BaseService):
         output_dir.mkdir(parents=True, exist_ok=True)
         ruta_archivo = output_dir / f"{nombre}.xlsx"
 
-        # Migra desde path plano viejo si es primer run del periodo + crea backup
-        file_exists = prepare_accumulative_file(ruta_archivo)
+        # Migra desde path viejo (flat o slug anterior) + crea backup
+        file_exists = prepare_accumulative_file(ruta_archivo, legacy_slugs=self.LEGACY_SLUGS)
 
         if file_exists:
             wb = load_workbook(str(ruta_archivo))

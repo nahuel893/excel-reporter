@@ -14,7 +14,7 @@
             "nombre": "AVANCE BRANCA - ABRIL 2026",
             "capture_images": [
                 { "hoja": "AVANCE",    "rango": "B2:AX35", "renderer": "libreoffice" },
-                { "hoja": "Cobertura", "rango": "B2:AR37", "renderer": "html_playwright" }
+                { "hoja": "Cobertura", "rango": "B2:AR37", "renderer": "libreoffice" }
             ]
         }
     ]

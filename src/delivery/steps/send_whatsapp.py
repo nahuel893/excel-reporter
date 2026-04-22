@@ -39,6 +39,10 @@ class SendWhatsAppStep(DeliveryStep):
                         )
                         continue
                     client.send_image(grupo, artifact.ruta_imagen, caption=caption)
+                elif config.whatsapp.enviar_como == "ambos":
+                    if artifact.ruta_imagen is not None:
+                        client.send_image(grupo, artifact.ruta_imagen, caption=caption)
+                    client.send_file(grupo, artifact.ruta_excel, caption=caption)
                 else:
                     client.send_file(grupo, artifact.ruta_excel, caption=caption)
             except Exception as exc:

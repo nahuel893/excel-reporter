@@ -88,13 +88,25 @@ def plot_cobertura_zona(
             vals = vals.values
             offset = (i - n / 2 + 0.5) * width
             color = _color_marca(marca, i)
-            ax.bar(
+            bars = ax.bar(
                 x + offset, vals, width,
                 label=marca, color=color, alpha=0.88,
                 edgecolor="white", linewidth=0.5, zorder=2,
             )
+            # Etiquetas dentro de cada barra (rotadas 90°)
+            for bar_obj, val in zip(bars, vals):
+                if val > 0:
+                    ax.text(
+                        bar_obj.get_x() + bar_obj.get_width() / 2,
+                        bar_obj.get_height() * 0.5,
+                        _format_number(val),
+                        ha="center", va="center",
+                        fontsize=8, rotation=90, fontweight="bold",
+                        color="#333333", zorder=5,
+                    )
 
         ax2 = ax.twinx()
+        line_data: dict[int, dict[int, float]] = {}
         all_line_vals: list[float] = []
         for yr in anios_lineas:
             df_line = df_gen_lines[df_gen_lines["anio"] == yr]
@@ -114,7 +126,40 @@ def plot_cobertura_zona(
                 markersize=7, linewidth=2.5, label=str(yr), zorder=4,
                 markeredgecolor="white", markeredgewidth=0.8,
             )
+            line_data[yr] = dict(zip(x_pts.tolist(), y_pts.tolist()))
             all_line_vals.extend(y_pts.tolist())
+
+        # Anotaciones en puntos de línea con offset inteligente para evitar overlaps
+        y_range = (max(all_line_vals) - min(all_line_vals)) if all_line_vals else 1
+        min_gap = y_range * 0.06
+        for xi in range(12):
+            points = [(line_data[yr][xi], yr) for yr in line_data if xi in line_data[yr]]
+            if not points:
+                continue
+            points.sort(key=lambda p: p[0])
+            offsets: dict[int, int] = {}
+            if len(points) == 1:
+                offsets[points[0][1]] = 13
+            else:
+                y_offsets = [13] * len(points)
+                for j in range(1, len(points)):
+                    if points[j][0] - points[j - 1][0] < min_gap:
+                        y_offsets[j - 1] = -16
+                        y_offsets[j] = 16
+                for j, (_, yr) in enumerate(points):
+                    offsets[yr] = y_offsets[j]
+            for yr, dy in offsets.items():
+                yi = line_data[yr][xi]
+                color = COLORES_LINEAS.get(yr, "#888888")
+                va = "bottom" if dy > 0 else "top"
+                ax2.annotate(
+                    _format_number(yi),
+                    (xi, yi), textcoords="offset points",
+                    xytext=(0, dy),
+                    ha="center", va=va,
+                    fontsize=12, fontweight="bold", color=color,
+                    zorder=5,
+                )
 
         ax.set_title(
             f"{zona}  ({generico})",
@@ -199,16 +244,30 @@ def plot_comparacion_marca(
 
         color_prev = COLORES_LINEAS.get(anio_anterior, "#E65100")
         color_actual = COLORES_LINEAS.get(anio_actual, "#2E7D32")
-        ax.bar(
+        bars_prev = ax.bar(
             x - width / 2, vals_prev, width,
             label=str(anio_anterior), color=color_prev,
             alpha=0.88, edgecolor="white", linewidth=0.5, zorder=2,
         )
-        ax.bar(
+        bars_actual = ax.bar(
             x + width / 2, vals_actual, width,
             label=str(anio_actual), color=color_actual,
             alpha=0.88, edgecolor="white", linewidth=0.5, zorder=2,
         )
+
+        # Etiquetas sobre cada barra
+        for bars in (bars_prev, bars_actual):
+            for bar_obj in bars:
+                h = bar_obj.get_height()
+                if h > 0:
+                    ax.text(
+                        bar_obj.get_x() + bar_obj.get_width() / 2,
+                        h + 0.5,
+                        _format_number(h),
+                        ha="center", va="bottom",
+                        fontsize=10, fontweight="bold",
+                        color="#333333", zorder=5,
+                    )
 
         mes_nombre = MESES[mes_corte - 1] if 1 <= mes_corte <= 12 else ""
         ax.set_title(

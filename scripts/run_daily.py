@@ -34,7 +34,7 @@ from typing import Literal
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from main import _run_reportes  # noqa: E402
+from main import _run_reportes, _resolve_test_mode  # noqa: E402
 from src.config.resolver import load_contacts, load_report_config  # noqa: E402
 
 
@@ -93,7 +93,7 @@ SERVICIOS: list[Servicio] = [
 ]
 
 
-def _ejecutar_servicio(svc: Servicio, hoy: date) -> int:
+def _ejecutar_servicio(svc: Servicio, hoy: date, test_mode: bool = False) -> int:
     """Load the config, patch fechas, and run through the normal pipeline."""
     raw = json.loads(svc.config_path.read_text(encoding="utf-8"))
     patched = svc.patch(raw, hoy)
@@ -109,7 +109,7 @@ def _ejecutar_servicio(svc: Servicio, hoy: date) -> int:
         report_config = load_report_config(tmp_path)
         contactos = load_contacts(CONTACTOS_PATH) if CONTACTOS_PATH.exists() else {}
         report_config.validate_contacts(contactos)
-        return _run_reportes(report_config, contactos)
+        return _run_reportes(report_config, contactos, test_mode=test_mode)
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -119,9 +119,13 @@ def main() -> int:
     parser.add_argument("--date", metavar="YYYY-MM-DD", help="Override today's date (for testing)")
     parser.add_argument("--dry-run", action="store_true", help="Print patched fechas without executing")
     parser.add_argument("--only", nargs="+", metavar="SERVICIO", help="Run only these services by name")
+    parser.add_argument("--test-mode", action="store_true", default=False, help="Redirige toda la entrega a Nahuel Aguirre (tambien activable con INFORMES_TEST_MODE=1)")
     args = parser.parse_args()
 
     hoy = date.fromisoformat(args.date) if args.date else date.today()
+    test_mode = _resolve_test_mode(args.test_mode)
+    if test_mode:
+        print("[TEST MODE ACTIVO] delivery redirigido a Nahuel Aguirre")
 
     servicios = SERVICIOS
     if args.only:
@@ -152,7 +156,7 @@ def main() -> int:
         print(f"  Ejecutando: {svc.nombre}")
         print(f"{'=' * 60}")
         try:
-            code = _ejecutar_servicio(svc, hoy)
+            code = _ejecutar_servicio(svc, hoy, test_mode=test_mode)
             if code != 0:
                 errores.append(f"{svc.nombre} (exit {code})")
         except Exception as exc:  # noqa: BLE001
