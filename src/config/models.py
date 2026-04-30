@@ -65,6 +65,7 @@ class GlobalFilters(BaseModel):
     id_articulo: int | None = None
     whatsapp_enviar_como: str = "imagen"  # "imagen" | "archivo" | "ambos"
     email_adjuntos: list[str] = ["excel"]  # ["excel"] | ["imagen"] | ["excel", "imagen"]
+    detalle_movimientos_path: str | None = None  # Path to detalle_movimientos.xlsx for merge import
 
 
 class ReportFilters(BaseModel):
@@ -79,6 +80,9 @@ class ReportFilters(BaseModel):
     enviar_whatsapp: bool | None = None
     id_articulo: int | None = None
     id_sucursal: int | None = None
+    clientes: list[dict] | None = None      # each dict: {"id_cliente": int, "id_sucursal": int}
+    articulos: list[int] | None = None      # list of id_articulo
+    marcas: list[str] | None = None         # list of marca names
 
 
 class ReportEntry(BaseModel):
@@ -102,7 +106,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

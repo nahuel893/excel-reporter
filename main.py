@@ -59,9 +59,21 @@ def parsear_genericos(genericos_str: str | None) -> list[str] | None:
 # New config format — per-report delivery pipeline
 # ---------------------------------------------------------------------------
 
-SERVICIOS = {
-    "ventas": "ventas",
-    "resumen-mensual": "resumen-mensual",
+# Registry: tipo → handler function name.
+# Resolved via globals() at call-time so `patch.object(main, "_run_X_report", fake)`
+# in tests still intercepts dispatch.
+REPORT_HANDLERS: dict[str, str] = {
+    "ventas": "_run_ventas_report",
+    "resumen-mensual": "_run_resumen_report",
+    "champions-league": "_run_mision_report",
+    "historico-fratelli": "_run_historico_fratelli_report",
+    "stock-diario": "_run_stock_diario_report",
+    "cartesiano": "_run_cartesiano_report",
+    "avances": "_run_avances_report",
+    "graficos-cobertura": "_run_graficos_cobertura_report",
+    "ventas-articulo": "_run_ventas_articulo_report",
+    "historico-cliente": "_run_historico_cliente_report",
+    "reporte-general-badie": "_run_reporte_general_badie_report",
 }
 
 
@@ -139,27 +151,11 @@ def _run_reportes(report_config, contactos, test_mode: bool = False) -> int:
 
         print(f"\nGenerando: {report.nombre}")
 
-        if report_config.tipo == "ventas":
-            artifacts = _run_ventas_report(report, merged)
-        elif report_config.tipo == "resumen-mensual":
-            artifacts = _run_resumen_report(report, merged)
-        elif report_config.tipo == "champions-league":
-            artifacts = _run_mision_report(report, merged)
-        elif report_config.tipo == "historico-fratelli":
-            artifacts = _run_historico_fratelli_report(report, merged)
-        elif report_config.tipo == "stock-diario":
-            artifacts = _run_stock_diario_report(report, merged)
-        elif report_config.tipo == "cartesiano":
-            artifacts = _run_cartesiano_report(report, merged)
-        elif report_config.tipo == "avances":
-            artifacts = _run_avances_report(report, merged)
-        elif report_config.tipo == "graficos-cobertura":
-            artifacts = _run_graficos_cobertura_report(report, merged)
-        elif report_config.tipo == "ventas-articulo":
-            artifacts = _run_ventas_articulo_report(report, merged)
-        else:
+        handler_name = REPORT_HANDLERS.get(report_config.tipo)
+        if handler_name is None:
             print(f"Error: tipo de reporte desconocido: {report_config.tipo}")
             return 1
+        artifacts = globals()[handler_name](report, merged)
 
         if not artifacts:
             continue  # error already printed
@@ -237,6 +233,7 @@ def _run_resumen_report(report, merged: dict) -> list[tuple[Path, dict]]:
         fecha_hasta=merged["fecha_hasta"],
         genericos=merged["genericos"],
         nombre_archivo=report.nombre,
+        detalle_movimientos_path=merged.get("detalle_movimientos_path"),
     )
 
     result = ResumenMensualService().generar_reporte(config)
@@ -673,6 +670,82 @@ def _run_cartesiano_report(report, merged: dict) -> list[tuple[Path, dict]]:
     ]
 
 
+def _run_historico_cliente_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate historico-cliente report. Returns list of (path, metadata) tuples."""
+    from src.services.historico_cliente import (
+        HistoricoClienteConfig,
+        HistoricoClienteService,
+    )
+
+    # Extract per-report filters if present, fall back to merged/globals
+    clientes = merged.get("clientes")
+    articulos = merged.get("articulos")
+    marcas = merged.get("marcas")
+
+    if not clientes:
+        print("Error: historico-cliente requires 'clientes' in filtros (report or global)")
+        return []
+
+    config = HistoricoClienteConfig(
+        fecha_desde=merged["fecha_desde"],
+        fecha_hasta=merged["fecha_hasta"],
+        clientes=clientes,
+        articulos=articulos,
+        marcas=marcas,
+        nombre_archivo=report.nombre,
+    )
+
+    service = HistoricoClienteService()
+    try:
+        result = service.generar_reporte(config)
+    except ValueError as e:
+        print(f"Error: {e}")
+        return []
+
+    print(f"Historico Cliente '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Hojas generadas: {len(result.sheets_generated)}")
+    for sh in result.sheets_generated:
+        print(f"    - {sh}")
+    print(f"  - Registros procesados: {result.registros_procesados}")
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
+def _run_reporte_general_badie_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate reporte-general-badie report. Returns list of (path, metadata) tuples."""
+    from src.services.reporte_general_badie import (
+        ReporteGeneralBadieConfig,
+        ReporteGeneralBadieService,
+    )
+
+    fecha_desde = merged.get("fecha_desde")
+    fecha_hasta = merged.get("fecha_hasta")
+    if not fecha_desde or not fecha_hasta:
+        print("Error: reporte-general-badie requires fecha_desde y fecha_hasta")
+        return []
+
+    print(f"Generando: {report.nombre}")
+    config = ReporteGeneralBadieConfig(
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        nombre_archivo=report.nombre,
+    )
+    service = ReporteGeneralBadieService()
+    result = service.generar_reporte(config)
+    print(f"{report.nombre} generado exitosamente:")
+    print(f"  - Archivo normal: {result.ruta_archivo}")
+    print(f"      Ventas: {result.registros_ventas} | Cobertura: {result.registros_cobertura} | Trimestres: {result.trimestres_en_dropdown}")
+    print(f"  - Archivo extendido: {result.ruta_archivo_extendido}")
+    print(f"      Ventas: {result.registros_ventas_extendido} | Cobertura: {result.registros_cobertura_extendido} | Trimestres: {result.trimestres_en_dropdown_extendido}")
+    print(f"  - Sucursales: {result.sucursales}")
+    return [(result.ruta_archivo, {}), (result.ruta_archivo_extendido, {})]
+
+
 def _run_avances_report(report, merged: dict) -> list[tuple[Path, dict]]:
     """Generate avances report. Returns list of (path, metadata) tuples."""
     import logging
@@ -729,6 +802,40 @@ def cmd_cartesiano(args, test_mode: bool = False) -> int:
         return _run_report_config(config_path, test_mode=test_mode)
     else:
         print("Error: cartesiano solo soporta el nuevo formato de configuracion JSON.")
+        return 1
+
+
+def cmd_historico_cliente(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando historico-cliente."""
+    if not args.config:
+        print("Error: historico-cliente requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    else:
+        print("Error: historico-cliente solo soporta el nuevo formato de configuracion JSON.")
+        return 1
+
+
+def cmd_reporte_general_badie(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando reporte-general-badie."""
+    if not args.config:
+        print("Error: reporte-general-badie requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    else:
+        print(
+            "Error: reporte-general-badie solo soporta el nuevo formato de configuracion JSON."
+        )
         return 1
 
 
@@ -987,6 +1094,32 @@ Ejemplos:
         help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
     )
     ventas_articulo_parser.set_defaults(func=cmd_ventas_articulo)
+
+    historico_cliente_parser = subparsers.add_parser(
+        "historico-cliente",
+        help="Historico de ventas por cliente",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    historico_cliente_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    historico_cliente_parser.set_defaults(func=cmd_historico_cliente)
+
+    reporte_general_badie_parser = subparsers.add_parser(
+        "reporte-general-badie",
+        help="Reporte General Badie con selector de mes interactivo",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    reporte_general_badie_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    reporte_general_badie_parser.set_defaults(func=cmd_reporte_general_badie)
 
     # Parsear argumentos
     args = parser.parse_args()

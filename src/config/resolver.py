@@ -203,6 +203,7 @@ def merge_filters(global_f: GlobalFilters, report_f: ReportFilters | None) -> di
         "id_articulo": global_f.id_articulo,
         "whatsapp_enviar_como": global_f.whatsapp_enviar_como,
         "email_adjuntos": global_f.email_adjuntos,
+        "detalle_movimientos_path": global_f.detalle_movimientos_path,
     }
     if report_f:
         if report_f.genericos is not None:
