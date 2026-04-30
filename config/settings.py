@@ -69,8 +69,12 @@ COLUMN_NAMES = {
 ZONAS_VIRTUALES = {
     "VALLE SALTA": {
         "sucursal_real": "CASA CENTRAL",
-        "rutas": [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 118, 119, 120, 122],
-    }
+        "rutas": [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 118, 119, 120, 122],
+    },
+    "SUB DISTRIBUIDORES": {
+        "sucursal_real": "CASA CENTRAL",
+        "rutas": [93],
+    },
 }
 
 # Configuracion SMTP para envio de emails
@@ -83,7 +87,7 @@ SMTP_CONFIG = {
 }
 
 # URL del servicio WhatsApp (Baileys microservice)
-WHATSAPP_SERVICE_URL = os.getenv("WHATSAPP_SERVICE_URL", "http://localhost:3001")
+WHATSAPP_SERVICE_URL = os.getenv("WHATSAPP_SERVICE_URL", "http://localhost:3000")
 
 DIAS_SEMANA = {
     0: "Lunes",
