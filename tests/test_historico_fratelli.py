@@ -190,6 +190,9 @@ class TestHistoricoFratelliService:
     def test_generates_excel_with_3_sections(self, tmp_path):
         mock_loader = MagicMock(spec=DataLoader)
         mock_loader.get_ventas_historico_fratelli.return_value = _make_test_data()
+        mock_loader.get_prvta_historico_fratelli.return_value = pd.DataFrame(
+            columns=["anio", "mes", "cantidad"]
+        )
 
         with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             service = HistoricoFratelliService(data_loader=mock_loader)
@@ -205,6 +208,9 @@ class TestHistoricoFratelliService:
         mock_loader.get_ventas_historico_fratelli.return_value = pd.DataFrame(
             columns=["anio", "mes", "marca", "id_lista_precio", "cantidad", "descuentos"]
         )
+        mock_loader.get_prvta_historico_fratelli.return_value = pd.DataFrame(
+            columns=["anio", "mes", "cantidad"]
+        )
 
         with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             service = HistoricoFratelliService(data_loader=mock_loader)
@@ -217,6 +223,9 @@ class TestHistoricoFratelliService:
     def test_result_fields(self, tmp_path):
         mock_loader = MagicMock(spec=DataLoader)
         mock_loader.get_ventas_historico_fratelli.return_value = _make_test_data()
+        mock_loader.get_prvta_historico_fratelli.return_value = pd.DataFrame(
+            columns=["anio", "mes", "cantidad"]
+        )
 
         with patch.object(_settings, "DATA_OUTPUT", tmp_path):
             service = HistoricoFratelliService(data_loader=mock_loader)

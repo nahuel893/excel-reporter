@@ -166,6 +166,57 @@ def _write_year_block_simple(
     return row + 1
 
 
+def _write_year_block_labeled_rows(
+    ws, row: int, anio: int, rows_data: dict, with_totals: bool = True
+) -> int:
+    """
+    Write year label + month headers + N labeled data rows.
+    `rows_data` is {label: [12 values]}. Label goes in col A, months in B-M, Total in N.
+    Returns next row (with spacing).
+    """
+    end_col = 14 if with_totals else 13
+    # Year label row — merge across label + months (+ total)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=end_col)
+    cell = ws.cell(row=row, column=1, value=anio)
+    cell.font = _YEAR_FONT
+    cell.fill = _YEAR_FILL
+    cell.alignment = Alignment(horizontal="center")
+    row += 1
+
+    # Header row
+    label_header = ws.cell(row=row, column=1, value="")
+    label_header.border = _THIN_BORDER
+    for i, mes in enumerate(MESES):
+        cell = ws.cell(row=row, column=i + 2, value=mes)
+        cell.font = _HEADER_FONT
+        cell.border = _THIN_BORDER
+        cell.alignment = Alignment(horizontal="center")
+    if with_totals:
+        total_header = ws.cell(row=row, column=14, value="Total")
+        total_header.font = _HEADER_FONT
+        total_header.border = _THIN_BORDER
+        total_header.alignment = Alignment(horizontal="center")
+    row += 1
+
+    # Data rows
+    for label, values in rows_data.items():
+        label_cell = ws.cell(row=row, column=1, value=label)
+        label_cell.font = _HEADER_FONT
+        label_cell.border = _THIN_BORDER
+        for i, val in enumerate(values):
+            cell = ws.cell(row=row, column=i + 2, value=val)
+            cell.number_format = _NUMBER_FORMAT
+            cell.border = _THIN_BORDER
+        if with_totals:
+            total_cell = ws.cell(row=row, column=14, value=sum(values))
+            total_cell.number_format = _NUMBER_FORMAT
+            total_cell.font = _HEADER_FONT
+            total_cell.border = _THIN_BORDER
+        row += 1
+
+    return row + 1
+
+
 def _write_year_block_with_rows(
     ws, row: int, anio: int, df: pd.DataFrame, dim_col: str, with_totals: bool = False
 ) -> int:
@@ -276,11 +327,13 @@ class HistoricoFratelliService(BaseService):
     ) -> HistoricoFratelliResult:
         """Genera el Excel con 3 secciones de datos historicos."""
         df = self.data_loader.get_ventas_historico_fratelli()
+        df_prvta = self.data_loader.get_prvta_historico_fratelli()
 
         registros_procesados = len(df)
 
         # Pivot data for each section
         pivot_mes = _pivot_por_mes(df)
+        pivot_prvta = _pivot_por_mes(df_prvta)
         pivot_marca = _pivot_por_dimension(df, "marca")
         pivot_lista = _pivot_por_dimension(df, "id_lista_precio")
 
@@ -294,8 +347,12 @@ class HistoricoFratelliService(BaseService):
         # Section 1: Totales por mes
         row = _write_section_title(ws, row, "Totales por Mes")
         for anio in ANIOS:
-            row = _write_year_block_simple(
-                ws, row, anio, pivot_mes[anio], with_totals=True
+            rows_data = {
+                "Ventas": pivot_mes[anio],
+                "Facturas Presupuesto": pivot_prvta[anio],
+            }
+            row = _write_year_block_labeled_rows(
+                ws, row, anio, rows_data, with_totals=True
             )
 
         # Section 2: Por lista de precio
