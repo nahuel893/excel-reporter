@@ -7,10 +7,11 @@ preservando columnas de formulas y definiciones de tablas Excel.
 import logging
 import re
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.utils import column_index_from_string, get_column_letter
 
 logger = logging.getLogger(__name__)
@@ -196,3 +197,45 @@ def replace_sheet_data(
         )
 
     return rows_written
+
+
+def import_xlsx_as_sheet(
+    target_wb: Workbook,
+    source_path: Path,
+    target_sheet_name: str,
+) -> int:
+    """Read source xlsx (first sheet, values only) into target_wb under target_sheet_name.
+
+    If target_sheet_name already exists in target_wb, it is removed first.
+    Source is opened with data_only=True so formulas resolve to last calculated values.
+
+    Args:
+        target_wb: Destination Workbook instance (already loaded or fresh).
+        source_path: Path to the source xlsx file (must exist).
+        target_sheet_name: Name to give the imported sheet in target_wb.
+
+    Returns:
+        Number of data rows written (excluding the header row). 0 if source has no rows
+        beyond the header.
+
+    Raises:
+        FileNotFoundError: If source_path does not exist.
+    """
+    if not source_path.exists():
+        raise FileNotFoundError(f"Source xlsx not found: {source_path}")
+
+    src_wb = load_workbook(str(source_path), data_only=True, read_only=True)
+    try:
+        src_ws = src_wb.worksheets[0]  # first sheet only
+        if target_sheet_name in target_wb.sheetnames:
+            del target_wb[target_sheet_name]
+        dst_ws = target_wb.create_sheet(title=target_sheet_name)
+        total_rows = 0
+        for row_idx, row in enumerate(src_ws.iter_rows(values_only=True), start=1):
+            for col_idx, value in enumerate(row, start=1):
+                dst_ws.cell(row=row_idx, column=col_idx, value=value)
+            total_rows = row_idx
+        # Data rows = total rows - 1 header row (0 if source is empty or header-only)
+        return max(0, total_rows - 1) if total_rows > 0 else 0
+    finally:
+        src_wb.close()

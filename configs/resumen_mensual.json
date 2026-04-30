@@ -1,13 +1,14 @@
 {
     "tipo": "resumen-mensual",
     "filtros": {
-        "fecha_desde": "2026-02-01",
-        "fecha_hasta": "2026-02-28",
-        "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
+        "fecha_desde": "2026-04-01",
+        "fecha_hasta": "2026-04-30",
+        "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
+        "detalle_movimientos_path": "/home/nahuel/VM shared/archivos_diarios/detalle_movimientos.xlsx"
     },
     "reportes": [
         {
-            "nombre": "Resumen Mensual Febrero"
+            "nombre": "Resumen Mensual Abril"
         }
     ]
 }

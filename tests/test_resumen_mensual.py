@@ -188,8 +188,8 @@ class TestResumenMensual:
         # cols[2] y cols[3] son los dias dinamicos (ej: "28-02 Sabado")
         assert cols[4] == "Total Ventas"
         assert cols[5] == "Tendencia"
-        assert cols[6] == "Ventas Mes Anterior"
-        assert cols[7] == "Ventas Mismo Mes AA"
+        assert cols[6] == "MMAA"
+        assert cols[7] == "MA"
         assert cols[8] == "Objetivo"
         assert cols[9] == "Tend vs Obj (%)"
 
@@ -409,11 +409,15 @@ class TestResumenMensual:
             result = service.generar_reporte(config)
 
         assert result is not None
-        # La columna AA se rellena con 0; verificar via add_sheet que se llamo con df que tiene AA=0
+        # La columna AA se rellena con 0; verificar via add_sheet que se llamo con df que tiene AA=0.
+        # Con subtotales inyectados, filtrar filas de datos reales (excluir subtotales con MMAA=None).
         call_args = mock_writer.add_sheet.call_args_list
         assert len(call_args) >= 1
         df_hoja = call_args[0].args[0] if call_args[0].args else call_args[0].kwargs["df"]
-        assert df_hoja["Ventas Mismo Mes AA"].iloc[0] == 0
+        _SUBTOTAL_LABELS = {"SUBTOTAL CASA CENTRAL", "SUCURSALES SIN DIRECTA", "TOTAL SIN SMK"}
+        df_datos = df_hoja[~df_hoja["Sucursal"].isin(_SUBTOTAL_LABELS)]
+        assert len(df_datos) >= 1, "No hay filas de datos en el df pasado a add_sheet"
+        assert df_datos["MMAA"].iloc[0] == 0
 
     # -----------------------------------------------------------------------
     # RF-014: Zonas virtuales aplicadas
@@ -502,7 +506,7 @@ class TestResumenMensual:
         assert len(resultado) == 1
         fila = resultado.iloc[0]
         assert fila["Total Ventas"] == 0
-        assert fila["Ventas Mismo Mes AA"] == 200
+        assert fila["MMAA"] == 200
 
     # -----------------------------------------------------------------------
     # RF-007 edge case: Combinacion sin datos en ningun periodo omitida

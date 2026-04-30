@@ -478,6 +478,37 @@ class DataLoader:
             fecha_desde_aa, fecha_hasta_aa, genericos
         )
 
+    def get_cupos_resumen_mensual(
+        self, periodo: str, genericos: list[str]
+    ) -> pd.DataFrame:
+        """
+        Obtiene cupos (objetivos) desde gold.fact_cupos para el resumen mensual.
+
+        Args:
+            periodo: Periodo en formato 'YYYY-MM' (e.g. '2026-04')
+            genericos: Lista de genericos a filtrar (top-level, sin aperturas).
+
+        Returns:
+            DataFrame con columnas: sucursal, generico, cupo
+            Agregado por (descripcion, generico) — SUM(cupo).
+        """
+        placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
+        query = f"""
+        SELECT
+            REGEXP_REPLACE(sucursal, '^\\d+ - ', '') AS sucursal,
+            id_ruta,
+            generico,
+            SUM(cupo)                                AS cupo
+        FROM gold.fact_cupos
+        WHERE periodo = :periodo
+          AND generico IN ({placeholders})
+        GROUP BY sucursal, id_ruta, generico
+        ORDER BY sucursal, id_ruta, generico
+        """
+        params: dict = {"periodo": periodo}
+        params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
+        return self.execute_query(query, params)
+
     def get_ventas_mision_imposible_categorias(
         self, fecha_desde: str, fecha_hasta: str, articulos_ids: list[int]
     ) -> pd.DataFrame:
@@ -546,6 +577,35 @@ class DataLoader:
           AND fv.fecha_comprobante >= '2024-01-01'
           AND fv.fecha_comprobante <= '2026-12-31'
         GROUP BY anio, mes, da.marca, dc.id_lista_precio
+        ORDER BY anio, mes
+        """
+        return self.execute_query(
+            query, {"id_sucursal": id_sucursal, "generico": generico}
+        )
+
+    def get_prvta_historico_fratelli(
+        self,
+        id_sucursal: int = 1,
+        generico: str = "FRATELLI B",
+    ) -> pd.DataFrame:
+        """
+        Obtiene volumen (cantidades_total) de facturas presupuesto (PRVTA)
+        de un generico, agregado por anio y mes.
+        Trae datos de 2024, 2025 y 2026.
+        """
+        query = """
+        SELECT
+            EXTRACT(YEAR FROM fv.fecha_comprobante)::int AS anio,
+            EXTRACT(MONTH FROM fv.fecha_comprobante)::int AS mes,
+            SUM(fv.cantidades_total) AS cantidad
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+        WHERE fv.id_sucursal = :id_sucursal
+          AND da.generico = :generico
+          AND fv.id_documento = 'PRVTA'
+          AND fv.fecha_comprobante >= '2024-01-01'
+          AND fv.fecha_comprobante <= '2026-12-31'
+        GROUP BY anio, mes
         ORDER BY anio, mes
         """
         return self.execute_query(
@@ -1455,6 +1515,157 @@ class DataLoader:
         GROUP BY 1, 2, id_sucursal, subdivision_aguas
         """
         return self.execute_query(query, params)
+
+    def get_ventas_historico_cliente(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        clientes: list[dict],
+        articulos: list[int] | None = None,
+        marcas: list[str] | None = None,
+    ) -> pd.DataFrame:
+        """Obtiene ventas agrupadas por cliente, row_key y mes para reporte historico.
+
+        Args:
+            fecha_desde: Fecha inicio formato 'YYYY-MM-DD'
+            fecha_hasta: Fecha fin formato 'YYYY-MM-DD'
+            clientes: Lista de dicts con keys 'id_cliente' e 'id_sucursal'.
+            articulos: Lista de id_articulo a filtrar. Si es None, no filtra por articulo.
+            marcas: Lista de marcas a filtrar. Si es None, no filtra por marca.
+                    Cuando se provee, row_key es da.marca; de lo contrario es el articulo.
+
+        Returns:
+            DataFrame con columnas: id_cliente, id_sucursal, nombre_cliente,
+            row_key, mes, bultos.
+            Ordenado por id_cliente, row_key, mes.
+        """
+        # Build composite-key OR clauses for the client list
+        cliente_clauses = " OR ".join(
+            f"(fv.id_cliente = :c{i}_id AND fv.id_sucursal = :c{i}_suc)"
+            for i in range(len(clientes))
+        )
+        params: dict = {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta}
+        for i, c in enumerate(clientes):
+            params[f"c{i}_id"] = c["id_cliente"]
+            params[f"c{i}_suc"] = c["id_sucursal"]
+
+        # row_key expression depends on mode
+        if marcas is not None:
+            row_key_expr = "da.marca"
+        else:
+            row_key_expr = "CAST(fv.id_articulo AS TEXT) || ' - ' || da.des_articulo"
+
+        # Optional filters
+        extra_filters = ""
+        if marcas is not None:
+            marca_ph = ", ".join(f":marca_{i}" for i in range(len(marcas)))
+            extra_filters += f"\n              AND da.marca IN ({marca_ph})"
+            params.update({f"marca_{i}": m for i, m in enumerate(marcas)})
+        if articulos is not None:
+            art_ph = ", ".join(f":art_{i}" for i in range(len(articulos)))
+            extra_filters += f"\n              AND fv.id_articulo IN ({art_ph})"
+            params.update({f"art_{i}": a for i, a in enumerate(articulos)})
+
+        query = f"""
+        SELECT
+            fv.id_cliente,
+            fv.id_sucursal,
+            COALESCE(dc.fantasia, dc.razon_social, CAST(fv.id_cliente AS TEXT)) AS nombre_cliente,
+            {row_key_expr} AS row_key,
+            TO_CHAR(fv.fecha_comprobante, 'YYYY-MM') AS mes,
+            SUM(fv.cantidades_total) AS bultos
+        FROM gold.fact_ventas fv
+        LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+        LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente
+            AND fv.id_sucursal = dc.id_sucursal
+        WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+          AND fv.anulado = false
+          AND ({cliente_clauses}){extra_filters}
+        GROUP BY fv.id_cliente, fv.id_sucursal, nombre_cliente, row_key, mes
+        ORDER BY fv.id_cliente, row_key, mes
+        """
+        return self.execute_query(query, params)
+
+
+    def get_ventas_mensuales_ccu(
+        self, fecha_desde: str, fecha_hasta: str
+    ) -> pd.DataFrame:
+        """
+        Obtiene ventas mensuales por sucursal y generico (solo CCU genericos).
+
+        Args:
+            fecha_desde: Fecha inicio formato 'YYYY-MM-DD'
+            fecha_hasta: Fecha fin formato 'YYYY-MM-DD'
+
+        Returns:
+            DataFrame con columnas: sucursal, generico, anio, mes, bultos
+        """
+        query = """
+        SELECT ds.descripcion AS sucursal, da.generico,
+          EXTRACT(YEAR FROM fv.fecha_comprobante)::int AS anio,
+          EXTRACT(QUARTER FROM fv.fecha_comprobante)::int AS trimestre,
+          SUM(fv.cantidades_total) AS bultos
+        FROM gold.fact_ventas fv
+        LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+        LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+        WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
+          AND da.generico IN ('CERVEZAS','AGUAS DANONE','VINOS CCU','SIDRAS Y LICORES')
+        GROUP BY ds.descripcion, da.generico, EXTRACT(YEAR FROM fv.fecha_comprobante), EXTRACT(QUARTER FROM fv.fecha_comprobante)
+        ORDER BY ds.descripcion, da.generico, anio, trimestre
+        """
+        params = {"desde": fecha_desde, "hasta": fecha_hasta}
+        return self.execute_query(query, params)
+
+    def get_cobertura_clientes_ccu(
+        self, fecha_desde: str, fecha_hasta: str
+    ) -> pd.DataFrame:
+        """
+        Cobertura de clientes para los 4 genericos CCU
+        (CERVEZAS, AGUAS DANONE, VINOS CCU, SIDRAS Y LICORES) agregada por trimestre.
+        Un row por cliente-sucursal-trimestre.
+
+        Returns:
+            DataFrame con columnas:
+              - sucursal, anio, trimestre, id_cliente
+              - bultos                            -> SUM total CCU (incluye regalos)
+              - bultos_sin_regalos                -> SUM CCU solo items bonificacion < 100
+              - bultos_aguas_danone               -> SUM solo AGUAS DANONE (incluye regalos)
+              - bultos_aguas_danone_sin_regalos   -> SUM AGUAS DANONE excluyendo regalos
+              - meses_con_compra                  -> cantidad de meses distintos del
+                                                     trimestre con compra (1, 2 o 3)
+        """
+        query = """
+        SELECT ds.descripcion AS sucursal,
+          EXTRACT(YEAR FROM fv.fecha_comprobante)::int AS anio,
+          EXTRACT(QUARTER FROM fv.fecha_comprobante)::int AS trimestre,
+          fv.id_cliente,
+          SUM(fv.cantidades_total) AS bultos,
+          SUM(CASE WHEN COALESCE(fv.bonificacion, 0) < 100
+                   THEN fv.cantidades_total ELSE 0 END) AS bultos_sin_regalos,
+          SUM(CASE WHEN da.generico = 'AGUAS DANONE'
+                   THEN fv.cantidades_total ELSE 0 END) AS bultos_aguas_danone,
+          SUM(CASE WHEN da.generico = 'AGUAS DANONE'
+                    AND COALESCE(fv.bonificacion, 0) < 100
+                   THEN fv.cantidades_total ELSE 0 END) AS bultos_aguas_danone_sin_regalos,
+          COUNT(DISTINCT EXTRACT(MONTH FROM fv.fecha_comprobante))::int AS meses_con_compra
+        FROM gold.fact_ventas fv
+        LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+        LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+        WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
+          AND da.generico IN ('CERVEZAS','AGUAS DANONE','VINOS CCU','SIDRAS Y LICORES')
+        GROUP BY ds.descripcion, EXTRACT(YEAR FROM fv.fecha_comprobante), EXTRACT(QUARTER FROM fv.fecha_comprobante), fv.id_cliente
+        ORDER BY ds.descripcion, anio, trimestre, fv.id_cliente
+        """
+        params = {"desde": fecha_desde, "hasta": fecha_hasta}
+        result = self.execute_query(query, params)
+        if result.empty:
+            return pd.DataFrame(columns=[
+                "sucursal", "anio", "trimestre", "id_cliente",
+                "bultos", "bultos_sin_regalos",
+                "bultos_aguas_danone", "bultos_aguas_danone_sin_regalos",
+                "meses_con_compra",
+            ])
+        return result
 
 
 # Instancia por defecto para compatibilidad

@@ -45,6 +45,7 @@ def procesar_resumen_mensual(
     fecha_desde: str,
     fecha_hasta: str,
     con_objetivo: bool = False,
+    df_cupos: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Construye el DataFrame de resumen mensual con 10 columnas.
@@ -62,12 +63,17 @@ def procesar_resumen_mensual(
         fecha_hasta:   Fecha fin formato 'YYYY-MM-DD'.
         con_objetivo:  Si True, calcular Tend vs Obj (%) a partir de Objetivo.
                        Si False (default), Objetivo y Tend vs Obj (%) quedan como None.
+        df_cupos:      DataFrame con columnas (sucursal, generico, cupo) para el objetivo.
+                       Si None o vacio, Objetivo queda como None/NaN.
 
     Returns:
         DataFrame con columnas (en orden):
-        Sucursal, Generico, Vtas Dia N-1, Vtas Dia N-2, Total Ventas,
-        Tendencia, Ventas Mes Anterior, Ventas Mismo Mes AA, Objetivo, Tend vs Obj (%)
+        Sucursal, Generico, Vtas Dia N-2, Vtas Dia N-1, Total Ventas,
+        Tendencia, MMAA, MA, Objetivo, Tend vs Obj (%)
     """
+    if df_cupos is None:
+        df_cupos = pd.DataFrame(columns=["sucursal", "generico", "cupo"])
+
     # -------------------------------------------------------------------------
     # 1. Detectar fechas N-1 y N-2
     # -------------------------------------------------------------------------
@@ -103,10 +109,9 @@ def procesar_resumen_mensual(
     # -------------------------------------------------------------------------
     # 4. Construir DataFrame base
     #    Outer join entre df_ventas_mes y df_ventas_aa para incluir combinaciones
-    #    que tienen datos en cualquiera de los dos periodos (RF-007).
+    #    que tienen datos en cualquiera de los dos periodos.
     # -------------------------------------------------------------------------
 
-    # Asegurar que las columnas de cantidad tengan nombre estandar antes del merge
     def _preparar_df(df: pd.DataFrame, col_nueva: str) -> pd.DataFrame:
         """Renombra 'cantidad' a col_nueva y garantiza las columnas clave."""
         if df.empty:
@@ -142,42 +147,54 @@ def procesar_resumen_mensual(
     df_base = df_base[~((df_base["total_ventas"] == 0) & (df_base["ventas_aa"] == 0))].copy()
 
     # -------------------------------------------------------------------------
-    # 6. Calcular Tendencia
+    # 6. Calcular Tendencia (PRIMARY RULE: sin .round().astype(int))
     # -------------------------------------------------------------------------
-    df_base["tendencia"] = (df_base["total_ventas"] * factor_tendencia).round().astype(int)
+    df_base["tendencia"] = df_base["total_ventas"] * factor_tendencia
 
     # -------------------------------------------------------------------------
-    # 7. Columnas Objetivo y Tend vs Obj (%)
+    # 7. Left-join con cupos para Objetivo
     # -------------------------------------------------------------------------
-    df_base["objetivo"] = None
-    df_base["tend_vs_obj"] = None
+    if not df_cupos.empty and "cupo" in df_cupos.columns:
+        df_cupos_prep = df_cupos[["sucursal", "generico", "cupo"]].rename(
+            columns={"cupo": "objetivo"}
+        )
+        df_base = df_base.merge(df_cupos_prep, on=["sucursal", "generico"], how="left")
+    else:
+        df_base["objetivo"] = None
 
+    # -------------------------------------------------------------------------
+    # 8. Calcular Tend vs Obj (%)
+    # -------------------------------------------------------------------------
     if con_objetivo:
-        # En esta iteracion no hay tabla de objetivos en BD; la columna queda en None.
-        # Cuando exista la fuente, calcular aqui:
-        #   df_base["tend_vs_obj"] = df_base.apply(
-        #       lambda r: round(r["tendencia"] / r["objetivo"] * 100, 1)
-        #                 if r["objetivo"] and r["objetivo"] > 0 else None,
-        #       axis=1
-        #   )
-        pass
+        def _calc_tend_vs_obj(row) -> float | None:
+            obj = row.get("objetivo")
+            if obj is None or pd.isna(obj) or obj <= 0:
+                return None
+            return row["tendencia"] / obj
+
+        df_base["tend_vs_obj"] = df_base.apply(_calc_tend_vs_obj, axis=1)
+    else:
+        df_base["objetivo"] = None
+        df_base["tend_vs_obj"] = None
 
     # -------------------------------------------------------------------------
-    # 8. Ordenar y renombrar columnas al formato final
+    # 9. Ordenar y renombrar columnas al formato final
+    #    Orden: Sucursal | Generico | DiaN-2 | DiaN-1 | Total Ventas |
+    #           Tendencia | MMAA | MA | Objetivo | Tend vs Obj (%)
     # -------------------------------------------------------------------------
     df_base = df_base.sort_values(["sucursal", "generico"]).reset_index(drop=True)
 
     df_resultado = pd.DataFrame({
-        "Sucursal":            df_base["sucursal"],
-        "Generico":            df_base["generico"],
-        col_n2:                df_base["vtas_n2"].astype(int),
-        col_n1:                df_base["vtas_n1"].astype(int),
-        "Total Ventas":        df_base["total_ventas"].astype(int),
-        "Tendencia":           df_base["tendencia"],
-        "Ventas Mes Anterior": df_base["ventas_ma"].astype(int),
-        "Ventas Mismo Mes AA": df_base["ventas_aa"].astype(int),
-        "Objetivo":            df_base["objetivo"],
-        "Tend vs Obj (%)":     df_base["tend_vs_obj"],
+        "Sucursal":        df_base["sucursal"],
+        "Generico":        df_base["generico"],
+        col_n2:            df_base["vtas_n2"],
+        col_n1:            df_base["vtas_n1"],
+        "Total Ventas":    df_base["total_ventas"],
+        "Tendencia":       df_base["tendencia"],
+        "MMAA":            df_base["ventas_aa"],
+        "MA":              df_base["ventas_ma"],
+        "Objetivo":        df_base["objetivo"],
+        "Tend vs Obj (%)": df_base["tend_vs_obj"],
     })
 
     return df_resultado

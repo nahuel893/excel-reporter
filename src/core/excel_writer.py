@@ -7,11 +7,12 @@ con formato de tabla profesional y sistema de formatos modular.
 from pathlib import Path
 from dataclasses import dataclass, field
 import pandas as pd
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, PatternFill, numbers
 from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.worksheet.worksheet import Worksheet
 
 from config.settings import DATA_OUTPUT
 
@@ -26,6 +27,7 @@ class ColumnFormat:
     fill_color: str | None = None
     header_fill_color: str | None = None
     hidden: bool = False
+    font_color: str | None = None
 
 
 @dataclass
@@ -117,7 +119,10 @@ def _apply_cell_format(cell, col_name: str, style: SheetStyle, is_header: bool =
             cell.alignment = Alignment(horizontal=fmt.alignment)
         if fmt.fill_color:
             cell.fill = PatternFill(start_color=fmt.fill_color, end_color=fmt.fill_color, fill_type="solid")
-        cell.font = Font(bold=True)
+        if fmt.font_color:
+            cell.font = Font(bold=True, color=fmt.font_color)
+        else:
+            cell.font = Font(bold=True)
         return
 
     # Formato generico para numericos
@@ -356,31 +361,79 @@ class ExcelWriter:
     Clase para generar Excel con mayor control.
 
     Permite configurar estilos, multiples hojas, etc.
+
+    Args:
+        nombre_archivo: Nombre base del archivo (sin extension). Ignorado en merge mode.
+        output_dir: Directorio de salida para modo fresco. Ignorado en merge mode.
+        style: Estilo por defecto para las hojas.
+        merge_with: Path a un xlsx existente. Si existe, lo carga como base y activa
+                    merge mode (los add_sheet reemplazan hojas existentes, save()
+                    escribe de vuelta al mismo path). Si no existe, cae a modo fresco.
     """
 
-    def __init__(self, nombre_archivo: str, output_dir: Path | None = None, style: SheetStyle | None = None):
+    def __init__(
+        self,
+        nombre_archivo: str,
+        output_dir: Path | None = None,
+        style: SheetStyle | None = None,
+        merge_with: Path | None = None,
+    ):
         self.nombre_archivo = nombre_archivo
         self.output_dir = output_dir or DATA_OUTPUT
         self.default_style = style or DEFAULT_STYLE
-        self.workbook = Workbook()
-        self._first_sheet = True
 
-    def add_sheet(self, df: pd.DataFrame, sheet_name: str = "Datos", style: SheetStyle | None = None) -> None:
-        """Agrega una hoja al workbook con formato."""
+        if merge_with is not None and merge_with.exists():
+            self.workbook = load_workbook(str(merge_with))
+            self._merge_mode = True
+            self._first_sheet = False
+            self._merge_path = merge_with
+        else:
+            self.workbook = Workbook()
+            self._merge_mode = False
+            self._first_sheet = True
+            self._merge_path = None
+
+    def add_sheet(self, df: pd.DataFrame, sheet_name: str = "Datos", style: SheetStyle | None = None) -> Worksheet:
+        """Agrega una hoja al workbook con formato.
+
+        En merge mode: si ya existe una hoja con ese nombre, la elimina y crea una nueva.
+        Las hojas no mencionadas permanecen intactas.
+
+        En modo fresco: la primera llamada renombra la hoja activa; las siguientes crean hojas nuevas.
+
+        Returns:
+            El objeto Worksheet de openpyxl recien creado/configurado.
+        """
         style = style or self.default_style
 
-        if self._first_sheet:
-            ws = self.workbook.active
-            ws.title = sheet_name
-            self._first_sheet = False
+        if self._merge_mode:
+            original_index = None
+            if sheet_name in self.workbook.sheetnames:
+                original_index = self.workbook.sheetnames.index(sheet_name)
+                del self.workbook[sheet_name]
+            ws = self.workbook.create_sheet(title=sheet_name, index=original_index)
         else:
-            ws = self.workbook.create_sheet(title=sheet_name)
+            if self._first_sheet:
+                ws = self.workbook.active
+                ws.title = sheet_name
+                self._first_sheet = False
+            else:
+                ws = self.workbook.create_sheet(title=sheet_name)
 
         _write_sheet(ws, df, style)
+        return ws
 
     def save(self) -> Path:
-        """Guarda el archivo Excel."""
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        ruta_archivo = self.output_dir / f"{self.nombre_archivo}.xlsx"
-        self.workbook.save(ruta_archivo)
-        return ruta_archivo
+        """Guarda el archivo Excel.
+
+        En merge mode: guarda en self._merge_path (preserva el nombre original).
+        En modo fresco: guarda en output_dir / nombre_archivo.xlsx.
+        """
+        if self._merge_mode:
+            self.workbook.save(str(self._merge_path))
+            return self._merge_path
+        else:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            ruta_archivo = self.output_dir / f"{self.nombre_archivo}.xlsx"
+            self.workbook.save(ruta_archivo)
+            return ruta_archivo
