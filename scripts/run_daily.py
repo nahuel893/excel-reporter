@@ -3,8 +3,8 @@
 
 Patches each config's fecha_desde/fecha_hasta to today (or the configured
 mode) and runs it through the normal pipeline. Delivery (email/whatsapp)
-is handled by each config's own `enviar_email` / `enviar_whatsapp` flags
-and `enviar_a` entries — the script does NOT override them.
+is handled by each config's own `enviar_a` entries — the script does NOT
+override them, EXCEPT when `configs/daily_overrides.json` says otherwise.
 
 Usage:
     python scripts/run_daily.py                       # all registered services
@@ -18,6 +18,22 @@ Add a new service:
         - "hoy"         : fecha_desde = fecha_hasta = today (single-day snapshots)
         - "mes_a_hoy"   : fecha_desde = first day of month, fecha_hasta = today
         - "solo_hasta"  : keep fecha_desde as-is, only patch fecha_hasta = today
+
+Daily overrides (configs/daily_overrides.json):
+    Optional file. Per-service flags to skip execution and/or delivery.
+    Missing file → all services execute and deliver as configured. Schema:
+
+        {
+            "<servicio>": {
+                "ejecutar": true | false,   // default: true
+                "enviar":   true | false,   // default: true
+                "razon":    "string"        // optional log note
+            }
+        }
+
+    `ejecutar=false` → skip the service entirely.
+    `ejecutar=true, enviar=false` → generate the file but suppress delivery
+    (clears `enviar_a` in the patched config).
 """
 from __future__ import annotations
 
@@ -40,6 +56,7 @@ from src.config.resolver import load_contacts, load_report_config  # noqa: E402
 
 CONFIGS_DIR = ROOT / "configs"
 CONTACTOS_PATH = CONFIGS_DIR / "contactos.json"
+OVERRIDES_PATH = CONFIGS_DIR / "daily_overrides.json"
 
 FechaModo = Literal["hoy", "mes_a_hoy", "solo_hasta"]
 
@@ -90,13 +107,66 @@ SERVICIOS: list[Servicio] = [
         config_path=CONFIGS_DIR / "schneider710.json",
         fecha_modo="mes_a_hoy",
     ),
+    Servicio(
+        nombre="avance-branca",
+        config_path=CONFIGS_DIR / "avances_branca.json",
+        fecha_modo="mes_a_hoy",
+    ),
 ]
 
 
-def _ejecutar_servicio(svc: Servicio, hoy: date, test_mode: bool = False) -> int:
+def _load_overrides() -> dict[str, dict]:
+    """Load daily_overrides.json. Missing file → empty dict (default behavior)."""
+    if not OVERRIDES_PATH.exists():
+        return {}
+    try:
+        return json.loads(OVERRIDES_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        print(f"⚠️  daily_overrides.json invalido ({exc}) — se ignora")
+        return {}
+
+
+def _strip_delivery(patched: dict) -> dict:
+    """Clear all `enviar_a` entries in the patched config so delivery is suppressed."""
+    for reporte in patched.get("reportes", []):
+        reporte["enviar_a"] = {}
+    return patched
+
+
+def _keep_only_channel(patched: dict, channel: str) -> dict:
+    """Filter each enviar_a entry's `via` list to keep only the given channel.
+
+    Drops entries that end up with empty `via`. Useful for forcing single-channel
+    delivery (e.g., only whatsapp).
+    """
+    for reporte in patched.get("reportes", []):
+        enviar_a = reporte.get("enviar_a") or {}
+        kept: dict = {}
+        for contacto, target in enviar_a.items():
+            via = target.get("via", []) if isinstance(target, dict) else []
+            filtered = [v for v in via if v == channel]
+            if filtered:
+                new_target = dict(target)
+                new_target["via"] = filtered
+                kept[contacto] = new_target
+        reporte["enviar_a"] = kept
+    return patched
+
+
+def _ejecutar_servicio(
+    svc: Servicio,
+    hoy: date,
+    test_mode: bool = False,
+    enviar: bool = True,
+    solo_canal: str | None = None,
+) -> int:
     """Load the config, patch fechas, and run through the normal pipeline."""
     raw = json.loads(svc.config_path.read_text(encoding="utf-8"))
     patched = svc.patch(raw, hoy)
+    if not enviar:
+        patched = _strip_delivery(patched)
+    elif solo_canal:
+        patched = _keep_only_channel(patched, solo_canal)
 
     # Write patched config to a temp file so the existing loader can consume it
     with tempfile.NamedTemporaryFile(
@@ -120,6 +190,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Print patched fechas without executing")
     parser.add_argument("--only", nargs="+", metavar="SERVICIO", help="Run only these services by name")
     parser.add_argument("--test-mode", action="store_true", default=False, help="Redirige toda la entrega a Nahuel Aguirre (tambien activable con INFORMES_TEST_MODE=1)")
+    parser.add_argument("--solo-canal", choices=["whatsapp", "email"], help="Filtra entrega a un solo canal (descarta los demas via)")
     args = parser.parse_args()
 
     hoy = date.fromisoformat(args.date) if args.date else date.today()
@@ -136,27 +207,47 @@ def main() -> int:
             return 1
         servicios = [s for s in SERVICIOS if s.nombre in args.only]
 
+    overrides = _load_overrides()
+
     print(f"Fecha: {hoy.isoformat()}")
     print(f"Servicios a ejecutar: {[s.nombre for s in servicios]}")
+    if overrides:
+        print(f"Overrides activos: {list(overrides.keys())}")
 
     if args.dry_run:
         print("\n=== DRY RUN (no se ejecuta nada) ===")
         for svc in servicios:
+            ov = overrides.get(svc.nombre, {})
+            ejecutar = ov.get("ejecutar", True)
+            enviar = ov.get("enviar", True)
+            razon = ov.get("razon", "")
             raw = json.loads(svc.config_path.read_text(encoding="utf-8"))
             patched = svc.patch(raw, hoy)
             f = patched["filtros"]
-            print(f"\n[{svc.nombre}] modo={svc.fecha_modo}")
+            print(f"\n[{svc.nombre}] modo={svc.fecha_modo} ejecutar={ejecutar} enviar={enviar}{f' — {razon}' if razon else ''}")
             print(f"  fecha_desde: {f.get('fecha_desde')}")
             print(f"  fecha_hasta: {f.get('fecha_hasta')}")
         return 0
 
     errores: list[str] = []
     for svc in servicios:
+        ov = overrides.get(svc.nombre, {})
+        ejecutar = ov.get("ejecutar", True)
+        enviar = ov.get("enviar", True)
+        razon = ov.get("razon", "")
+
         print(f"\n{'=' * 60}")
-        print(f"  Ejecutando: {svc.nombre}")
+        if not ejecutar:
+            print(f"  ⏭️  SKIP: {svc.nombre}{f' — {razon}' if razon else ''}")
+            print(f"{'=' * 60}")
+            continue
+        if not enviar:
+            print(f"  Ejecutando: {svc.nombre}  (📵 sin envío{f' — {razon}' if razon else ''})")
+        else:
+            print(f"  Ejecutando: {svc.nombre}")
         print(f"{'=' * 60}")
         try:
-            code = _ejecutar_servicio(svc, hoy, test_mode=test_mode)
+            code = _ejecutar_servicio(svc, hoy, test_mode=test_mode, enviar=enviar, solo_canal=args.solo_canal)
             if code != 0:
                 errores.append(f"{svc.nombre} (exit {code})")
         except Exception as exc:  # noqa: BLE001

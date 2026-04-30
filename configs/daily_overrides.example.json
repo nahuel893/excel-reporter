@@ -1,0 +1,12 @@
+{
+    "_comment": "Copia este archivo a daily_overrides.json y editalo. Si daily_overrides.json no existe, todos los servicios corren y entregan normalmente.",
+    "_ejemplo_skip_total": {
+        "ejecutar": false,
+        "razon": "configuracion incompleta"
+    },
+    "_ejemplo_solo_generar_sin_enviar": {
+        "ejecutar": true,
+        "enviar": false,
+        "razon": "esperando cupos del mes — generamos para revisar local"
+    }
+}
