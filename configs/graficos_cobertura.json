@@ -15,7 +15,8 @@
             "asunto_email": "INFORME GRAFICOS COBERTURA",
             "enviar_a": {
                 "Gonzalo Farah": {"via": ["email", "whatsapp"]},
-                "Sebastian Dellamea": {"via": ["email", "whatsapp"]}
+                "Sebastian Dellamea": {"via": ["email", "whatsapp"]},
+                "Nahuel Aguirre": {"via": ["whatsapp"]}
             }
         }
     ]

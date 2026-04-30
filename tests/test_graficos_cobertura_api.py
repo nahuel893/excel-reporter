@@ -122,9 +122,6 @@ class TestCliSubcommandWired:
 
     def test_dispatcher_branch_exists(self):
         """The dispatcher in main._run_reportes must route tipo=graficos-cobertura."""
-        import inspect
-
         import main
-        source = inspect.getsource(main._run_reportes)
-        assert 'tipo == "graficos-cobertura"' in source
-        assert "_run_graficos_cobertura_report" in source
+        assert main.REPORT_HANDLERS.get("graficos-cobertura") == "_run_graficos_cobertura_report"
+        assert hasattr(main, "_run_graficos_cobertura_report")
