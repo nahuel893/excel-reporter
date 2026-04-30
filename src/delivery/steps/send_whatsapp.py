@@ -32,16 +32,17 @@ class SendWhatsAppStep(DeliveryStep):
             try:
                 caption = artifact.metadata.get("nombre", artifact.ruta_excel.stem)
                 if config.whatsapp.enviar_como == "imagen":
-                    if artifact.ruta_imagen is None:
+                    if not artifact.rutas_imagenes:
                         logger.info(
-                            "WhatsApp: sin imagen para '%s', omitiendo.",
+                            "WhatsApp: sin imagenes para '%s', omitiendo.",
                             artifact.ruta_excel.name,
                         )
                         continue
-                    client.send_image(grupo, artifact.ruta_imagen, caption=caption)
+                    for img_path in artifact.rutas_imagenes:
+                        client.send_image(grupo, img_path, caption=caption)
                 elif config.whatsapp.enviar_como == "ambos":
-                    if artifact.ruta_imagen is not None:
-                        client.send_image(grupo, artifact.ruta_imagen, caption=caption)
+                    for img_path in artifact.rutas_imagenes:
+                        client.send_image(grupo, img_path, caption=caption)
                     client.send_file(grupo, artifact.ruta_excel, caption=caption)
                 else:
                     client.send_file(grupo, artifact.ruta_excel, caption=caption)
