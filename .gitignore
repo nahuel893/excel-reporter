@@ -37,8 +37,35 @@ htmlcov/
 *.swp
 *.swo
 
-# Reportes generados
+# Reportes generados (xlsx, pptx, png + per-service subfolders)
 data/output/*.xlsx
+data/output/*.pptx
+data/output/*.png
+data/output/*/
+
+# Capture artifacts in input dirs (templates remain tracked)
+data/input/avances/*.png
+
+# WhatsApp service runtime state
+whatsapp-service/node_modules/
+whatsapp-service/session/
+whatsapp-service/session.*/
+
+# Engram local memory database
+.engram/
+
+# Local tool config
+.gga
+
+# Temp configs left behind by ad-hoc runs
+configs/tmp*.json
+
+# Root-level local debug scripts (not part of the codebase)
+/test.xlsx
+/test_*.py
+/test_*.md
+/get_cols.py
+/reporte_cobertura_marca.py
 
 # Logs
 *.log
