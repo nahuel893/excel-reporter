@@ -7,7 +7,7 @@
         "id_sucursal": 1,
         "id_fuerza_ventas": 4,
         "enviar_email": false,
-        "enviar_whatsapp": false
+        "enviar_whatsapp": true
     },
     "reportes": [
         {
@@ -15,7 +15,10 @@
             "capture_images": [
                 { "hoja": "AVANCE",    "rango": "B2:AX35", "renderer": "libreoffice" },
                 { "hoja": "Cobertura", "rango": "B2:AR37", "renderer": "libreoffice" }
-            ]
+            ],
+            "enviar_a": {
+                "Nahuel Aguirre": {"via": ["whatsapp"]}
+            }
         }
     ]
 }
