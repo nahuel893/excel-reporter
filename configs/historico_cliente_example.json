@@ -1,0 +1,18 @@
+{
+    "tipo": "historico-cliente",
+    "filtros": {
+        "fecha_desde": "2024-01-01",
+        "fecha_hasta": "2026-04-30",
+        "clientes": [
+            {"id_cliente": 19771, "id_sucursal": 1}
+        ],
+        "marcas": ["BRANCA", "BRAHMA"],
+        "enviar_email": false,
+        "enviar_whatsapp": false
+    },
+    "reportes": [
+        {
+            "nombre": "Historico Cliente 19771 - Marcas CCU"
+        }
+    ]
+}
