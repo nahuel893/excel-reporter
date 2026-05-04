@@ -184,8 +184,17 @@ def resolve_delivery(
     )
 
 
-def merge_filters(global_f: GlobalFilters, report_f: ReportFilters | None) -> dict:
-    """Merge global filters with per-report overrides. Report wins when set."""
+def merge_filters(
+    global_f: GlobalFilters,
+    report_f: ReportFilters | None,
+    *,
+    no_delivery: bool = False,
+) -> dict:
+    """Merge global filters with per-report overrides. Report wins when set.
+
+    When no_delivery=True, forces enviar_email=False and enviar_whatsapp=False
+    regardless of global or per-report settings.
+    """
     merged = {
         "fecha_desde": global_f.fecha_desde,
         "fecha_hasta": global_f.fecha_hasta,
@@ -226,4 +235,10 @@ def merge_filters(global_f: GlobalFilters, report_f: ReportFilters | None) -> di
             merged["id_articulo"] = report_f.id_articulo
         if report_f.id_sucursal is not None:
             merged["id_sucursal"] = report_f.id_sucursal
+
+    # no_delivery overrides everything — forces delivery off
+    if no_delivery:
+        merged["enviar_email"] = False
+        merged["enviar_whatsapp"] = False
+
     return merged

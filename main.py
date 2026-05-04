@@ -78,7 +78,10 @@ REPORT_HANDLERS: dict[str, str] = {
 
 
 def _run_report_config(
-    config_path: Path, contactos_path: Path | None = None, test_mode: bool = False
+    config_path: Path,
+    contactos_path: Path | None = None,
+    test_mode: bool = False,
+    no_delivery: bool = False,
 ) -> int:
     """Execute a single report config file (new format)."""
     from pydantic import ValidationError
@@ -110,7 +113,7 @@ def _run_report_config(
         print(f"Error: {exc}")
         return 1
 
-    return _run_reportes(report_config, contactos, test_mode=test_mode)
+    return _run_reportes(report_config, contactos, test_mode=test_mode, no_delivery=no_delivery)
 
 
 def _run_config_dir(config_dir: Path, test_mode: bool = False) -> int:
@@ -142,12 +145,12 @@ def _run_config_dir(config_dir: Path, test_mode: bool = False) -> int:
     return exit_code
 
 
-def _run_reportes(report_config, contactos, test_mode: bool = False) -> int:
+def _run_reportes(report_config, contactos, test_mode: bool = False, no_delivery: bool = False) -> int:
     """Iterate over reportes[], generate each file, run delivery pipeline."""
     from src.config.resolver import merge_filters, resolve_delivery
 
     for report in report_config.reportes:
-        merged = merge_filters(report_config.filtros, report.filtros)
+        merged = merge_filters(report_config.filtros, report.filtros, no_delivery=no_delivery)
 
         print(f"\nGenerando: {report.nombre}")
 
@@ -944,6 +947,15 @@ Ejemplos:
         help="Redirige TODA la entrega (email + whatsapp) a Nahuel Aguirre. Tambien activable con INFORMES_TEST_MODE=1.",
     )
 
+    # Global option: --no-delivery to suppress email + whatsapp dispatch
+    parser.add_argument(
+        "--no-delivery",
+        action="store_true",
+        default=False,
+        dest="no_delivery",
+        help="Suprime el envio de email y WhatsApp. Util para correr reportes sin notificar.",
+    )
+
     subparsers = parser.add_subparsers(
         title="comandos", description="Tipos de reportes disponibles", dest="comando"
     )
@@ -1128,9 +1140,13 @@ Ejemplos:
     if test_mode:
         print("[TEST MODE ACTIVO] delivery redirigido a Nahuel Aguirre", flush=True)
 
+    no_delivery = getattr(args, "no_delivery", False)
+    if no_delivery:
+        print("[NO DELIVERY] envio de email y WhatsApp desactivado", flush=True)
+
     # --config mode: process a single config file
     if args.config:
-        return _run_report_config(Path(args.config), test_mode=test_mode)
+        return _run_report_config(Path(args.config), test_mode=test_mode, no_delivery=no_delivery)
 
     # --config-dir mode: process all configs in directory
     if args.config_dir:

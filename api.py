@@ -8,11 +8,18 @@ Documentacion interactiva:
     http://localhost:8000/docs  (Swagger UI)
     http://localhost:8000/redoc (ReDoc)
 """
+import asyncio
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes import ventas_router, resumen_mensual_router, graficos_cobertura_router
+from src.api.routes.mgmt_runs import router as mgmt_runs_router
+from src.api.routes.mgmt_configs import router as mgmt_configs_router
 from src.core.data_loader import DataLoader
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Excel Reporter API",
@@ -43,9 +50,66 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Existing routes (unchanged)
 app.include_router(ventas_router)
 app.include_router(resumen_mensual_router)
 app.include_router(graficos_cobertura_router)
+
+# Management UI routes
+app.include_router(mgmt_runs_router)
+app.include_router(mgmt_configs_router)
+
+
+# ---------------------------------------------------------------------------
+# Startup / shutdown hooks
+# ---------------------------------------------------------------------------
+
+
+@app.on_event("startup")
+async def _startup():
+    """Initialize DB, recover interrupted runs, start scheduler."""
+    from src.api.db import get_default_engine, init_db, recover_interrupted_runs
+    from src.api.runner import RunRegistry
+    from src.api.scheduler import build_scheduler, seed_daily_master_job
+
+    # 1. DB
+    engine = get_default_engine()
+    init_db(engine=engine)
+    interrupted = recover_interrupted_runs(engine=engine)
+    if interrupted:
+        logger.warning("Startup: marked %d run(s) as 'interrupted'", interrupted)
+
+    # 2. Runner
+    loop = asyncio.get_running_loop()
+    app.state.runner = RunRegistry(loop=loop, engine=engine)
+    app.state.engine = engine
+
+    # 3. Scheduler
+    try:
+        sched = build_scheduler(engine=engine)
+        seed_daily_master_job(sched)
+        sched.start()
+        app.state.scheduler = sched
+        logger.info("Scheduler started")
+    except Exception as exc:
+        logger.warning("Scheduler could not start: %s", exc)
+        app.state.scheduler = None
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    """Shut down scheduler and terminate active runs."""
+    sched = getattr(app.state, "scheduler", None)
+    if sched is not None:
+        try:
+            sched.shutdown(wait=False)
+        except Exception:
+            pass
+
+    runner = getattr(app.state, "runner", None)
+    if runner is not None:
+        for sess in list(runner.sessions.values()):
+            sess.terminate(grace=5)
 
 
 @app.get("/", tags=["Health"], summary="Estado del servicio")

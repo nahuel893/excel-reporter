@@ -43,6 +43,10 @@ data/output/*.pptx
 data/output/*.png
 data/output/*/
 
+# Management UI runtime data (not committed)
+data/mgmt.db
+data/runs/
+
 # Capture artifacts in input dirs (templates remain tracked)
 data/input/avances/*.png
 

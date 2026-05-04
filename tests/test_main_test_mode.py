@@ -146,7 +146,7 @@ class TestTestModePropagation:
             resolve_delivery_calls.append(kwargs)
             return None  # no delivery, pipeline skipped
 
-        def fake_merge_filters(global_f, report_f):
+        def fake_merge_filters(global_f, report_f, **kwargs):
             return {
                 "fecha_desde": "2026-01-01",
                 "fecha_hasta": "2026-01-31",
