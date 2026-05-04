@@ -44,6 +44,9 @@ _SUBTOTAL_FONT_COLOR = "FFFFFF"  # white text on all 3 fills
 _HEADER_FILL_COLOR = "1F4E78"  # dark blue
 _HEADER_FONT_COLOR = "FFFFFF"  # white
 
+# Sheet-wide font family
+_FONT_NAME = "JetBrainsMono Nerd Font"
+
 
 @dataclass
 class ResumenMensualConfig:
@@ -126,15 +129,15 @@ def _crear_estilo_resumen(info_dias: dict, col_n1: str, col_n2: str) -> SheetSty
         column_formats={
             "Sucursal":        ColumnFormat(width=30.375, font_bold=True),
             "Generico":        ColumnFormat(width=14.125, font_bold=True),
-            col_n1:            ColumnFormat(number_format=_DASH_FMT, width=9.125, font_bold=True),
-            col_n2:            ColumnFormat(number_format=_DASH_FMT, width=13.0, font_bold=True),
-            "Total Ventas":    ColumnFormat(number_format=_DASH_FMT, width=13.0, font_bold=True),
-            "Tendencia":       ColumnFormat(number_format=_DASH_FMT, width=13.0, font_bold=True),
+            col_n1:            ColumnFormat(number_format=_DASH_FMT, width=8.5, font_bold=True),
+            col_n2:            ColumnFormat(number_format=_DASH_FMT, width=8.5, font_bold=True),
+            "Total Ventas":    ColumnFormat(number_format=_DASH_FMT, width=8.5, font_bold=True),
+            "Tendencia":       ColumnFormat(number_format=_DASH_FMT, width=8.5, font_bold=True),
             # T-021: MMAA = dark red, MA = olive, Objetivo = light blue
-            "MMAA":            ColumnFormat(number_format=_DASH_FMT, width=13.0, font_bold=True, font_color="C00000"),
-            "MA":              ColumnFormat(number_format=_DASH_FMT, width=13.0, font_bold=True, font_color="808000"),
-            "Objetivo":        ColumnFormat(number_format=_DASH_FMT, width=13.0, font_bold=True, font_color="4472C4"),
-            "Tend vs Obj (%)": ColumnFormat(number_format="0.0%", width=9.625, font_bold=True),
+            "MMAA":            ColumnFormat(number_format=_DASH_FMT, width=8.5, font_bold=True, font_color="C00000"),
+            "MA":              ColumnFormat(number_format=_DASH_FMT, width=8.5, font_bold=True, font_color="808000"),
+            "Objetivo":        ColumnFormat(number_format=_DASH_FMT, width=8.5, font_bold=True, font_color="4472C4"),
+            "Tend vs Obj (%)": ColumnFormat(number_format="0.0%", width=8.5, font_bold=True),
         },
         summary_rows=info_dias,
         as_table=False,
@@ -326,7 +329,7 @@ def _post_write_subtotals_and_heatmap(
         subtotal_fill = PatternFill(
             start_color=fill_color, end_color=fill_color, fill_type="solid",
         )
-        subtotal_font = Font(bold=True, color=_SUBTOTAL_FONT_COLOR)
+        subtotal_font = Font(name=_FONT_NAME, bold=True, color=_SUBTOTAL_FONT_COLOR)
 
         # Write SUM formulas for numeric columns
         for col_name in sum_cols:
@@ -371,7 +374,7 @@ def _post_write_subtotals_and_heatmap(
     header_fill = PatternFill(
         start_color=_HEADER_FILL_COLOR, end_color=_HEADER_FILL_COLOR, fill_type="solid",
     )
-    header_font = Font(bold=True, color=_HEADER_FONT_COLOR)
+    header_font = Font(name=_FONT_NAME, bold=True, color=_HEADER_FONT_COLOR)
     for col_idx in range(1, n_cols + 1):
         cell = ws.cell(row=header_row, column=col_idx)
         cell.fill = header_fill
@@ -400,6 +403,20 @@ def _post_write_subtotals_and_heatmap(
             end_type="num",     end_value=1.2,   end_color="00B050",    # green
         )
         ws.conditional_formatting.add(heatmap_range, color_scale)
+
+    # -------------------------------------------------------------------
+    # Sheet-wide font family override (last pass — preserves bold/color/size)
+    # -------------------------------------------------------------------
+    for row in ws.iter_rows():
+        for cell in row:
+            existing = cell.font
+            cell.font = Font(
+                name=_FONT_NAME,
+                size=existing.size,
+                bold=existing.bold,
+                italic=existing.italic,
+                color=existing.color,
+            )
 
 
 class ResumenMensualService(BaseService):
