@@ -11,8 +11,11 @@ Documentacion interactiva:
 import asyncio
 import logging
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from src.api.routes import ventas_router, resumen_mensual_router, graficos_cobertura_router
 from src.api.routes.mgmt_runs import router as mgmt_runs_router
@@ -146,6 +149,22 @@ def health_check():
         response["database_error"] = db_error
 
     return response
+
+
+# ---------------------------------------------------------------------------
+# SPA static files mount (only when frontend/dist/ exists)
+# Mounted AFTER all API routes so API routes take priority.
+# html=True enables SPA fallback (404 → index.html).
+# ---------------------------------------------------------------------------
+
+_FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
+if _FRONTEND_DIST.exists():
+    app.mount("/app", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="spa")
+else:
+    logger.info(
+        "frontend/dist/ not found — SPA not mounted. "
+        "Run `cd frontend && npm run build` to enable."
+    )
 
 
 if __name__ == "__main__":
