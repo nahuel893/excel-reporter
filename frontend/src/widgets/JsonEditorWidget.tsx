@@ -89,8 +89,10 @@ export function JsonEditorWidget({
               wordWrap: "on",
               tabSize: 2,
               automaticLayout: true,
+              fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+              renderLineHighlight: "none",
             }}
-            theme="vs-light"
+            theme="vs-dark"
             data-testid={`monaco-${id}`}
           />
         </Suspense>

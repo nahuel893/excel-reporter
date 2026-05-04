@@ -6,6 +6,7 @@
  * renders rjsf <Form/> with all 5 custom widgets registered.
  */
 
+import type { ReactNode } from "react";
 import Form from "@rjsf/core";
 import validator from "@rjsf/validator-ajv8";
 import type { IChangeEvent } from "@rjsf/core";
@@ -27,7 +28,7 @@ interface ConfigFormProps {
   onSubmit: (data: Record<string, unknown>) => void;
   serverErrors?: FieldError[];
   isSaving?: boolean;
-  submitLabel?: string;
+  submitLabel?: ReactNode;
 }
 
 export function ConfigForm({
@@ -37,7 +38,7 @@ export function ConfigForm({
   onSubmit,
   serverErrors,
   isSaving = false,
-  submitLabel = "Guardar",
+  submitLabel = <span>Guardar</span>,
 }: ConfigFormProps) {
   const uiSchema = buildUiSchema(schema as Parameters<typeof buildUiSchema>[0]);
 
@@ -86,16 +87,16 @@ export function ConfigForm({
         extraErrors={extraErrors}
         showErrorList={serverErrors && serverErrors.length > 0 ? "top" : false}
       >
-        <div className="mt-4 flex gap-2">
+        <div className="mt-6 flex gap-2">
           <button
             type="submit"
             disabled={isSaving}
             className={cn(
-              "rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+              "inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
             )}
             data-testid="config-form-submit"
           >
-            {isSaving ? "Guardando..." : submitLabel}
+            {submitLabel}
           </button>
         </div>
       </Form>
