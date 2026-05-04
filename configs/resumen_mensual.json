@@ -1,14 +1,26 @@
 {
     "tipo": "resumen-mensual",
     "filtros": {
-        "fecha_desde": "2026-04-01",
-        "fecha_hasta": "2026-04-30",
-        "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
-        "detalle_movimientos_path": "/home/nahuel/VM shared/archivos_diarios/detalle_movimientos.xlsx"
+        "fecha_desde": "2026-05-01",
+        "fecha_hasta": "2026-05-31",
+        "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES", "FRATELLI B"],
+        "detalle_movimientos_path": "/home/nahuel/VM shared/archivos_diarios/detalle_movimientos.xlsx",
+        "enviar_email": false,
+        "enviar_whatsapp": true
     },
     "reportes": [
         {
-            "nombre": "Resumen Mensual Abril"
+            "nombre": "Resumen Mensual Mayo",
+            "capture_images": [
+                { "hoja": "CERVEZAS",         "rango": "A1:J30", "renderer": "libreoffice" },
+                { "hoja": "AGUAS DANONE",     "rango": "A1:J30", "renderer": "libreoffice" },
+                { "hoja": "VINOS CCU",        "rango": "A1:J30", "renderer": "libreoffice" },
+                { "hoja": "SIDRAS Y LICORES", "rango": "A1:J30", "renderer": "libreoffice" },
+                { "hoja": "FRATELLI B",       "rango": "A1:J30", "renderer": "libreoffice" }
+            ],
+            "enviar_a": {
+                "Nahuel Aguirre": {"via": ["whatsapp"]}
+            }
         }
     ]
 }
