@@ -1,13 +1,20 @@
 """
-AvancesService - Refreshes raw DB data in existing avances Excel files,
-preserving formulas and table definitions.
+AvancesService - Generates avances Excel reports from a base template,
+preserving formulas and user-added sheets.
 
-The service updates the working file IN-PLACE. No per-run output copy —
-the file passed as `archivo_plantilla` IS the working file and is
-overwritten with refreshed data on every run.
+Workflow:
+- ``archivo_plantilla`` is the BASE template (read-only — never modified).
+- Output is written to ``data/output/avances/{YYYY-MM}/{nombre_archivo}.xlsx``.
+- A copy of the base used is saved alongside the output (same folder, original
+  filename) as ``{base_name}.xlsx`` — so reports can be regenerated even if the
+  base evolves later.
+- Re-running the same period UPDATES the existing output (preserving user
+  customizations); the base snapshot is refreshed each run to reflect the base
+  used in the latest run.
 """
 
 import logging
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +22,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from src.core.excel_updater import replace_sheet_data
+from src.core.output_paths import service_output_dir
 from src.services.base_service import BaseService
 
 logger = logging.getLogger(__name__)
@@ -97,12 +105,13 @@ class AvancesConfig:
       - dim_articulo se filtra por articulos vendidos en el rango + sucursal
     """
 
-    archivo_plantilla: str  # path to working/template Excel
+    archivo_plantilla: str  # path to BASE template (read-only)
     fecha_desde: str
     fecha_hasta: str
     id_sucursal: int = 1
     id_fuerza_ventas: int = 1
-    nombre_archivo: str | None = None
+    nombre_archivo: str | None = None  # output filename (no extension)
+    output_dir: Path | None = None  # override; if None, derived from fecha_desde
 
 
 @dataclass
@@ -114,19 +123,47 @@ class AvancesResult:
 
 
 class AvancesService(BaseService):
-    """Refreshes raw DB data in existing avances Excel files."""
+    """Generates avances Excel reports from a base template into per-period folders."""
 
     SERVICE_SLUG = "avances"
     GRANULARITY = "month"
 
     def generar_reporte(self, config: AvancesConfig) -> AvancesResult:
-        working_path = Path(config.archivo_plantilla)
-        if not working_path.exists():
-            raise FileNotFoundError(f"Working file not found: {working_path}")
+        base_path = Path(config.archivo_plantilla)
+        if not base_path.exists():
+            raise FileNotFoundError(f"Base template not found: {base_path}")
 
-        logger.info("Cargando workbook %s ...", working_path.name)
+        if not config.nombre_archivo:
+            raise ValueError(
+                "nombre_archivo is required — used as the output filename "
+                "(without extension)"
+            )
+
+        output_dir = (
+            Path(config.output_dir)
+            if config.output_dir
+            else service_output_dir(self.SERVICE_SLUG, config.fecha_desde, "month")
+        )
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        snapshot_path = output_dir / base_path.name
+        output_path = output_dir / f"{config.nombre_archivo}.xlsx"
+
+        # Always refresh the base snapshot — captures which base was used in this run
+        shutil.copy2(str(base_path), str(snapshot_path))
+        logger.info("Base snapshot guardado: %s", snapshot_path)
+
+        # If output doesn't exist yet, seed it from the base. If it exists,
+        # leave it as-is so user customizations survive regeneration.
+        if not output_path.exists():
+            shutil.copy2(str(base_path), str(output_path))
+            logger.info("Archivo output creado desde base: %s", output_path)
+        else:
+            logger.info("Archivo output existente — actualizando in-place: %s", output_path)
+
+        logger.info("Cargando workbook %s ...", output_path.name)
         t0 = time.perf_counter()
-        wb = load_workbook(working_path, data_only=False, keep_links=False)
+        wb = load_workbook(str(output_path), data_only=False, keep_links=False)
         logger.info("Workbook cargado en %.1fs", time.perf_counter() - t0)
 
         registros = {}
@@ -138,7 +175,6 @@ class AvancesService(BaseService):
                 for col_idx, col_name in enumerate(sc.data_columns, 1):
                     ws.cell(row=sc.header_row, column=col_idx, value=col_name)
 
-            # Build query params from config
             params = {p: getattr(config, p) for p in sc.query_params}
             method = getattr(self.data_loader, sc.query_method)
 
@@ -154,10 +190,10 @@ class AvancesService(BaseService):
             logger.info("Sheet '%s': %d filas escritas en %.1fs", sc.sheet_name, rows, time.perf_counter() - t2)
             registros[sc.sheet_name] = rows
 
-        logger.info("Guardando workbook (in-place) ...")
+        logger.info("Guardando workbook ...")
         t3 = time.perf_counter()
-        wb.save(working_path)
+        wb.save(str(output_path))
         wb.close()
-        logger.info("Guardado en %.1fs -> %s", time.perf_counter() - t3, working_path)
+        logger.info("Guardado en %.1fs -> %s", time.perf_counter() - t3, output_path)
 
-        return AvancesResult(ruta_archivo=working_path, registros_por_hoja=registros)
+        return AvancesResult(ruta_archivo=output_path, registros_por_hoja=registros)

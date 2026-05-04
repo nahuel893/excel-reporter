@@ -764,13 +764,17 @@ def _run_avances_report(report, merged: dict) -> list[tuple[Path, dict]]:
         print("Error: avances report requires 'archivo_plantilla' in filtros")
         return []
 
+    if not report.nombre:
+        print("Error: avances report requires 'nombre' (used as output filename)")
+        return []
+
     config = AvancesConfig(
         archivo_plantilla=archivo_plantilla,
         fecha_desde=merged["fecha_desde"],
         fecha_hasta=merged["fecha_hasta"],
         id_sucursal=merged.get("id_sucursal") or 1,
         id_fuerza_ventas=merged.get("id_fuerza_ventas") or 1,
-        nombre_archivo=report.nombre if report.nombre else None,
+        nombre_archivo=report.nombre,
     )
 
     service = AvancesService()

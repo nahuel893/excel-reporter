@@ -149,23 +149,28 @@ def _make_mock_loader():
 
 
 class TestAvancesServiceHappyPath:
-    def test_in_place_update(self, tmp_path):
-        """Template with 3 gold sheets + mocked DataLoader → SAME file updated,
-        registros_por_hoja has correct counts, formula columns preserved."""
+    def test_output_written_to_period_folder(self, tmp_path):
+        """Template with 3 gold sheets + mocked DataLoader → output written to
+        output_dir, registros_por_hoja has correct counts, formula columns preserved."""
         plantilla = _make_template(tmp_path)
         mock_loader = _make_mock_loader()
+        out_dir = tmp_path / "out" / "avances" / "2026-04"
 
         service = AvancesService(data_loader=mock_loader)
         config = AvancesConfig(
             archivo_plantilla=str(plantilla),
             fecha_desde="2026-04-01",
             fecha_hasta="2026-04-15",
+            nombre_archivo="AVANCE TEST - ABRIL 2026",
+            output_dir=out_dir,
         )
 
         result = service.generar_reporte(config)
 
-        # Result points to the SAME file (not a copy in data/output)
-        assert result.ruta_archivo == plantilla
+        # Result points to the OUTPUT path (not the base in input)
+        assert result.ruta_archivo == out_dir / "AVANCE TEST - ABRIL 2026.xlsx"
+        assert result.ruta_archivo.exists()
+        # Base in input is untouched
         assert plantilla.exists()
 
         # registros_por_hoja has correct counts for all 5 gold-* sheets
@@ -197,6 +202,8 @@ class TestAvancesServiceHappyPath:
             fecha_hasta="2026-04-30",
             id_sucursal=1,
             id_fuerza_ventas=4,
+            nombre_archivo="AVANCE TEST - ABRIL 2026",
+            output_dir=tmp_path / "out",
         )
         service.generar_reporte(config)
 
@@ -235,9 +242,10 @@ class TestAvancesServiceHappyPath:
             "id_sucursal": 1,
         }
 
-    def test_no_new_files_created(self, tmp_path):
-        """In-place mode must not create any new xlsx file elsewhere."""
+    def test_base_in_input_unchanged_after_run(self, tmp_path):
+        """The base template in input must be byte-identical after a run."""
         plantilla = _make_template(tmp_path)
+        original_bytes = plantilla.read_bytes()
         mock_loader = _make_mock_loader()
 
         service = AvancesService(data_loader=mock_loader)
@@ -245,12 +253,12 @@ class TestAvancesServiceHappyPath:
             archivo_plantilla=str(plantilla),
             fecha_desde="2026-04-01",
             fecha_hasta="2026-04-15",
+            nombre_archivo="AVANCE TEST - ABRIL 2026",
+            output_dir=tmp_path / "out" / "avances" / "2026-04",
         )
         service.generar_reporte(config)
 
-        # Only the original template file should exist in tmp_path
-        xlsx_files = list(tmp_path.glob("*.xlsx"))
-        assert xlsx_files == [plantilla]
+        assert plantilla.read_bytes() == original_bytes
 
 
 class TestAvancesServiceErrors:
@@ -261,6 +269,8 @@ class TestAvancesServiceErrors:
             archivo_plantilla=str(tmp_path / "no_existe.xlsx"),
             fecha_desde="2026-04-01",
             fecha_hasta="2026-04-15",
+            nombre_archivo="ignored",
+            output_dir=tmp_path / "out",
         )
 
         with pytest.raises(FileNotFoundError):
@@ -298,6 +308,8 @@ class TestAvancesServiceMissingSheet:
             archivo_plantilla=str(plantilla),
             fecha_desde="2026-04-01",
             fecha_hasta="2026-04-15",
+            nombre_archivo="AVANCE TEST INCOMPLETO",
+            output_dir=tmp_path / "out" / "avances" / "2026-04",
         )
 
         import logging

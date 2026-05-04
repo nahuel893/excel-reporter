@@ -1,9 +1,9 @@
 {
     "tipo": "avances",
     "filtros": {
-        "fecha_desde": "2026-04-01",
-        "fecha_hasta": "2026-04-30",
-        "archivo_plantilla": "data/input/avances/AVANCE BRANCA - ABRIL 2026.xlsx",
+        "fecha_desde": "2026-05-01",
+        "fecha_hasta": "2026-05-31",
+        "archivo_plantilla": "data/input/avances/AVANCE BRANCA.xlsx",
         "id_sucursal": 1,
         "id_fuerza_ventas": 4,
         "enviar_email": false,
@@ -11,7 +11,7 @@
     },
     "reportes": [
         {
-            "nombre": "AVANCE BRANCA - ABRIL 2026",
+            "nombre": "AVANCE BRANCA - MAYO 2026",
             "capture_images": [
                 { "hoja": "AVANCE",    "rango": "B2:AX35", "renderer": "libreoffice" },
                 { "hoja": "Cobertura", "rango": "B2:AR37", "renderer": "libreoffice" }
