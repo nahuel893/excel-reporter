@@ -37,18 +37,26 @@ htmlcov/
 *.swp
 *.swo
 
-# Reportes generados (xlsx, pptx, png + per-service subfolders)
-data/output/*.xlsx
-data/output/*.pptx
-data/output/*.png
-data/output/*/
+# NO Excel files, images, PDFs anywhere under data/ (templates, outputs,
+# captures — all live locally, never committed)
+data/**/*.xlsx
+data/**/*.xlsm
+data/**/*.xlsb
+data/**/*.xls
+data/**/*.pptx
+data/**/*.pdf
+data/**/*.png
+data/**/*.jpg
+data/**/*.jpeg
+data/**/*.gif
+data/**/*.webp
 
 # Management UI runtime data (not committed)
 data/mgmt.db
 data/runs/
 
-# Capture artifacts in input dirs (templates remain tracked)
-data/input/avances/*.png
+# Sensitive configs (contain PII — emails, phone numbers, etc.)
+configs/contactos.json
 
 # WhatsApp service runtime state
 whatsapp-service/node_modules/

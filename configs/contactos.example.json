@@ -1,0 +1,13 @@
+{
+    "_comment": "Copia este archivo a contactos.json y editalo con datos reales. contactos.json esta gitignored (contiene PII).",
+    "Nombre Apellido": {
+        "email": "ejemplo@dominio.com",
+        "telefono": "5493870000000"
+    },
+    "Otro Contacto": {
+        "email": "otro@dominio.com"
+    },
+    "Solo Telefono": {
+        "telefono": "5493870000001"
+    }
+}
