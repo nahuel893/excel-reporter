@@ -1,0 +1,3 @@
+# Un-ignore lib/ and test/ inside whatsapp-service/ (root .gitignore has lib/ for Python venv)
+!lib/
+!test/
