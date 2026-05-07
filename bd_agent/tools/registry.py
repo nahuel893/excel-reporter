@@ -10,13 +10,20 @@ Tool handlers have the signature:
 
 ToolRegistry.invoke wraps exceptions in a structured ToolResult(is_error=True).
 
+Context propagation (T-102/RF-143):
+  invoke() accepts an optional ``context: Mapping[str, Any] | None`` kwarg.
+  Context is ONLY passed to handlers that declare it as a keyword argument;
+  legacy handlers (no ``context`` param) receive no change.  This is determined
+  via inspect.signature at call time.
+
 Zero imports from src.* (RF-070). Deps: stdlib + bd_agent.contracts.
 """
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from bd_agent.contracts import DatabaseGateway, ToolCall, ToolResult
 
@@ -142,6 +149,7 @@ class ToolRegistry:
         self,
         call: ToolCall,
         gateway: DatabaseGateway | None,
+        context: Mapping[str, Any] | None = None,
     ) -> ToolResult:
         """Execute a tool call and return the result.
 
@@ -149,10 +157,18 @@ class ToolRegistry:
         If the handler raises any exception, catches it and returns a
         ToolResult with is_error=True (RF-022).
 
+        Context propagation (T-102/RF-143): if *context* is provided, it is
+        passed as a ``context`` keyword argument **only** to handlers that
+        declare a ``context`` parameter in their signature.  Legacy handlers
+        that do not declare ``context`` are called without it — backward
+        compatibility is preserved.
+
         Args:
             call: ToolCall emitted by the LLM.
             gateway: DatabaseGateway instance (or None for tools that don't
                 need DB access).
+            context: Optional server-side context dict (e.g. ``{"_jid": jid}``).
+                Defaults to None.
 
         Returns:
             ToolResult with JSON-serialized content or error payload.
@@ -174,7 +190,14 @@ class ToolRegistry:
             )
 
         try:
-            result = tool.handler(gateway, **call.arguments)
+            # Determine whether this handler opts in to receiving context.
+            # We check the handler's declared parameters: if it has a 'context'
+            # keyword argument, pass it; otherwise omit (backward-compat).
+            sig = inspect.signature(tool.handler)
+            if context is not None and "context" in sig.parameters:
+                result = tool.handler(gateway, **call.arguments, context=context)
+            else:
+                result = tool.handler(gateway, **call.arguments)
             return ToolResult(
                 call_id=call.id,
                 name=call.name,

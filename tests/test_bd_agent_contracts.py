@@ -165,6 +165,9 @@ class TestProtocols:
             def send_text(self, jid, text):
                 pass
 
+            def send_file(self, jid, file_path, caption=None):
+                pass
+
         assert isinstance(FakeMsg(), MessagingGateway)
 
     def test_contacts_repo_protocol_satisfied_by_concrete(self):

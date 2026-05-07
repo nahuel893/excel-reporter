@@ -1,9 +1,10 @@
-"""tests/bd_agent/integrations/test_messaging.py — Tests for WhatsAppMessagingGateway (T-071).
+"""tests/bd_agent/integrations/test_messaging.py — Tests for WhatsAppMessagingGateway (T-071, T-101).
 
 All tests mock httpx so no real HTTP calls are made.
 """
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -155,6 +156,147 @@ def test_implements_messaging_gateway_protocol(base_url):
     from bd_agent.integrations.messaging import WhatsAppMessagingGateway
     gw = WhatsAppMessagingGateway(base_url=base_url)
     assert isinstance(gw, MessagingGateway)
+
+
+# ---------------------------------------------------------------------------
+# T-101: send_file (new method)
+# ---------------------------------------------------------------------------
+
+def test_send_file_posts_to_send_file_dm(base_url):
+    """T-101: send_file POSTs multipart to {base_url}/send-file-dm."""
+    import httpx
+    from bd_agent.integrations.messaging import WhatsAppMessagingGateway
+
+    captured_urls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_urls.append(str(request.url))
+        return httpx.Response(200, json={"ok": True})
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    gw = WhatsAppMessagingGateway(base_url=base_url, http_client=client)
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        f.write(b"dummy")
+        tmp_path = Path(f.name)
+
+    try:
+        gw.send_file("5493870000000@s.whatsapp.net", tmp_path, caption="reporte")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    assert len(captured_urls) == 1
+    assert "/send-file-dm" in captured_urls[0]
+
+
+def test_send_file_includes_to_and_file_fields(base_url):
+    """T-101: send_file multipart contains 'to' and 'file' fields."""
+    import httpx
+    from bd_agent.integrations.messaging import WhatsAppMessagingGateway
+
+    captured_content = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_content.append(request.content)
+        return httpx.Response(200, json={"ok": True})
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    jid = "5493870000001@s.whatsapp.net"
+    gw = WhatsAppMessagingGateway(base_url=base_url, http_client=client)
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        f.write(b"xlsx_content")
+        tmp_path = Path(f.name)
+
+    try:
+        gw.send_file(jid, tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    assert len(captured_content) == 1
+    raw = captured_content[0]
+    assert jid.encode() in raw
+    assert b"xlsx_content" in raw
+
+
+def test_send_file_includes_caption_when_provided(base_url):
+    """T-101: send_file includes caption field when caption is not None."""
+    import httpx
+    from bd_agent.integrations.messaging import WhatsAppMessagingGateway
+
+    captured_content = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_content.append(request.content)
+        return httpx.Response(200, json={"ok": True})
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    gw = WhatsAppMessagingGateway(base_url=base_url, http_client=client)
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(b"png_bytes")
+        tmp_path = Path(f.name)
+
+    try:
+        gw.send_file("jid@s.whatsapp.net", tmp_path, caption="mi reporte mensual")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    raw = captured_content[0]
+    assert b"mi reporte mensual" in raw
+
+
+def test_send_file_raises_on_non_2xx(base_url):
+    """T-101: send_file raises RuntimeError on non-2xx response."""
+    import httpx
+    from bd_agent.integrations.messaging import WhatsAppMessagingGateway
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"ok": False, "error": "invalid jid"})
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    gw = WhatsAppMessagingGateway(base_url=base_url, http_client=client)
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        f.write(b"data")
+        tmp_path = Path(f.name)
+
+    try:
+        with pytest.raises(RuntimeError):
+            gw.send_file("jid@s.whatsapp.net", tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def test_send_file_uses_post_method(base_url):
+    """T-101: send_file uses HTTP POST."""
+    import httpx
+    from bd_agent.integrations.messaging import WhatsAppMessagingGateway
+
+    methods = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        return httpx.Response(200, json={"ok": True})
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport)
+    gw = WhatsAppMessagingGateway(base_url=base_url, http_client=client)
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        f.write(b"data")
+        tmp_path = Path(f.name)
+
+    try:
+        gw.send_file("jid@s.whatsapp.net", tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    assert methods == ["POST"]
 
 
 # ---------------------------------------------------------------------------

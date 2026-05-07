@@ -29,6 +29,7 @@ const https = require("https");
 
 const { AllowlistManager } = require("./lib/allowlist");
 const { MessageDeduplicator } = require("./lib/dedup");
+const { createSendFileDmRouter } = require("./lib/send-file-dm-router");
 
 const logger = pino({ level: "info" });
 const app = express();
@@ -168,12 +169,19 @@ async function initWhatsApp() {
     // Only process new messages (not history syncs)
     if (type !== "notify") return;
 
+    // Bot's own JID (sin device suffix). Necesario para distinguir entre:
+    //   - reply del bot a alguien     → fromMe=true, remoteJid=otro  → SKIP (anti-loop)
+    //   - "Mensajes contigo mismo"    → fromMe=true, remoteJid=botJid → ALLOW (self-chat)
+    const botBaseNumber = sock.user?.id?.split(":")[0]?.split("@")[0];
+    const botJid = botBaseNumber ? `${botBaseNumber}@s.whatsapp.net` : null;
+
     for (const msg of messages) {
-      // Skip own messages
-      if (msg.key?.fromMe) continue;
+      const from = msg.key?.remoteJid || "";
+
+      // Anti-loop: si el mensaje es del bot pero no es self-chat, lo descartamos
+      if (msg.key?.fromMe && from !== botJid) continue;
 
       // DMs only: JID must end with @s.whatsapp.net (not @g.us for groups)
-      const from = msg.key?.remoteJid || "";
       if (!from.endsWith("@s.whatsapp.net")) continue;
 
       // Extract text from various message types
@@ -303,6 +311,28 @@ app.post(
       res.status(500).json({ success: false, message: err.message });
     }
   }
+);
+
+// POST /send-file-dm (T-106)
+// Delivers a file as a WhatsApp DM document to a specific JID.
+// Body: multipart/form-data with fields: to (JID @s.whatsapp.net), caption (optional), file (binary).
+// Returns: { ok: true } | { ok: false, error: string }
+app.use(
+  "/send-file-dm",
+  createSendFileDmRouter(
+    // sock proxy: we use a getter so the router always reads the current sock value,
+    // even if sock was set after app creation (Baileys connects asynchronously).
+    new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (sock === null) throw new Error("WhatsApp socket not initialized");
+          return sock[prop];
+        },
+      }
+    ),
+    () => sessionReady
+  )
 );
 
 // POST /send-file

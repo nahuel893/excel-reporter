@@ -285,3 +285,53 @@ class TestInvocation:
         call = ToolCall(id="call-4", name="echo_tool", arguments={"message": "x"})
         registry.invoke(call, gateway=sentinel_gateway)
         assert received_gateway == [sentinel_gateway]
+
+    # T-102: context parameter backward-compat
+    def test_invoke_with_context_existing_handler_unchanged(self):
+        """T-102: existing handler (no context param) is invoked identically with context passed."""
+        from bd_agent.tools.registry import ToolRegistry
+
+        received_args = []
+
+        def legacy_handler(gateway, **kwargs):
+            received_args.append(kwargs)
+            return {"ok": True}
+
+        registry = ToolRegistry()
+        spec = _minimal_spec()
+        registry.register(
+            name=spec["name"],
+            description=spec["description"],
+            params_schema=spec["parameters"],
+            handler=legacy_handler,
+        )
+        call = ToolCall(id="call-5", name="echo_tool", arguments={"message": "hello"})
+        # Pass context — legacy handler should NOT receive it
+        result = registry.invoke(call, gateway=None, context={"_jid": "jid@s.whatsapp.net"})
+        assert result.is_error is False
+        assert received_args == [{"message": "hello"}]  # context NOT leaked into kwargs
+
+    def test_invoke_context_none_behaves_like_no_context(self):
+        """T-102: context=None is equivalent to not passing context at all."""
+        from bd_agent.tools.registry import ToolRegistry
+
+        call_count = []
+
+        def handler(gateway, **kwargs):
+            call_count.append(1)
+            return {"n": len(call_count)}
+
+        registry = ToolRegistry()
+        spec = _minimal_spec()
+        registry.register(
+            name=spec["name"],
+            description=spec["description"],
+            params_schema=spec["parameters"],
+            handler=handler,
+        )
+        call = ToolCall(id="call-6", name="echo_tool", arguments={"message": "hi"})
+        r1 = registry.invoke(call, gateway=None, context=None)
+        r2 = registry.invoke(call, gateway=None)
+        assert r1.is_error is False
+        assert r2.is_error is False
+        assert len(call_count) == 2

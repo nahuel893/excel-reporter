@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
 # ---------------------------------------------------------------------------
@@ -30,6 +31,7 @@ class Contact:
     jid: str
     daily_message_limit: int
     permissions: tuple[Permission, ...]
+    cargo: str | None = None  # cargo / role (gerente, supervisor, dueño, etc.)
 
 
 @dataclass(frozen=True)
@@ -102,9 +104,16 @@ class MessagingGateway(Protocol):
 
     send_text MUST be synchronous from the caller's perspective and raise on
     transport failure (caller handles retry).
+
+    send_file delivers a binary file as a WhatsApp document DM.  Raises on
+    transport failure.  caption is optional.
     """
 
     def send_text(self, jid: str, text: str) -> None: ...
+
+    def send_file(
+        self, jid: str, file_path: Path, caption: str | None = None
+    ) -> None: ...
 
 
 @runtime_checkable

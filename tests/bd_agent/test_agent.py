@@ -77,13 +77,17 @@ def _make_contact(jid: str = _KNOWN_JID) -> Contact:
 
 
 class RecordingMessagingGateway:
-    """Captures send_text() calls for assertion."""
+    """Captures send_text() and send_file() calls for assertion."""
 
     def __init__(self):
         self.sent: list[tuple[str, str]] = []
+        self.sent_files: list[tuple] = []
 
     def send_text(self, jid: str, text: str) -> None:
         self.sent.append((jid, text))
+
+    def send_file(self, jid: str, file_path, caption=None) -> None:
+        self.sent_files.append((jid, file_path, caption))
 
 
 class ScriptedLLMProvider:

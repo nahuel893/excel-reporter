@@ -16,4 +16,5 @@ playwright>=1.40.0,<2.0.0  # Alt image renderer (Chrome headless); requires: pla
 apscheduler>=3.10  # Management UI: daily scheduling
 sse-starlette>=1.8  # Management UI: SSE log streaming
 sqlglot>=25.0.0,<31.0.0  # SQL AST parser for safety validation (bd_agent)
+pyarrow>=15.0,<20.0  # Parquet I/O for sandbox staging (bd_agent)
 google-genai>=0.7,<2.0  # Gemini API SDK for bd_agent LLM provider

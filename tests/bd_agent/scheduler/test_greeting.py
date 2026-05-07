@@ -56,12 +56,16 @@ class _FakeContactsRepo:
 class _RecordingMessagingGateway:
     def __init__(self, raise_on: set[str] | None = None):
         self.sent: list[tuple[str, str]] = []
+        self.sent_files: list[tuple] = []
         self._raise_on = raise_on or set()
 
     def send_text(self, jid: str, text: str) -> None:
         if jid in self._raise_on:
             raise RuntimeError(f"Simulated send_text error for {jid}")
         self.sent.append((jid, text))
+
+    def send_file(self, jid: str, file_path, caption=None) -> None:
+        self.sent_files.append((jid, file_path, caption))
 
 
 class _FakeActiveHoursGuard:
