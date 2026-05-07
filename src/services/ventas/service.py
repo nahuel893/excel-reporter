@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import pandas as pd
 
-from config.settings import COLUMN_NAMES, ZONAS_VIRTUALES
+from config.settings import COLUMN_NAMES
 from src.core.base_processor import calcular_info_dias
 from src.core.data_loader import DataLoader
 from src.core.excel_writer import ExcelWriter, SheetStyle, ColumnFormat, ColumnGroup
@@ -45,6 +45,40 @@ VENTAS_COLUMN_FORMATS = {
     COLUMN_NAMES["cupo_vs_tend_marca"]: ColumnFormat(number_format='0.0%', width=13, font_bold=True),
 }
 
+# Columnas relacionadas con monto/descuentos. Cuando con_montos=False, se omiten
+# tanto del DataFrame final como del estilo (ni siquiera ocultas — directamente
+# no aparecen en el archivo).
+_MONEY_COLUMNS = (
+    COLUMN_NAMES["monto_generico"],
+    COLUMN_NAMES["desc_generico"],
+    COLUMN_NAMES["desc_pct_generico"],
+    COLUMN_NAMES["monto_marca"],
+    COLUMN_NAMES["desc_marca"],
+    COLUMN_NAMES["desc_pct_marca"],
+)
+
+# Color de fondo por generico (toda la fila — bloque entero del generico).
+# Genericos sin entrada quedan sin color de fondo.
+_GENERICO_FILL_COLORS: dict[str, str] = {
+    "AGUAS DANONE": "DDEBF7",       # celeste claro
+    "CERVEZAS": "FCE4D6",            # peach claro
+    "SIDRAS Y LICORES": "E2EFDA",   # verde menta
+    "VINOS CCU": "F4CCCC",           # rojo palido
+}
+
+# Genericos cuyo color de fondo es oscuro y necesitan font blanco.
+_GENERICO_WHITE_FONT: set[str] = set()
+
+# Zonas virtuales locales al servicio ventas: SUB DISTRIBUIDORES (ruta 93) se
+# absorbe dentro de VALLE SALTA en vez de mostrarse como zona aparte. Otros
+# servicios (ej. resumen-mensual) siguen usando el mapeo global de settings.
+_ZONAS_VIRTUALES_VENTAS: dict[str, dict] = {
+    "VALLE SALTA": {
+        "sucursal_real": "CASA CENTRAL",
+        "rutas": [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 118, 119, 120, 122],
+    },
+}
+
 
 def _fechas_a_periodos(fecha_desde: str, fecha_hasta: str) -> list[str]:
     """Convierte un rango de fechas en lista de primeros dias de mes cubiertos."""
@@ -57,7 +91,8 @@ def _fechas_a_periodos(fecha_desde: str, fecha_hasta: str) -> list[str]:
 def _crear_estilo_ventas(
     columnas_dias: list[str],
     info_dias: dict[str, int],
-    dias_visibles: int = 2
+    dias_visibles: int = 2,
+    con_montos: bool = True,
 ) -> SheetStyle:
     """
     Crea el estilo para el reporte de ventas con grupos de columnas.
@@ -66,6 +101,7 @@ def _crear_estilo_ventas(
         columnas_dias: Lista de nombres de columnas de dias
         info_dias: Diccionario con info de dias habiles para mostrar en encabezado
         dias_visibles: Cantidad de dias al final que no se agrupan (default: 2)
+        con_montos: Si False, omite columnas de monto/descuento del estilo y subtotales.
 
     Returns:
         SheetStyle configurado con el grupo de dias y filas de resumen
@@ -81,6 +117,9 @@ def _crear_estilo_ventas(
 
     # Formato de columnas: base + dias con ancho fijo
     column_formats = dict(VENTAS_COLUMN_FORMATS)
+    if not con_montos:
+        for col in _MONEY_COLUMNS:
+            column_formats.pop(col, None)
     for col_dia in columnas_dias:
         column_formats[col_dia] = ColumnFormat(number_format='#,##0', width=9.3)
 
@@ -104,6 +143,8 @@ def _crear_estilo_ventas(
         COLUMN_NAMES["monto_marca"],
         COLUMN_NAMES["desc_marca"],
     ]
+    if not con_montos:
+        subtotal_cols = [c for c in subtotal_cols if c not in _MONEY_COLUMNS]
 
     return SheetStyle(
         column_formats=column_formats,
@@ -127,6 +168,190 @@ _UNIDADES = [
     (UNIDAD_BULTOS, "Ventas Bultos"),
     (UNIDAD_HTLS, "Ventas HTLs"),
 ]
+
+# Mapeo (columna%, numerador, denominador) — keys de COLUMN_NAMES.
+# Solo se escriben formulas para columnas presentes en la hoja (graceful skip
+# cuando con_montos=False u otra columna falta).
+_PCT_SUBTOTAL_FORMULAS: list[tuple[str, str, str]] = [
+    ("cupo_vs_tend_generico", "tend_generico", "cupo_generico"),
+    ("cupo_vs_tend_marca", "tend_marca", "cupo_marca"),
+    ("var_mmaa_marca", "total_marca", "mmaa_marca"),
+    ("desc_pct_generico", "desc_generico", "monto_generico"),
+    ("desc_pct_marca", "desc_marca", "monto_marca"),
+]
+
+
+def _aplicar_bordes_blancos(ruta: Path, sheet_names: list[str]) -> None:
+    """
+    Pinta bordes blancos thin a todas las celdas del area de la tabla
+    (desde la fila "Subtotales" hasta la ultima fila), para separar visualmente
+    cada celda sobre los fondos coloreados.
+    """
+    from openpyxl import load_workbook
+    from openpyxl.styles import Border, Side
+
+    side = Side(style="thin", color="FFFFFF")
+    border = Border(left=side, right=side, top=side, bottom=side)
+    wb = load_workbook(ruta)
+    for sheet_name in sheet_names:
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        start_row = None
+        for r in range(1, ws.max_row + 1):
+            if ws.cell(r, 1).value == "Subtotales":
+                start_row = r
+                break
+        if start_row is None:
+            continue
+        for r in range(start_row, ws.max_row + 1):
+            for c in range(1, ws.max_column + 1):
+                ws.cell(r, c).border = border
+    wb.save(ruta)
+
+
+def _aplicar_estilo_fila_subtotal(ruta: Path, sheet_names: list[str]) -> None:
+    """
+    Pinta la fila "Subtotales" (la que tiene SUBTOTAL(109,...) y los % derivados)
+    con un fondo morado oscuro y fuente blanca bold a lo largo de TODA la row.
+    """
+    from openpyxl import load_workbook
+    from openpyxl.styles import PatternFill, Font
+
+    fill = PatternFill(start_color="4A235A", end_color="4A235A", fill_type="solid")
+    wb = load_workbook(ruta)
+    for sheet_name in sheet_names:
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        subtotal_row = None
+        for r in range(1, ws.max_row + 1):
+            if ws.cell(r, 1).value == "Subtotales":
+                subtotal_row = r
+                break
+        if subtotal_row is None:
+            continue
+        for c in range(1, ws.max_column + 1):
+            cell = ws.cell(subtotal_row, c)
+            cell.fill = fill
+            existing = cell.font
+            cell.font = Font(
+                name=existing.name,
+                size=existing.size,
+                bold=True,
+                italic=existing.italic,
+                color="FFFFFF",
+            )
+    wb.save(ruta)
+
+
+def _aplicar_porcentajes_subtotal(ruta: Path, sheet_names: list[str]) -> None:
+    """
+    Inyecta formulas de porcentaje en la fila "Subtotales" (la que ya tiene
+    SUBTOTAL(109,...) en las columnas sumables) para las columnas %.
+
+    Cada formula es =IFERROR(num_subtotal / den_subtotal, 0) — usa las celdas
+    de subtotal de la misma fila para que cambie cuando el filtrado autosuma
+    distinto. Si la columna numerador o denominador no existe (ej: con_montos=False),
+    salta esa formula silenciosamente.
+    """
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
+
+    wb = load_workbook(ruta)
+    for sheet_name in sheet_names:
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        subtotal_row = None
+        header_row = None
+        for r in range(1, ws.max_row + 1):
+            v = ws.cell(r, 1).value
+            if v == "Subtotales":
+                subtotal_row = r
+            elif v == "Sucursal":
+                header_row = r
+                break
+        if subtotal_row is None or header_row is None:
+            continue
+        col_idx_by_name: dict[str, int] = {}
+        for c in range(1, ws.max_column + 1):
+            v = ws.cell(header_row, c).value
+            if v:
+                col_idx_by_name[str(v)] = c
+        for pct_key, num_key, den_key in _PCT_SUBTOTAL_FORMULAS:
+            pct_name = COLUMN_NAMES.get(pct_key)
+            num_name = COLUMN_NAMES.get(num_key)
+            den_name = COLUMN_NAMES.get(den_key)
+            if not pct_name or pct_name not in col_idx_by_name:
+                continue
+            if not num_name or num_name not in col_idx_by_name:
+                continue
+            if not den_name or den_name not in col_idx_by_name:
+                continue
+            pct_idx = col_idx_by_name[pct_name]
+            num_letter = get_column_letter(col_idx_by_name[num_name])
+            den_letter = get_column_letter(col_idx_by_name[den_name])
+            cell = ws.cell(subtotal_row, pct_idx)
+            cell.value = f"=IFERROR({num_letter}{subtotal_row}/{den_letter}{subtotal_row},0)"
+            cell.number_format = "0.0%"
+    wb.save(ruta)
+
+
+def _aplicar_colores_por_generico(ruta: Path, sheet_names: list[str]) -> None:
+    """
+    Pinta cada fila de datos con el color asociado a su generico (col B).
+
+    Recorre las hojas indicadas, encuentra el header buscando "Sucursal" en col A,
+    y para cada fila de datos siguiente colorea TODA la fila segun el mapping
+    `_GENERICO_FILL_COLORS`. Si el generico esta en `_GENERICO_WHITE_FONT`, usa
+    fuente blanca preservando el resto del estilo.
+
+    Genericos sin entrada en el mapping no se modifican.
+    """
+    from openpyxl import load_workbook
+    from openpyxl.styles import PatternFill, Font
+
+    wb = load_workbook(ruta)
+    for sheet_name in sheet_names:
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        header_row = None
+        for r in range(1, ws.max_row + 1):
+            if ws.cell(r, 1).value == "Sucursal":
+                header_row = r
+                break
+        if header_row is None:
+            continue
+        gen_col = None
+        for c in range(1, ws.max_column + 1):
+            if ws.cell(header_row, c).value == "Generico":
+                gen_col = c
+                break
+        if gen_col is None:
+            continue
+        for r in range(header_row + 1, ws.max_row + 1):
+            gen = ws.cell(r, gen_col).value
+            if not gen or gen not in _GENERICO_FILL_COLORS:
+                continue
+            color = _GENERICO_FILL_COLORS[gen]
+            fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
+            white_font = gen in _GENERICO_WHITE_FONT
+            for c in range(1, ws.max_column + 1):
+                cell = ws.cell(r, c)
+                cell.fill = fill
+                if white_font:
+                    existing = cell.font
+                    cell.font = Font(
+                        name=existing.name,
+                        size=existing.size,
+                        bold=existing.bold,
+                        italic=existing.italic,
+                        color="FFFFFF",
+                    )
+    wb.save(ruta)
+
 
 # Hojas de cobertura
 _COB_GENERICO_SHEET = "Cobertura Generico"
@@ -175,6 +400,7 @@ class ReporteVentasConfig:
     nombre_archivo: str | None = None
     con_slicers: bool = True
     con_cobertura: bool = True
+    con_montos: bool = True
 
     def __post_init__(self):
         pass  # El nombre se genera en el servicio a partir de la ultima fecha real de ventas
@@ -249,11 +475,11 @@ class VentasService(BaseService):
             config.fecha_hasta,
             config.genericos
         )
-        df_ventas = _aplicar_zonas_virtuales(df_ventas)
+        df_ventas = _aplicar_zonas_virtuales(zonas_config=_ZONAS_VIRTUALES_VENTAS, df=df_ventas)
 
         df_sucursales = self.data_loader.get_sucursales()
         # Agregar zonas virtuales a la lista de sucursales (solo si la sucursal real existe)
-        for zona_nombre, zona_config in ZONAS_VIRTUALES.items():
+        for zona_nombre, zona_config in _ZONAS_VIRTUALES_VENTAS.items():
             if (
                 zona_config["sucursal_real"] in df_sucursales["sucursal"].values
                 and zona_nombre not in df_sucursales["sucursal"].values
@@ -274,7 +500,7 @@ class VentasService(BaseService):
             try:
                 df_cg = self.data_loader.get_cobertura_preventista_generico(periodos=periodos)
                 if not df_cg.empty:
-                    df_cg = _aplicar_zonas_virtuales(df_cg)
+                    df_cg = _aplicar_zonas_virtuales(zonas_config=_ZONAS_VIRTUALES_VENTAS, df=df_cg)
                     df_cob_generico = (
                         df_cg.groupby(["sucursal", "generico"])["clientes_compradores"]
                         .sum()
@@ -286,7 +512,7 @@ class VentasService(BaseService):
             try:
                 df_cm = self.data_loader.get_cobertura_preventista_marca(periodos=periodos)
                 if not df_cm.empty:
-                    df_cm = _aplicar_zonas_virtuales(df_cm)
+                    df_cm = _aplicar_zonas_virtuales(zonas_config=_ZONAS_VIRTUALES_VENTAS, df=df_cm)
                     df_cob_marca = (
                         df_cm.groupby(["sucursal", "marca"])["clientes_compradores"]
                         .sum()
@@ -301,7 +527,7 @@ class VentasService(BaseService):
                 config.fecha_desde, config.fecha_hasta, config.genericos
             )
             if not df_mmaa_raw.empty:
-                df_mmaa_raw = _aplicar_zonas_virtuales(df_mmaa_raw)
+                df_mmaa_raw = _aplicar_zonas_virtuales(zonas_config=_ZONAS_VIRTUALES_VENTAS, df=df_mmaa_raw)
                 df_mmaa = df_mmaa_raw.groupby(
                     ["sucursal", "generico", "marca"], as_index=False
                 )[["cantidad", "cantidad_htls"]].sum()
@@ -313,7 +539,7 @@ class VentasService(BaseService):
             periodo = pd.to_datetime(config.fecha_desde).strftime("%Y-%m")
             df_cupos_raw = self.data_loader.get_cupos(periodo)
             if not df_cupos_raw.empty:
-                df_cupos_raw = _aplicar_zonas_virtuales(df_cupos_raw)
+                df_cupos_raw = _aplicar_zonas_virtuales(zonas_config=_ZONAS_VIRTUALES_VENTAS, df=df_cupos_raw)
                 df_cupos = df_cupos_raw.groupby(["sucursal", "cupo_generico"], as_index=False)["cupo"].sum()
         except Exception:
             pass
@@ -335,6 +561,7 @@ class VentasService(BaseService):
         info_dias: dict,
         con_slicers: bool,
         output_dir: Path | None = None,
+        con_montos: bool = True,
     ) -> tuple[Path, int, bool, list[str]]:
         """
         Genera el archivo Excel con hojas de ventas y cobertura.
@@ -361,13 +588,18 @@ class VentasService(BaseService):
                 df_cupos=df_cupos,
             )
 
+            if not con_montos:
+                df_procesado = df_procesado.drop(
+                    columns=[c for c in _MONEY_COLUMNS if c in df_procesado.columns]
+                )
+
             # Detectar columnas de dias (entre Marca y Total)
             columnas = list(df_procesado.columns)
             idx_marca = columnas.index(COLUMN_NAMES["marca"])
             idx_total = columnas.index(COLUMN_NAMES["total_marca"])
             columnas_dias = columnas[idx_marca + 1:idx_total]
 
-            style = _crear_estilo_ventas(columnas_dias, info_dias)
+            style = _crear_estilo_ventas(columnas_dias, info_dias, con_montos=con_montos)
             writer.add_sheet(df_procesado, sheet_name=sheet_label, style=style)
             total_procesados += len(df_procesado)
             hojas.append(sheet_label)
@@ -388,6 +620,12 @@ class VentasService(BaseService):
             hojas.append(_COB_MARCA_SHEET)
 
         ruta = writer.save()
+
+        sheet_labels = [s for _, s in _UNIDADES]
+        _aplicar_porcentajes_subtotal(ruta, sheet_labels)
+        _aplicar_estilo_fila_subtotal(ruta, sheet_labels)
+        _aplicar_colores_por_generico(ruta, sheet_labels)
+        _aplicar_bordes_blancos(ruta, sheet_labels)
 
         slicers_ok = False
         if con_slicers and slicers_disponibles():
@@ -434,6 +672,7 @@ class VentasService(BaseService):
             info_dias,
             config.con_slicers,
             output_dir=out,
+            con_montos=config.con_montos,
         )
 
         genericos_incluidos = (
@@ -475,7 +714,7 @@ class VentasService(BaseService):
         results = []
         for supervisor, sucursales_list in supervisores.items():
             # Expandir zonas virtuales (CASA CENTRAL → CASA CENTRAL + VALLE SALTA)
-            sucursales_expandidas = _expandir_sucursales(sucursales_list)
+            sucursales_expandidas = _expandir_sucursales(sucursales_list, zonas_config=_ZONAS_VIRTUALES_VENTAS)
 
             # Filtrar datos al universo de este supervisor
             df_ventas_sup = df_ventas[df_ventas["sucursal"].isin(sucursales_expandidas)]
@@ -513,6 +752,7 @@ class VentasService(BaseService):
                 info_dias,
                 config.con_slicers,
                 output_dir=out,
+                con_montos=config.con_montos,
             )
 
             genericos_incluidos = (

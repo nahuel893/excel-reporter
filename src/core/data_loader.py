@@ -14,6 +14,48 @@ from sqlalchemy import create_engine, text, Engine
 from config.settings import DB_CONFIG
 
 
+def _build_marca_split_clause(
+    marca_splits: dict[str, list[str]] | None, params: dict
+) -> str:
+    """Build the SQL CASE expression that rewrites ``da.generico`` per marca_splits.
+
+    For each (generico, [marcas]) entry, rows whose ``da.marca`` is in the list
+    surface their marca as the synthetic generico value; the rest surface as
+    ``"{generico} (sin {m1, m2, ...})"``. Genericos NOT in marca_splits are returned
+    unchanged.
+
+    Mutates ``params`` in-place to register the named parameters used by the
+    CASE clause. Caller is responsible for passing those params to execute_query.
+
+    Returns:
+        ``"da.generico"`` if marca_splits is None/empty.
+        ``"CASE ... ELSE da.generico END"`` otherwise.
+    """
+    if not marca_splits:
+        return "da.generico"
+
+    when_parts: list[str] = []
+    counter = 0
+    for generico, marcas in marca_splits.items():
+        gen_param = f"split_g_{counter}"
+        params[gen_param] = generico
+        counter += 1
+        for marca in marcas:
+            marca_param = f"split_m_{counter}"
+            params[marca_param] = marca
+            when_parts.append(
+                f"WHEN da.generico = :{gen_param} AND da.marca = :{marca_param} THEN da.marca"
+            )
+            counter += 1
+        label = f"{generico} (sin {', '.join(marcas)})"
+        label_param = f"split_l_{counter}"
+        params[label_param] = label
+        counter += 1
+        when_parts.append(f"WHEN da.generico = :{gen_param} THEN :{label_param}")
+
+    return "CASE\n            " + "\n            ".join(when_parts) + "\n            ELSE da.generico END"
+
+
 class DataLoader:
     """Clase para acceso a datos del Data Warehouse."""
 
@@ -58,6 +100,22 @@ class DataLoader:
         SELECT DISTINCT descripcion AS sucursal
         FROM gold.dim_sucursal
         ORDER BY descripcion
+        """
+        return self.execute_query(query)
+
+    def get_dim_articulo(self) -> pd.DataFrame:
+        """
+        Obtiene la tabla `dim_articulo` completa para usar como lookup table
+        en hojas de Excel (VLOOKUP por id_articulo).
+
+        Returns:
+            DataFrame con columnas: id_articulo, generico, marca, des_articulo
+        """
+        query = """
+        SELECT id_articulo, generico, marca, des_articulo
+        FROM gold.dim_articulo
+        WHERE generico IS NOT NULL
+        ORDER BY id_articulo
         """
         return self.execute_query(query)
 
@@ -206,10 +264,12 @@ class DataLoader:
         self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None
     ) -> pd.DataFrame:
         """
-        Obtiene ventas del mismo periodo del año anterior (MMAA).
+        Obtiene ventas del MES completo del año anterior (MMAA — Mismo Mes Año Anterior).
 
-        Desplaza internamente las fechas -1 año con relativedelta.
-        Misma estructura de JOINs que get_ventas_diarias_con_ruta pero sin monto.
+        Para cada mes cubierto por [fecha_desde, fecha_hasta] del periodo actual,
+        trae todo el mes equivalente un año atrás. Esto evita comparar rangos
+        parciales (ej: corriendo el reporte el 5 de mayo, igual debe traer mayo
+        completo del año anterior, no solo del 1 al 5).
 
         Args:
             fecha_desde: Fecha inicio formato 'YYYY-MM-DD' (del periodo actual)
@@ -219,8 +279,14 @@ class DataLoader:
         Returns:
             DataFrame con columnas: sucursal, generico, marca, fecha, id_ruta, cantidad, cantidad_htls
         """
-        desde = (pd.to_datetime(fecha_desde) - relativedelta(years=1)).strftime("%Y-%m-%d")
-        hasta = (pd.to_datetime(fecha_hasta) - relativedelta(years=1)).strftime("%Y-%m-%d")
+        # MMAA: rango completo del/los mes(es) cubierto(s), un año atrás.
+        # desde → primer dia del mes (de fecha_desde) un año atras.
+        # hasta → ultimo dia del mes (de fecha_hasta) un año atras.
+        desde_prev = (pd.to_datetime(fecha_desde) - relativedelta(years=1)).replace(day=1)
+        hasta_prev_first = (pd.to_datetime(fecha_hasta) - relativedelta(years=1)).replace(day=1)
+        hasta_prev = hasta_prev_first + relativedelta(months=1, days=-1)
+        desde = desde_prev.strftime("%Y-%m-%d")
+        hasta = hasta_prev.strftime("%Y-%m-%d")
 
         if genericos:
             placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
@@ -323,7 +389,12 @@ class DataLoader:
     # ── Resumen Mensual ─────────────────────────────────────────
 
     def get_ventas_resumen_mensual(
-        self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        genericos: list[str] | None = None,
+        genericos_sin_prvta: list[str] | None = None,
+        marca_splits: dict[str, list[str]] | None = None,
     ) -> pd.DataFrame:
         """
         Obtiene ventas mensuales agrupadas por sucursal, generico e id_ruta.
@@ -332,119 +403,129 @@ class DataLoader:
             fecha_desde: Fecha inicio formato 'YYYY-MM-DD'
             fecha_hasta: Fecha fin formato 'YYYY-MM-DD'
             genericos: Lista de genericos a filtrar. Si es None, trae todos.
+            genericos_sin_prvta: Lista de genericos para los cuales se DEBE excluir
+                fact_ventas.id_documento = 'PRVTA' (facturas presupuesto). Otros
+                genericos no se ven afectados. Si es None o vacio, no se aplica filtro.
+            marca_splits: Mapping de generico -> lista de marcas a separar. Para los
+                genericos listados, cada marca matcheada se reporta como su propio
+                "generico" sintetico (la marca pasa a la columna generico) y el resto
+                se reporta como "{generico} (sin {marcas})". Si es None o vacio, no
+                hay split.
 
         Returns:
             DataFrame con columnas: sucursal, generico, id_ruta, cantidad
         """
+        params = {"desde": fecha_desde, "hasta": fecha_hasta}
+        where_clauses = [
+            "fv.fecha_comprobante BETWEEN :desde AND :hasta",
+            "da.generico IS NOT NULL",
+        ]
         if genericos:
             placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
-            query = f"""
-            SELECT
-                ds.descripcion          AS sucursal,
-                da.generico,
-                dc.id_ruta_fv1          AS id_ruta,
-                SUM(fv.cantidades_total) AS cantidad
-            FROM gold.fact_ventas fv
-            LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
-            LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
-            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
-            WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
-              AND da.generico IS NOT NULL
-              AND da.generico IN ({placeholders})
-            GROUP BY ds.descripcion, da.generico, dc.id_ruta_fv1
-            ORDER BY ds.descripcion, da.generico
-            """
-            params = {"desde": fecha_desde, "hasta": fecha_hasta}
+            where_clauses.append(f"da.generico IN ({placeholders})")
             params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
-        else:
-            query = """
-            SELECT
-                ds.descripcion          AS sucursal,
-                da.generico,
-                dc.id_ruta_fv1          AS id_ruta,
-                SUM(fv.cantidades_total) AS cantidad
-            FROM gold.fact_ventas fv
-            LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
-            LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
-            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
-            WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
-              AND da.generico IS NOT NULL
-            GROUP BY ds.descripcion, da.generico, dc.id_ruta_fv1
-            ORDER BY ds.descripcion, da.generico
-            """
-            params = {"desde": fecha_desde, "hasta": fecha_hasta}
+        if genericos_sin_prvta:
+            sp_placeholders = ", ".join([f":sp_{i}" for i in range(len(genericos_sin_prvta))])
+            where_clauses.append(
+                f"NOT (da.generico IN ({sp_placeholders}) AND fv.id_documento = 'PRVTA')"
+            )
+            params.update({f"sp_{i}": g for i, g in enumerate(genericos_sin_prvta)})
+
+        where_sql = "\n              AND ".join(where_clauses)
+        generico_expr = _build_marca_split_clause(marca_splits, params)
+        query = f"""
+        SELECT
+            ds.descripcion          AS sucursal,
+            {generico_expr}         AS generico,
+            dc.id_ruta_fv1          AS id_ruta,
+            SUM(fv.cantidades_total) AS cantidad
+        FROM gold.fact_ventas fv
+        LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
+        LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
+        LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
+        WHERE {where_sql}
+        GROUP BY 1, 2, 3
+        ORDER BY 1, 2
+        """
 
         return self.execute_query(query, params)
 
     def get_ventas_ultimos_dias_habiles(
-        self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        genericos: list[str] | None = None,
+        genericos_sin_prvta: list[str] | None = None,
+        marca_splits: dict[str, list[str]] | None = None,
     ) -> pd.DataFrame:
         """
         Obtiene ventas diarias del rango completo del mes, con desglose por fecha e id_ruta.
-
-        Trae todos los dias del mes para que el procesador pueda detectar los
-        ultimos 2 dias con ventas reales en la BD (sin usar la fecha de hoy como referencia).
 
         Args:
             fecha_desde: Primer dia del mes formato 'YYYY-MM-DD'
             fecha_hasta: Ultimo dia del rango formato 'YYYY-MM-DD'
             genericos: Lista de genericos a filtrar. Si es None, trae todos.
+            genericos_sin_prvta: Lista de genericos para los cuales se DEBE excluir
+                fact_ventas.id_documento = 'PRVTA' (facturas presupuesto).
+            marca_splits: Mapping generico -> [marcas]. Las marcas matcheadas se
+                reportan como su propio "generico" sintetico; el resto del generico
+                se reporta como "{generico} (sin {marcas})".
 
         Returns:
             DataFrame con columnas: sucursal, generico, fecha, id_ruta, cantidad
         """
+        params = {"desde": fecha_desde, "hasta": fecha_hasta}
+        where_clauses = [
+            "fv.fecha_comprobante BETWEEN :desde AND :hasta",
+            "da.generico IS NOT NULL",
+        ]
         if genericos:
             placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
-            query = f"""
-            SELECT
-                ds.descripcion           AS sucursal,
-                da.generico,
-                fv.fecha_comprobante     AS fecha,
-                dc.id_ruta_fv1           AS id_ruta,
-                SUM(fv.cantidades_total) AS cantidad
-            FROM gold.fact_ventas fv
-            LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
-            LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
-            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
-            WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
-              AND da.generico IS NOT NULL
-              AND da.generico IN ({placeholders})
-            GROUP BY ds.descripcion, da.generico, fv.fecha_comprobante, dc.id_ruta_fv1
-            ORDER BY ds.descripcion, da.generico, fv.fecha_comprobante
-            """
-            params = {"desde": fecha_desde, "hasta": fecha_hasta}
+            where_clauses.append(f"da.generico IN ({placeholders})")
             params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
-        else:
-            query = """
-            SELECT
-                ds.descripcion           AS sucursal,
-                da.generico,
-                fv.fecha_comprobante     AS fecha,
-                dc.id_ruta_fv1           AS id_ruta,
-                SUM(fv.cantidades_total) AS cantidad
-            FROM gold.fact_ventas fv
-            LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
-            LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
-            LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
-            WHERE fv.fecha_comprobante BETWEEN :desde AND :hasta
-              AND da.generico IS NOT NULL
-            GROUP BY ds.descripcion, da.generico, fv.fecha_comprobante, dc.id_ruta_fv1
-            ORDER BY ds.descripcion, da.generico, fv.fecha_comprobante
-            """
-            params = {"desde": fecha_desde, "hasta": fecha_hasta}
+        if genericos_sin_prvta:
+            sp_placeholders = ", ".join([f":sp_{i}" for i in range(len(genericos_sin_prvta))])
+            where_clauses.append(
+                f"NOT (da.generico IN ({sp_placeholders}) AND fv.id_documento = 'PRVTA')"
+            )
+            params.update({f"sp_{i}": g for i, g in enumerate(genericos_sin_prvta)})
+
+        where_sql = "\n              AND ".join(where_clauses)
+        generico_expr = _build_marca_split_clause(marca_splits, params)
+        query = f"""
+        SELECT
+            ds.descripcion           AS sucursal,
+            {generico_expr}          AS generico,
+            fv.fecha_comprobante     AS fecha,
+            dc.id_ruta_fv1           AS id_ruta,
+            SUM(fv.cantidades_total) AS cantidad
+        FROM gold.fact_ventas fv
+        LEFT JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
+        LEFT JOIN gold.dim_sucursal  ds ON fv.id_sucursal  = ds.id_sucursal
+        LEFT JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
+        WHERE {where_sql}
+        GROUP BY 1, 2, 3, 4
+        ORDER BY 1, 2, 3
+        """
 
         return self.execute_query(query, params)
 
     def get_ventas_mes_anterior(
-        self, fecha_desde: str, genericos: list[str] | None = None
+        self,
+        fecha_desde: str,
+        genericos: list[str] | None = None,
+        genericos_sin_prvta: list[str] | None = None,
+        marca_splits: dict[str, list[str]] | None = None,
     ) -> pd.DataFrame:
         """
         Obtiene ventas del mes calendario completo anterior a fecha_desde.
 
         Args:
-            fecha_desde: Fecha de referencia formato 'YYYY-MM-DD'. El mes anterior
-                         se calcula como el mes calendario que precede a esta fecha.
+            fecha_desde: Fecha de referencia formato 'YYYY-MM-DD'.
             genericos: Lista de genericos a filtrar. Si es None, trae todos.
+            genericos_sin_prvta: Genericos para los que se excluye id_documento='PRVTA'.
+            marca_splits: Mapping generico -> [marcas] para split por marca (sintetizando
+                el valor de la columna generico).
 
         Returns:
             DataFrame con columnas: sucursal, generico, id_ruta, cantidad
@@ -456,10 +537,17 @@ class DataLoader:
             primer_dia.strftime("%Y-%m-%d"),
             ultimo_dia.strftime("%Y-%m-%d"),
             genericos,
+            genericos_sin_prvta=genericos_sin_prvta,
+            marca_splits=marca_splits,
         )
 
     def get_ventas_mismo_mes_anio_anterior(
-        self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        genericos: list[str] | None = None,
+        genericos_sin_prvta: list[str] | None = None,
+        marca_splits: dict[str, list[str]] | None = None,
     ) -> pd.DataFrame:
         """
         Obtiene ventas del mismo rango de fechas pero del anio anterior.
@@ -468,6 +556,8 @@ class DataLoader:
             fecha_desde: Fecha inicio formato 'YYYY-MM-DD'
             fecha_hasta: Fecha fin formato 'YYYY-MM-DD'
             genericos: Lista de genericos a filtrar. Si es None, trae todos.
+            genericos_sin_prvta: Genericos para los que se excluye id_documento='PRVTA'.
+            marca_splits: Mapping generico -> [marcas] para split por marca.
 
         Returns:
             DataFrame con columnas: sucursal, generico, id_ruta, cantidad
@@ -475,7 +565,11 @@ class DataLoader:
         fecha_desde_aa = f"{int(fecha_desde[:4]) - 1}{fecha_desde[4:]}"
         fecha_hasta_aa = f"{int(fecha_hasta[:4]) - 1}{fecha_hasta[4:]}"
         return self.get_ventas_resumen_mensual(
-            fecha_desde_aa, fecha_hasta_aa, genericos
+            fecha_desde_aa,
+            fecha_hasta_aa,
+            genericos,
+            genericos_sin_prvta=genericos_sin_prvta,
+            marca_splits=marca_splits,
         )
 
     def get_cupos_resumen_mensual(

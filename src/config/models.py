@@ -57,6 +57,7 @@ class GlobalFilters(BaseModel):
     categorias: dict[str, Any] | None = None
     con_slicers: bool = True
     con_cobertura: bool = True
+    con_montos: bool = True
     enviar_email: bool = True
     enviar_whatsapp: bool = True
     archivo_plantilla: str | None = None
@@ -66,6 +67,13 @@ class GlobalFilters(BaseModel):
     whatsapp_enviar_como: str = "imagen"  # "imagen" | "archivo" | "ambos"
     email_adjuntos: list[str] = ["excel"]  # ["excel"] | ["imagen"] | ["excel", "imagen"]
     detalle_movimientos_path: str | None = None  # Path to detalle_movimientos.xlsx for merge import
+    detalle_movimientos_ma_path: str | None = None    # Mes anterior — imported as separate sheet
+    detalle_movimientos_mmaa_path: str | None = None  # Mismo mes año anterior — imported as separate sheet
+    categorias_deposito_path: str | None = None       # Path to JSON con master-data {codigo, concatenar, division} para hoja "Categorias"
+    # Genericos for which fact_ventas.id_documento='PRVTA' is excluded (resumen-mensual)
+    genericos_sin_prvta: list[str] | None = None
+    # Mapping {generico: [marcas]} for split-by-marca (resumen-mensual)
+    marca_splits: dict[str, list[str]] | None = None
 
 
 class ReportFilters(BaseModel):
@@ -76,6 +84,7 @@ class ReportFilters(BaseModel):
     genericos: list[str] | None = None
     con_slicers: bool | None = None
     con_cobertura: bool | None = None
+    con_montos: bool | None = None
     enviar_email: bool | None = None
     enviar_whatsapp: bool | None = None
     id_articulo: int | None = None

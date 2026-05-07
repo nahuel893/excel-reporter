@@ -124,27 +124,40 @@ def procesar_resumen_mensual(
     df_n1_prep = _preparar_df(df_n1, "vtas_n1")
     df_n2_prep = _preparar_df(df_n2, "vtas_n2")
 
-    # Outer join mes vs aa para preservar ambos periodos
+    # Outer-join the 4 ventas dataframes (mes, aa, ma) plus the 2 day-slices.
+    # Outer joins preserve any (sucursal, generico) that appears in ANY period —
+    # so historical-only data (MMAA / MA without current month) is not lost.
     df_base = df_mes_prep.merge(df_aa_prep, on=["sucursal", "generico"], how="outer")
-    df_base["total_ventas"] = df_base["total_ventas"].fillna(0)
-    df_base["ventas_aa"] = df_base["ventas_aa"].fillna(0)
-
-    # Left join con mes anterior
-    df_base = df_base.merge(df_ma_prep, on=["sucursal", "generico"], how="left")
-    df_base["ventas_ma"] = df_base["ventas_ma"].fillna(0)
-
-    # Left join con N-1 y N-2
-    df_base = df_base.merge(df_n1_prep, on=["sucursal", "generico"], how="left")
-    df_base["vtas_n1"] = df_base["vtas_n1"].fillna(0)
-
-    df_base = df_base.merge(df_n2_prep, on=["sucursal", "generico"], how="left")
-    df_base["vtas_n2"] = df_base["vtas_n2"].fillna(0)
+    df_base = df_base.merge(df_ma_prep, on=["sucursal", "generico"], how="outer")
+    df_base = df_base.merge(df_n1_prep, on=["sucursal", "generico"], how="outer")
+    df_base = df_base.merge(df_n2_prep, on=["sucursal", "generico"], how="outer")
 
     # -------------------------------------------------------------------------
-    # 5. Eliminar filas donde ambos total_ventas y ventas_aa son 0
-    #    (combinaciones sin ningun dato real)
+    # 5. Universe expansion: every sucursal must appear for every generico.
+    #    Universe = union of sucursales (and genericos) across all input dfs.
+    #    Combinations with no data anywhere still appear in the result with 0s.
     # -------------------------------------------------------------------------
-    df_base = df_base[~((df_base["total_ventas"] == 0) & (df_base["ventas_aa"] == 0))].copy()
+    all_sucursales: set = set()
+    all_genericos: set = set()
+    for src in (df_ventas_mes, df_dias, df_ventas_ma, df_ventas_aa):
+        if src is None or src.empty:
+            continue
+        if "sucursal" in src.columns:
+            all_sucursales.update(src["sucursal"].dropna().unique())
+        if "generico" in src.columns:
+            all_genericos.update(src["generico"].dropna().unique())
+
+    if all_sucursales and all_genericos:
+        cross = pd.MultiIndex.from_product(
+            [sorted(all_sucursales), sorted(all_genericos)],
+            names=["sucursal", "generico"],
+        ).to_frame(index=False)
+        df_base = cross.merge(df_base, on=["sucursal", "generico"], how="left")
+
+    # Fill 0 for ventas-related numeric columns where no data was found.
+    for col in ("total_ventas", "ventas_aa", "ventas_ma", "vtas_n1", "vtas_n2"):
+        if col in df_base.columns:
+            df_base[col] = df_base[col].fillna(0)
 
     # -------------------------------------------------------------------------
     # 6. Calcular Tendencia (PRIMARY RULE: sin .round().astype(int))

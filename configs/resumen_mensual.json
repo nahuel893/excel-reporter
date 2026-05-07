@@ -3,8 +3,14 @@
     "filtros": {
         "fecha_desde": "2026-05-01",
         "fecha_hasta": "2026-05-31",
-        "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES", "FRATELLI B"],
-        "detalle_movimientos_path": "/home/nahuel/VM shared/archivos_diarios/detalle_movimientos.xlsx",
+        "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "VINOS", "VINOS FINOS", "SIDRAS Y LICORES", "FRATELLI B", "TAMBO", "JUGOS"],
+        "marca_splits": {
+            "VINOS FINOS": ["QUARA"]
+        },
+        "detalle_movimientos_path": "/home/nahuel/VM shared/archivos_diarios/2026-05/detalle_movimientos.xlsx",
+        "detalle_movimientos_ma_path": "/home/nahuel/VM shared/archivos_diarios/2026-05/detalle_movimientos_ma.xlsx",
+        "detalle_movimientos_mmaa_path": "/home/nahuel/VM shared/archivos_diarios/2026-05/detalle_movimientos_mmaa.xlsx",
+        "categorias_deposito_path": "configs/categorias_deposito.json",
         "enviar_email": false,
         "enviar_whatsapp": true
     },
@@ -15,8 +21,12 @@
                 { "hoja": "CERVEZAS",         "rango": "A1:J30", "renderer": "libreoffice" },
                 { "hoja": "AGUAS DANONE",     "rango": "A1:J30", "renderer": "libreoffice" },
                 { "hoja": "VINOS CCU",        "rango": "A1:J30", "renderer": "libreoffice" },
+                { "hoja": "VINOS",            "rango": "A1:J30", "renderer": "libreoffice" },
+                { "hoja": "VINOS FINOS",      "rango": "A1:J50", "renderer": "libreoffice" },
                 { "hoja": "SIDRAS Y LICORES", "rango": "A1:J30", "renderer": "libreoffice" },
-                { "hoja": "FRATELLI B",       "rango": "A1:J30", "renderer": "libreoffice" }
+                { "hoja": "FRATELLI B",       "rango": "A1:J30", "renderer": "libreoffice" },
+                { "hoja": "TAMBO",            "rango": "A1:J30", "renderer": "libreoffice" },
+                { "hoja": "JUGOS",            "rango": "A1:J30", "renderer": "libreoffice" }
             ],
             "enviar_a": {
                 "Nahuel Aguirre": {"via": ["whatsapp"]}

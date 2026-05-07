@@ -3,6 +3,7 @@ ResumenMensualService - Servicio para generacion de reportes de resumen mensual.
 
 Orquesta el flujo completo: extraccion, procesamiento y generacion de Excel.
 """
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,6 +62,22 @@ class ResumenMensualConfig:
     nombre_archivo: str | None = None
     con_objetivo: bool = True  # True: uses gold.fact_cupos; set False if table is missing
     detalle_movimientos_path: str | None = None  # Path to source xlsx for Detalle Movimientos sheet
+    detalle_movimientos_ma_path: str | None = None    # Mes anterior — imported as "Detalle Movimientos MA"
+    detalle_movimientos_mmaa_path: str | None = None  # Mismo mes año anterior — imported as "Detalle Movimientos MMAA"
+    categorias_deposito_path: str | None = None       # JSON con master-data para sheet "Categorias" + lookup en detalles
+    # Genericos for which fact_ventas.id_documento = 'PRVTA' (facturas presupuesto)
+    # is excluded from totals. When None, defaults to ["FRATELLI B"]; pass [] to disable.
+    genericos_sin_prvta: list[str] | None = None
+    # Mapping {generico: [marcas]} — for each entry, the sheet of that generico will
+    # contain rows split by marca: one synthetic generico per listed marca, plus a
+    # "{generico} (sin {marcas})" group for everything else. Each section gets its
+    # own subtotals. Example: {"VINOS FINOS": ["QUARA"]}.
+    marca_splits: dict[str, list[str]] | None = None
+
+
+# Default list of genericos that exclude PRVTA documents (facturas presupuesto).
+# Applied when ResumenMensualConfig.genericos_sin_prvta is None.
+_DEFAULT_GENERICOS_SIN_PRVTA = ["FRATELLI B"]
 
 
 @dataclass
@@ -219,6 +236,7 @@ def _post_write_subtotals_and_heatmap(
     ws,
     df_hoja_ordered: pd.DataFrame,
     summary_rows_count: int,
+    note: str | None = None,
 ):
     """
     Post-write step: resolves subtotal placeholder rows to real =SUM(...) formulas,
@@ -232,6 +250,9 @@ def _post_write_subtotals_and_heatmap(
                          including subtotal placeholder rows)
         summary_rows_count: Number of summary rows written before the header
                             (from SheetStyle.summary_rows). Used to compute row offsets.
+        note: Optional label inserted as a new top row, merged across all columns
+              with an amber highlight. Used to flag sheet-specific data caveats
+              (e.g. PRVTA exclusion for FRATELLI B).
     """
     # Guard: if ws is not a real openpyxl Worksheet (e.g. a Mock in unit tests),
     # skip post-write silently.
@@ -245,11 +266,20 @@ def _post_write_subtotals_and_heatmap(
         return
 
     # -------------------------------------------------------------------
-    # Compute layout offsets
+    # Optional caveat note: insert a merged label row at the top BEFORE
+    # computing positions, so SUM formulas reference correctly-shifted rows.
+    # -------------------------------------------------------------------
+    note_offset = 0
+    if note:
+        ws.insert_rows(1)
+        note_offset = 1
+
+    # -------------------------------------------------------------------
+    # Compute layout offsets (with note offset baked in if applicable)
     # -------------------------------------------------------------------
     # ExcelWriter._write_summary_rows writes `len(summary_rows) + 1` rows
     # before the header (the +1 is an empty separator row).
-    header_row = summary_rows_count + 1 + 1  # summary rows + separator + header
+    header_row = note_offset + summary_rows_count + 1 + 1  # note + summary + separator + header
     data_start_row = header_row + 1
     n_data_rows = len(df_hoja_ordered)
     data_end_row = data_start_row + n_data_rows - 1
@@ -269,104 +299,115 @@ def _post_write_subtotals_and_heatmap(
     sum_cols = [c for c in df_hoja_ordered.columns if c not in _NON_SUM_COLS]
 
     # -------------------------------------------------------------------
-    # Build a map: subtotal_label -> list of (start_row, end_row) to sum
-    # and their actual sheet row numbers
-    # -------------------------------------------------------------------
-    # Sheet row for each df row: data_start_row + df_index
-    rows_by_label = {}  # label -> sheet_row_number
-    for df_idx, sucursal in enumerate(df_hoja_ordered["Sucursal"]):
-        sheet_row = data_start_row + df_idx
-        rows_by_label[sucursal] = sheet_row
-
-    # Ranges to SUM for each subtotal
-    def _rows_for_group(group_labels):
-        """Return sorted sheet row numbers for the given sucursal labels."""
-        return sorted(
-            rows_by_label[lbl]
-            for lbl in group_labels
-            if lbl in rows_by_label
-        )
-
-    cc_group_labels = [l for l in _CC_FAMILY if l in rows_by_label]
-    numbered_labels = [
-        s for s in df_hoja_ordered["Sucursal"]
-        if s not in set(_CC_FAMILY) | {"DIRECTA SUCURSALES", _SUBTOTAL_CC, _SUC_SIN_DIRECTA, _TOTAL_SIN_SMK}
-        and s is not None
-    ]
-    # Deduplicate keeping order
-    seen = set()
-    numbered_labels_unique = []
-    for lbl in numbered_labels:
-        if lbl not in seen:
-            seen.add(lbl)
-            numbered_labels_unique.append(lbl)
-
-    directa_labels = ["DIRECTA SUCURSALES"] if "DIRECTA SUCURSALES" in rows_by_label else []
-
-    subtotal_definitions = {
-        _SUBTOTAL_CC: _rows_for_group(cc_group_labels),
-        _SUC_SIN_DIRECTA: _rows_for_group(numbered_labels_unique),
-        _TOTAL_SIN_SMK: (
-            ([rows_by_label[_SUBTOTAL_CC]] if _SUBTOTAL_CC in rows_by_label else [])
-            + ([rows_by_label[_SUC_SIN_DIRECTA]] if _SUC_SIN_DIRECTA in rows_by_label else [])
-            + _rows_for_group(directa_labels)
-        ),
-    }
-
-    # -------------------------------------------------------------------
-    # Write SUM formulas and styling on subtotal rows
+    # Split rows into sections by Generico value (one section per logical group).
+    # Subtotals are computed per-section so multi-Generico sheets (marca_splits)
+    # don't sum across groups.
     # -------------------------------------------------------------------
     n_cols = len(header_cells)
     thin_side = Side(style="thin")
     thin_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
 
-    for subtotal_label, source_rows in subtotal_definitions.items():
-        if subtotal_label not in rows_by_label:
-            continue
-        subtotal_sheet_row = rows_by_label[subtotal_label]
+    sections: list[tuple[str, int, int]] = []  # (generico_value, section_start_row, section_end_row)
+    if "Generico" in df_hoja_ordered.columns:
+        prev_gen = object()
+        sec_start = data_start_row
+        for df_idx, gen_value in enumerate(df_hoja_ordered["Generico"]):
+            sheet_row = data_start_row + df_idx
+            if gen_value != prev_gen and df_idx > 0:
+                sections.append((prev_gen, sec_start, sheet_row - 1))
+                sec_start = sheet_row
+            prev_gen = gen_value
+        sections.append((prev_gen, sec_start, data_end_row))
+    else:
+        sections.append((None, data_start_row, data_end_row))
 
-        fill_color = _SUBTOTAL_FILLS.get(subtotal_label, "D9D9D9")
-        subtotal_fill = PatternFill(
-            start_color=fill_color, end_color=fill_color, fill_type="solid",
-        )
-        subtotal_font = Font(name=_FONT_NAME, bold=True, color=_SUBTOTAL_FONT_COLOR)
+    _NON_SUMMING_LABELS = set(_CC_FAMILY) | {
+        "DIRECTA SUCURSALES", _SUBTOTAL_CC, _SUC_SIN_DIRECTA, _TOTAL_SIN_SMK
+    }
 
-        # Write SUM formulas for numeric columns
-        for col_name in sum_cols:
-            col_letter = col_map.get(col_name)
-            if col_letter is None:
+    for _gen_value, sec_start_row, sec_end_row in sections:
+        # Build label → row map for THIS section only
+        section_rows_by_label: dict[str, int] = {}
+        for sheet_row in range(sec_start_row, sec_end_row + 1):
+            df_idx = sheet_row - data_start_row
+            sucursal = df_hoja_ordered["Sucursal"].iloc[df_idx]
+            if sucursal is not None:
+                section_rows_by_label[sucursal] = sheet_row
+
+        cc_group_labels = [l for l in _CC_FAMILY if l in section_rows_by_label]
+        # Numbered labels in section: keep order, dedupe
+        numbered_labels_unique: list[str] = []
+        seen: set[str] = set()
+        for sheet_row in range(sec_start_row, sec_end_row + 1):
+            df_idx = sheet_row - data_start_row
+            lbl = df_hoja_ordered["Sucursal"].iloc[df_idx]
+            if lbl is None or lbl in _NON_SUMMING_LABELS:
                 continue
-            if not source_rows:
-                formula = None
-            elif len(source_rows) == 1:
-                formula = f"=SUM({col_letter}{source_rows[0]})"
-            else:
-                # Use individual cell references (non-contiguous in general)
-                refs = ",".join(f"{col_letter}{r}" for r in source_rows)
-                formula = f"=SUM({refs})"
+            if lbl not in seen:
+                seen.add(lbl)
+                numbered_labels_unique.append(lbl)
 
-            if formula and col_letter:
-                cell = ws[f"{col_letter}{subtotal_sheet_row}"]
-                cell.value = formula
+        directa_labels = (
+            ["DIRECTA SUCURSALES"] if "DIRECTA SUCURSALES" in section_rows_by_label else []
+        )
 
-        # Write Tend vs Obj (%) formula: =IF(Objetivo=0,"",Tendencia/Objetivo)
-        tend_col = col_map.get("Tend vs Obj (%)")
-        tend_col_num = col_map.get("Tendencia")
-        obj_col_num = col_map.get("Objetivo")
-        if tend_col and tend_col_num and obj_col_num:
-            formula_tend = (
-                f"=IF({obj_col_num}{subtotal_sheet_row}=0,\"\","
-                f"{tend_col_num}{subtotal_sheet_row}/{obj_col_num}{subtotal_sheet_row})"
+        def _rows_for(labels):
+            return sorted(
+                section_rows_by_label[l] for l in labels if l in section_rows_by_label
             )
-            cell_tend = ws[f"{tend_col}{subtotal_sheet_row}"]
-            cell_tend.value = formula_tend
 
-        # Apply bold + fill + border to the entire subtotal row
-        for col_idx in range(1, n_cols + 1):
-            cell = ws.cell(row=subtotal_sheet_row, column=col_idx)
-            cell.font = subtotal_font
-            cell.fill = subtotal_fill
-            cell.border = thin_border
+        subtotal_definitions = {
+            _SUBTOTAL_CC: _rows_for(cc_group_labels),
+            _SUC_SIN_DIRECTA: _rows_for(numbered_labels_unique),
+            _TOTAL_SIN_SMK: (
+                ([section_rows_by_label[_SUBTOTAL_CC]] if _SUBTOTAL_CC in section_rows_by_label else [])
+                + ([section_rows_by_label[_SUC_SIN_DIRECTA]] if _SUC_SIN_DIRECTA in section_rows_by_label else [])
+                + _rows_for(directa_labels)
+            ),
+        }
+
+        for subtotal_label, source_rows in subtotal_definitions.items():
+            if subtotal_label not in section_rows_by_label:
+                continue
+            subtotal_sheet_row = section_rows_by_label[subtotal_label]
+
+            fill_color = _SUBTOTAL_FILLS.get(subtotal_label, "D9D9D9")
+            subtotal_fill = PatternFill(
+                start_color=fill_color, end_color=fill_color, fill_type="solid",
+            )
+            subtotal_font = Font(name=_FONT_NAME, bold=True, color=_SUBTOTAL_FONT_COLOR)
+
+            for col_name in sum_cols:
+                col_letter = col_map.get(col_name)
+                if col_letter is None:
+                    continue
+                if not source_rows:
+                    formula = None
+                elif len(source_rows) == 1:
+                    formula = f"=SUM({col_letter}{source_rows[0]})"
+                else:
+                    refs = ",".join(f"{col_letter}{r}" for r in source_rows)
+                    formula = f"=SUM({refs})"
+
+                if formula and col_letter:
+                    cell = ws[f"{col_letter}{subtotal_sheet_row}"]
+                    cell.value = formula
+
+            tend_col = col_map.get("Tend vs Obj (%)")
+            tend_col_num = col_map.get("Tendencia")
+            obj_col_num = col_map.get("Objetivo")
+            if tend_col and tend_col_num and obj_col_num:
+                formula_tend = (
+                    f"=IF({obj_col_num}{subtotal_sheet_row}=0,\"\","
+                    f"{tend_col_num}{subtotal_sheet_row}/{obj_col_num}{subtotal_sheet_row})"
+                )
+                ws[f"{tend_col}{subtotal_sheet_row}"].value = formula_tend
+
+            for col_idx in range(1, n_cols + 1):
+                cell = ws.cell(row=subtotal_sheet_row, column=col_idx)
+                cell.font = subtotal_font
+                cell.fill = subtotal_fill
+                cell.border = thin_border
 
     # -------------------------------------------------------------------
     # Header styling: dark blue fill, white bold font, thin border
@@ -382,9 +423,15 @@ def _post_write_subtotals_and_heatmap(
         cell.border = thin_border
 
     # -------------------------------------------------------------------
-    # Thin borders on every data cell (preserving existing fonts/colors)
+    # Thin borders on every data cell (skip subtotal rows already styled)
     # -------------------------------------------------------------------
-    subtotal_rows_set = {rows_by_label[lbl] for lbl in _SUBTOTAL_FILLS if lbl in rows_by_label}
+    subtotal_rows_set: set[int] = set()
+    for sec_start_row, sec_end_row in [(s, e) for _g, s, e in sections]:
+        for sheet_row in range(sec_start_row, sec_end_row + 1):
+            df_idx = sheet_row - data_start_row
+            sucursal = df_hoja_ordered["Sucursal"].iloc[df_idx]
+            if sucursal in _SUBTOTAL_FILLS:
+                subtotal_rows_set.add(sheet_row)
     for row_num in range(data_start_row, data_end_row + 1):
         if row_num in subtotal_rows_set:
             continue  # already styled above
@@ -405,6 +452,26 @@ def _post_write_subtotals_and_heatmap(
         ws.conditional_formatting.add(heatmap_range, color_scale)
 
     # -------------------------------------------------------------------
+    # Caveat note row was inserted at the start of this function (row 1).
+    # Now style it: merge across, amber background, bold.
+    # -------------------------------------------------------------------
+    if note:
+        last_col = max(n_cols, 1)
+        ws.merge_cells(
+            start_row=1, start_column=1, end_row=1, end_column=last_col
+        )
+        cell = ws.cell(row=1, column=1, value=note)
+        cell.fill = PatternFill(
+            start_color="FFE699", end_color="FFE699", fill_type="solid"
+        )  # amber
+        cell.font = Font(name=_FONT_NAME, bold=True, color="7F6000")
+        cell.border = Border(
+            left=Side(style="thin"), right=Side(style="thin"),
+            top=Side(style="thin"), bottom=Side(style="thin"),
+        )
+        ws.row_dimensions[1].height = 22
+
+    # -------------------------------------------------------------------
     # Sheet-wide font family override (last pass — preserves bold/color/size)
     # -------------------------------------------------------------------
     for row in ws.iter_rows():
@@ -417,6 +484,178 @@ def _post_write_subtotals_and_heatmap(
                 italic=existing.italic,
                 color=existing.color,
             )
+
+
+def _load_categorias_deposito(path: str) -> list[dict]:
+    """
+    Carga master-data de categorias_deposito desde JSON.
+
+    Path absoluto o relativo (resuelto desde CWD). Cada entrada debe tener
+    'codigo', 'concatenar' y 'division'. Retorna [] ante cualquier error.
+    """
+    p = Path(path)
+    if not p.is_absolute():
+        p = Path.cwd() / p
+    if not p.exists():
+        logger.warning("categorias_deposito source not found: %s — skipping", p)
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("categorias_deposito JSON parse failed (%s) — skipping", exc)
+        return []
+    if not isinstance(data, list):
+        logger.warning(
+            "categorias_deposito JSON must be array, got %s — skipping",
+            type(data).__name__,
+        )
+        return []
+    return data
+
+
+def _build_categorias_sheet(workbook, entradas: list[dict]) -> None:
+    """Crea hoja 'Categorias' con columnas codigo / concatenar / division."""
+    if "Categorias" in workbook.sheetnames:
+        del workbook["Categorias"]
+    ws = workbook.create_sheet("Categorias")
+    ws.append(["codigo", "concatenar", "division"])
+    for entry in entradas:
+        ws.append([
+            entry.get("codigo"),
+            entry.get("concatenar"),
+            entry.get("division"),
+        ])
+
+
+def _add_lookup_columns_to_detalle(ws) -> None:
+    """
+    Agrega columnas 'Concatenar', 'División' y 'Generico' al final de la hoja:
+      - Concatenar  =Serie & Descripción Depósito  (col C & col L)
+      - División    =IFERROR(VLOOKUP(<concat>,Categorias!B:C,2,FALSE),"")
+      - Generico    =IFERROR(VLOOKUP(<articulo>,dim_articulo!A:B,2,FALSE),"")
+                    (Articulo en col R = col 18)
+    """
+    if ws.max_row < 2:
+        return
+    concat_col = ws.max_column + 1
+    division_col = concat_col + 1
+    generico_col = division_col + 1
+    concat_letter = get_column_letter(concat_col)
+
+    ws.cell(1, concat_col).value = "Concatenar"
+    ws.cell(1, division_col).value = "División"
+    ws.cell(1, generico_col).value = "Generico"
+
+    for row in range(2, ws.max_row + 1):
+        ws.cell(row, concat_col).value = f"=C{row}&L{row}"
+        ws.cell(row, division_col).value = (
+            f'=IFERROR(VLOOKUP({concat_letter}{row},Categorias!B:C,2,FALSE),"")'
+        )
+        ws.cell(row, generico_col).value = (
+            f'=IFERROR(VLOOKUP(R{row},dim_articulo!A:B,2,FALSE),"")'
+        )
+
+
+def _add_division_totals(
+    ws,
+    generico_name: str,
+    fecha_desde: str,
+    info_dias: dict,
+    divisions: list[str],
+    detalle_sheet_actual: str | None,
+    detalle_sheet_ma: str | None,
+    detalle_sheet_mmaa: str | None,
+) -> None:
+    """
+    Agrega al pie de una hoja de generico filas de totales por division (SUPERMERCADOS X).
+
+    Cada fila usa SUMIFS contra las hojas de Detalle Movimientos correspondientes,
+    filtrando por (Generico = nombre de la hoja, División = division).
+    Las cols T (Bultos), AD (División) y AE (Generico) tienen que existir en los detalles.
+
+    Columnas de la hoja:
+        A=Sucursal | B=Generico | C=DIA1 | D=DIA2 | E=Total Ventas |
+        F=Tendencia | G=MMAA | H=MA | I=Objetivo | J=Tend vs Obj %
+    """
+    # Buscar fila de header
+    header_row = None
+    for r in range(1, ws.max_row + 1):
+        if ws.cell(r, 1).value == "Sucursal":
+            header_row = r
+            break
+    if header_row is None:
+        return
+
+    # Parsear los headers de DIA1 y DIA2 (formato "dd-mm DiaSemana")
+    def _parse_day_header(value) -> tuple[int, int] | None:
+        if not value:
+            return None
+        first = str(value).split()[0]
+        parts = first.split("-")
+        if len(parts) != 2:
+            return None
+        try:
+            return int(parts[1]), int(parts[0])  # (month, day)
+        except ValueError:
+            return None
+
+    year = int(fecha_desde[:4])
+    dia1 = _parse_day_header(ws.cell(header_row, 3).value)
+    dia2 = _parse_day_header(ws.cell(header_row, 4).value)
+
+    dias_habiles = info_dias.get("Dias Habiles", 0)
+    dias_trans = info_dias.get("Dias Transcurridos", 0)
+
+    last_row = ws.max_row
+    start_row = last_row + 2  # una fila vacia de separacion
+
+    def _sumifs(sheet: str, with_date: tuple[int, int] | None, row: int) -> str:
+        base = (
+            f"=SUMIFS('{sheet}'!T:T,"
+            f"'{sheet}'!AE:AE,B{row},"
+            f"'{sheet}'!AD:AD,A{row}"
+        )
+        if with_date is not None:
+            month, day = with_date
+            base += f",'{sheet}'!F:F,DATE({year},{month},{day})"
+        base += ")"
+        return base
+
+    for i, division in enumerate(divisions):
+        r = start_row + i
+        ws.cell(r, 1).value = division
+        ws.cell(r, 2).value = generico_name
+        if dia1 and detalle_sheet_actual:
+            ws.cell(r, 3).value = _sumifs(detalle_sheet_actual, dia1, r)
+        if dia2 and detalle_sheet_actual:
+            ws.cell(r, 4).value = _sumifs(detalle_sheet_actual, dia2, r)
+        if detalle_sheet_actual:
+            ws.cell(r, 5).value = _sumifs(detalle_sheet_actual, None, r)
+        if dias_trans > 0:
+            ws.cell(r, 6).value = f"=E{r}/{dias_trans}*{dias_habiles}"
+        if detalle_sheet_mmaa:
+            ws.cell(r, 7).value = _sumifs(detalle_sheet_mmaa, None, r)
+        if detalle_sheet_ma:
+            ws.cell(r, 8).value = _sumifs(detalle_sheet_ma, None, r)
+        # I (Objetivo) y J (Tend vs Obj %) quedan en blanco — no hay cupos por division.
+
+
+def _build_dim_articulo_sheet(workbook, df: pd.DataFrame) -> None:
+    """
+    Crea hoja 'dim_articulo' con id_articulo, generico, marca, descripcion.
+    Usada como lookup table para los VLOOKUP en hojas de detalle.
+    """
+    if "dim_articulo" in workbook.sheetnames:
+        del workbook["dim_articulo"]
+    ws = workbook.create_sheet("dim_articulo")
+    ws.append(["id_articulo", "generico", "marca", "des_articulo"])
+    for _, row in df.iterrows():
+        ws.append([
+            row.get("id_articulo"),
+            row.get("generico"),
+            row.get("marca"),
+            row.get("des_articulo"),
+        ])
 
 
 class ResumenMensualService(BaseService):
@@ -447,26 +686,50 @@ class ResumenMensualService(BaseService):
         # Normalizar genericos: lista vacia se trata como None (traer todos)
         genericos = config.genericos if config.genericos else None
 
+        # PRVTA exclusion: None → default; explicit [] disables; explicit list overrides
+        sin_prvta = (
+            config.genericos_sin_prvta
+            if config.genericos_sin_prvta is not None
+            else list(_DEFAULT_GENERICOS_SIN_PRVTA)
+        )
+
+        marca_splits = config.marca_splits or {}
+
         # -----------------------------------------------------------------
         # 1. Fetch de los 4 DataFrames
         # -----------------------------------------------------------------
         df_ventas_mes = self.data_loader.get_ventas_resumen_mensual(
-            config.fecha_desde, config.fecha_hasta, genericos
+            config.fecha_desde,
+            config.fecha_hasta,
+            genericos,
+            genericos_sin_prvta=sin_prvta,
+            marca_splits=marca_splits or None,
         )
         df_dias = self.data_loader.get_ventas_ultimos_dias_habiles(
-            config.fecha_desde, config.fecha_hasta, genericos
+            config.fecha_desde,
+            config.fecha_hasta,
+            genericos,
+            genericos_sin_prvta=sin_prvta,
+            marca_splits=marca_splits or None,
         )
 
         try:
             df_ventas_ma = self.data_loader.get_ventas_mes_anterior(
-                config.fecha_desde, genericos
+                config.fecha_desde,
+                genericos,
+                genericos_sin_prvta=sin_prvta,
+                marca_splits=marca_splits or None,
             )
         except Exception:
             df_ventas_ma = pd.DataFrame(columns=["sucursal", "generico", "cantidad"])
 
         try:
             df_ventas_aa = self.data_loader.get_ventas_mismo_mes_anio_anterior(
-                config.fecha_desde, config.fecha_hasta, genericos
+                config.fecha_desde,
+                config.fecha_hasta,
+                genericos,
+                genericos_sin_prvta=sin_prvta,
+                marca_splits=marca_splits or None,
             )
         except Exception:
             df_ventas_aa = pd.DataFrame(columns=["sucursal", "generico", "cantidad"])
@@ -571,10 +834,6 @@ class ResumenMensualService(BaseService):
 
         writer = ExcelWriter(nombre, output_dir=out, merge_with=merge_target)
 
-        genericos_resultado = (
-            df_resultado["Generico"].unique().tolist() if not df_resultado.empty else []
-        )
-
         # Detectar nombres dinámicos de columnas N-1 y N-2 (posiciones 2 y 3)
         cols = list(df_resultado.columns)
         col_n1 = cols[2] if len(cols) > 2 else "Vtas Dia N-1"
@@ -583,33 +842,152 @@ class ResumenMensualService(BaseService):
         style = _crear_estilo_resumen(info_dias, col_n1, col_n2)
         summary_rows_count = len(info_dias)  # used for row offset calculation
 
-        for generico in genericos_resultado:
-            df_hoja = df_resultado[df_resultado["Generico"] == generico].copy()
-            # T-020: inject subtotal rows (ordered)
-            df_hoja_ordered = _ordenar_e_inyectar_subtotales(df_hoja)
-            sheet_name = generico[:31]  # Excel max 31 caracteres
-            ws = writer.add_sheet(df_hoja_ordered, sheet_name=sheet_name, style=style)
-            # T-020/T-022/T-023: post-write — resolve SUM formulas, heatmap, subtotal styling
-            _post_write_subtotals_and_heatmap(ws, df_hoja_ordered, summary_rows_count)
+        # Map de genericos sinteticos (resultado de marca_splits) -> generico logico (sheet name)
+        synthetic_to_logical: dict[str, str] = {}
+        for logical_gen, marcas in (marca_splits or {}).items():
+            synthetic_to_logical[f"{logical_gen} (sin {', '.join(marcas)})"] = logical_gen
+            for marca in marcas:
+                synthetic_to_logical[marca] = logical_gen
 
-        # T-09: Import Detalle Movimientos sheet from external source
-        if config.detalle_movimientos_path:
-            src_path = Path(config.detalle_movimientos_path)
+        # Build ordered list of logical genericos, preserving original order from config
+        if df_resultado.empty:
+            logical_genericos = []
+        else:
+            seen: set[str] = set()
+            logical_genericos = []
+            for syn in df_resultado["Generico"].tolist():
+                logical = synthetic_to_logical.get(syn, syn)
+                if logical not in seen:
+                    seen.add(logical)
+                    logical_genericos.append(logical)
+
+        for logical_gen in logical_genericos:
+            # Find all synthetic generico values that belong to this logical sheet
+            if logical_gen in (marca_splits or {}):
+                marcas = marca_splits[logical_gen]
+                # Section order: "sin {marcas}" first, then each marca
+                section_order = [f"{logical_gen} (sin {', '.join(marcas)})"] + list(marcas)
+                # Filter and only keep those actually present
+                section_order = [s for s in section_order if s in df_resultado["Generico"].values]
+            else:
+                section_order = [logical_gen]
+
+            # Build sectioned dataframe: each section's rows ordered + subtotals injected
+            section_dfs = []
+            for syn_gen in section_order:
+                df_section = df_resultado[df_resultado["Generico"] == syn_gen].copy()
+                if df_section.empty:
+                    continue
+                section_dfs.append(_ordenar_e_inyectar_subtotales(df_section))
+
+            if not section_dfs:
+                continue
+
+            df_hoja_ordered = pd.concat(section_dfs, ignore_index=True)
+            sheet_name = logical_gen[:31]  # Excel max 31 caracteres
+            ws = writer.add_sheet(df_hoja_ordered, sheet_name=sheet_name, style=style)
+
+            # Caveat note for genericos whose totals exclude PRVTA
+            note = (
+                f"{logical_gen}: cantidades excluyen documentos PRVTA (facturas presupuesto)"
+                if logical_gen in sin_prvta
+                else None
+            )
+            # T-020/T-022/T-023: post-write — resolve SUM formulas, heatmap, subtotal styling
+            _post_write_subtotals_and_heatmap(
+                ws, df_hoja_ordered, summary_rows_count, note=note
+            )
+
+        # T-09: Import Detalle Movimientos sheets from external sources
+        # 3 hojas: actual + mes anterior (MA) + mismo mes año anterior (MMAA).
+        detalle_imports = [
+            (config.detalle_movimientos_path, "Detalle Movimientos"),
+            (config.detalle_movimientos_ma_path, "Detalle Movimientos MA"),
+            (config.detalle_movimientos_mmaa_path, "Detalle Movimientos MMAA"),
+        ]
+        imported_detalles: list[str] = []
+        for src_str, sheet_name in detalle_imports:
+            if not src_str:
+                continue
+            src_path = Path(src_str)
             try:
                 rows_imported = import_xlsx_as_sheet(
-                    writer.workbook, src_path, "Detalle Movimientos"
+                    writer.workbook, src_path, sheet_name
                 )
+                imported_detalles.append(sheet_name)
                 logger.info(
-                    "Detalle Movimientos imported: %d rows from %s", rows_imported, src_path
+                    "%s imported: %d rows from %s", sheet_name, rows_imported, src_path
                 )
             except FileNotFoundError:
                 logger.warning(
-                    "detalle_movimientos source not found: %s — skipping", src_path
+                    "%s source not found: %s — skipping", sheet_name, src_path
                 )
             except Exception as exc:
                 logger.warning(
-                    "detalle_movimientos import failed (%s) — skipping", exc
+                    "%s import failed (%s) — skipping", sheet_name, exc
                 )
+
+        # T-10: dim_articulo + Categorias deposito → hojas lookup + columns en cada Detalle.
+        if imported_detalles:
+            # dim_articulo (siempre que haya al menos 1 detalle importado)
+            try:
+                df_dim = self.data_loader.get_dim_articulo()
+                if not df_dim.empty:
+                    _build_dim_articulo_sheet(writer.workbook, df_dim)
+                    logger.info("dim_articulo sheet escrita: %d filas", len(df_dim))
+            except Exception as exc:
+                logger.warning("dim_articulo fetch failed (%s) — skipping", exc)
+
+            # Categorias (solo si hay path configurado)
+            if config.categorias_deposito_path:
+                entradas = _load_categorias_deposito(config.categorias_deposito_path)
+                if entradas:
+                    _build_categorias_sheet(writer.workbook, entradas)
+
+            # Lookup columns en cada hoja de detalle
+            for sheet_name in imported_detalles:
+                if sheet_name in writer.workbook.sheetnames:
+                    _add_lookup_columns_to_detalle(writer.workbook[sheet_name])
+            logger.info(
+                "Lookup columns (Concatenar/División/Generico) aplicados a %d hojas de detalle",
+                len(imported_detalles),
+            )
+
+            # T-11: Totales por division SUPERMERCADOS al pie de cada hoja de generico.
+            # Solo si tenemos categorias_deposito (de donde sacamos la lista de divisiones)
+            # y al menos detalle_movimientos del periodo actual importado.
+            if config.categorias_deposito_path and "Detalle Movimientos" in imported_detalles:
+                entradas_for_div = _load_categorias_deposito(config.categorias_deposito_path)
+                if entradas_for_div:
+                    # divisiones unicas, preservando orden de aparicion
+                    seen = {}
+                    for e in entradas_for_div:
+                        d = e.get("division")
+                        if d and d not in seen:
+                            seen[d] = True
+                    divisions = list(seen.keys())
+
+                    excluded = {
+                        "Sheet1", "dim_articulo", "Categorias",
+                        *imported_detalles,
+                    }
+                    for sheet_name in list(writer.workbook.sheetnames):
+                        if sheet_name in excluded:
+                            continue
+                        _add_division_totals(
+                            writer.workbook[sheet_name],
+                            generico_name=sheet_name,
+                            fecha_desde=config.fecha_desde,
+                            info_dias=info_dias,
+                            divisions=divisions,
+                            detalle_sheet_actual="Detalle Movimientos" if "Detalle Movimientos" in imported_detalles else None,
+                            detalle_sheet_ma="Detalle Movimientos MA" if "Detalle Movimientos MA" in imported_detalles else None,
+                            detalle_sheet_mmaa="Detalle Movimientos MMAA" if "Detalle Movimientos MMAA" in imported_detalles else None,
+                        )
+                    logger.info(
+                        "Totales por division agregados a hojas de generico (divisiones: %s)",
+                        divisions,
+                    )
 
         ruta = writer.save()
 
@@ -624,6 +1002,6 @@ class ResumenMensualService(BaseService):
             ruta_archivo=ruta,
             registros_procesados=len(df_resultado),
             sucursales=sucursales_unicas,
-            genericos_incluidos=genericos_resultado,
-            hojas=[g[:31] for g in genericos_resultado],
+            genericos_incluidos=logical_genericos,
+            hojas=[g[:31] for g in logical_genericos],
         )

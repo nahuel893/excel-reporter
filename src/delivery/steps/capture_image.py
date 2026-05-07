@@ -48,6 +48,7 @@ class CaptureImageStep(DeliveryStep):
                     output_dir=artifact.ruta_excel.parent,
                 )
                 artifact.rutas_imagenes.append(png_path)
+                artifact.nombres_hojas.append(cfg.hoja)
                 produced.append(f"{cfg.hoja}[{renderer_name}]:{png_path.name}")
             except (RuntimeError, ImportError) as exc:
                 # Dep faltante en el backend elegido → no tiene sentido seguir

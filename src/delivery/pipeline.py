@@ -40,10 +40,20 @@ class EmailConfig(BaseModel):
         return v
 
 
+class Recipient(BaseModel):
+    """Metadata de un destinatario WhatsApp para personalizar captions."""
+    target: str           # JID/numero/grupo enviado al wpp-service
+    is_group: bool = False
+    contact_name: str | None = None
+
+
 class WhatsAppConfig(BaseModel):
     """Configuracion para envio por WhatsApp."""
-    grupos: list[str]  # Nombres de grupos o contactos individuales
+    grupos: list[str]  # Nombres de grupos o contactos individuales (legacy / cardinal)
     enviar_como: Literal["imagen", "archivo"] = "imagen"
+    # Opcional: metadata paralela a `grupos` para personalizar captions.
+    # Misma longitud y orden que `grupos`. Si esta vacia, se usa caption default.
+    recipients_meta: list[Recipient] = []
 
 
 class DeliveryConfig(BaseModel):
@@ -83,6 +93,7 @@ class ReportArtifact:
     """Artefactos generados por un reporte (archivos en disco)."""
     ruta_excel: Path
     rutas_imagenes: list[Path] = field(default_factory=list)
+    nombres_hojas: list[str] = field(default_factory=list)  # paralelo a rutas_imagenes — sheet de cada imagen
     metadata: dict = field(default_factory=dict)
 
     @property

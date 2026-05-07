@@ -151,7 +151,9 @@ class TestResumenMensual:
             service.generar_reporte(config)
 
         loader.get_ventas_resumen_mensual.assert_called_once_with(
-            "2026-02-01", "2026-02-28", ["CERVEZAS", "AGUAS DANONE"]
+            "2026-02-01", "2026-02-28", ["CERVEZAS", "AGUAS DANONE"],
+            genericos_sin_prvta=["FRATELLI B"],
+            marca_splits=None,
         )
 
     # -----------------------------------------------------------------------
@@ -378,7 +380,9 @@ class TestResumenMensual:
         # El servicio pasa fecha_desde y fecha_hasta al metodo del DataLoader
         # El DataLoader calcula internamente el desplazamiento; el servicio pasa las fechas originales
         loader.get_ventas_mismo_mes_anio_anterior.assert_called_once_with(
-            "2026-02-01", "2026-02-28", None
+            "2026-02-01", "2026-02-28", None,
+            genericos_sin_prvta=["FRATELLI B"],
+            marca_splits=None,
         )
 
     # -----------------------------------------------------------------------
@@ -596,7 +600,9 @@ class TestResumenMensual:
 
         # Se debe llamar con None, no con []
         loader.get_ventas_resumen_mensual.assert_called_once_with(
-            "2026-02-01", "2026-02-28", None
+            "2026-02-01", "2026-02-28", None,
+            genericos_sin_prvta=["FRATELLI B"],
+            marca_splits=None,
         )
 
     # -----------------------------------------------------------------------
@@ -648,10 +654,14 @@ class TestResumenMensual:
                 "2026-02-01", "2026-02-28"
             )
 
+        # With universe expansion: every (sucursal × generico) appears.
+        # Universe of sucursales: {SUC1, SUC2}; universe of genericos: {AGUAS DANONE, CERVEZAS, VINOS CCU}.
+        # Expected order: by Sucursal asc, then Generico asc.
         sucursales = resultado["Sucursal"].tolist()
         genericos = resultado["Generico"].tolist()
 
-        assert sucursales == ["SUC1", "SUC1", "SUC2"]
-        assert genericos[0] == "AGUAS DANONE"
-        assert genericos[1] == "VINOS CCU"
-        assert genericos[2] == "CERVEZAS"
+        assert sucursales == ["SUC1", "SUC1", "SUC1", "SUC2", "SUC2", "SUC2"]
+        assert genericos == [
+            "AGUAS DANONE", "CERVEZAS", "VINOS CCU",
+            "AGUAS DANONE", "CERVEZAS", "VINOS CCU",
+        ]

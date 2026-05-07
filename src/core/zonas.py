@@ -9,16 +9,20 @@ import pandas as pd
 from config.settings import ZONAS_VIRTUALES
 
 
-def aplicar_zonas_virtuales(df: pd.DataFrame) -> pd.DataFrame:
+def aplicar_zonas_virtuales(
+    df: pd.DataFrame,
+    zonas_config: dict | None = None,
+) -> pd.DataFrame:
     """
     Renombra sucursal en filas que pertenecen a zonas virtuales segun id_ruta.
 
-    Para cada zona virtual definida en ZONAS_VIRTUALES, las filas cuya sucursal
-    coincide con sucursal_real y cuyo id_ruta esta en la lista de rutas se renombran.
-    Luego elimina la columna id_ruta y reagrupa los datos.
+    Para cada zona virtual definida en `zonas_config` (default: ZONAS_VIRTUALES global),
+    las filas cuya sucursal coincide con sucursal_real y cuyo id_ruta esta en la
+    lista de rutas se renombran. Luego elimina la columna id_ruta y reagrupa.
 
     Args:
         df: DataFrame con columnas 'sucursal' e 'id_ruta'
+        zonas_config: Override del mapeo de zonas. None usa el global de settings.
 
     Returns:
         DataFrame sin columna id_ruta, con sucursales renombradas
@@ -26,8 +30,9 @@ def aplicar_zonas_virtuales(df: pd.DataFrame) -> pd.DataFrame:
     if "id_ruta" not in df.columns:
         return df
 
+    zonas = zonas_config if zonas_config is not None else ZONAS_VIRTUALES
     df = df.copy()
-    for zona_nombre, zona_config in ZONAS_VIRTUALES.items():
+    for zona_nombre, zona_config in zonas.items():
         mask = (
             (df["sucursal"] == zona_config["sucursal_real"])
             & (df["id_ruta"].isin(zona_config["rutas"]))
@@ -48,14 +53,22 @@ def aplicar_zonas_virtuales(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def expandir_sucursales(sucursales_list: list[str]) -> list[str]:
+def expandir_sucursales(
+    sucursales_list: list[str],
+    zonas_config: dict | None = None,
+) -> list[str]:
     """
     Expande sucursales reales a incluir sus zonas virtuales.
 
     Si un supervisor tiene 'CASA CENTRAL', se agrega 'VALLE SALTA' automaticamente.
+
+    Args:
+        sucursales_list: Lista de sucursales del supervisor.
+        zonas_config: Override del mapeo de zonas. None usa el global de settings.
     """
+    zonas = zonas_config if zonas_config is not None else ZONAS_VIRTUALES
     expandidas = list(sucursales_list)
-    for zona_nombre, zona_config in ZONAS_VIRTUALES.items():
+    for zona_nombre, zona_config in zonas.items():
         if zona_config["sucursal_real"] in expandidas and zona_nombre not in expandidas:
             expandidas.append(zona_nombre)
     return expandidas

@@ -1,13 +1,15 @@
 {
     "tipo": "ventas",
     "filtros": {
-        "fecha_desde": "2026-04-01",
-        "fecha_hasta": "2026-04-30",
+        "fecha_desde": "2026-05-01",
+        "fecha_hasta": "2026-05-06",
         "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
-        "con_slicers": true,
+        "con_slicers": false,
         "con_cobertura": true,
-        "enviar_email": false,
-        "enviar_whatsapp": false
+        "con_montos": false,
+        "enviar_email": true,
+        "enviar_whatsapp": true,
+        "whatsapp_enviar_como": "archivo"
     },
     "reportes": [
         {
@@ -23,7 +25,7 @@
                 ]
             },
             "enviar_a": {
-                "Walter Vilte": { "via": ["email"] }
+                "Sebastian Dellamea": { "via": ["whatsapp"] }
             }
         },
         {
@@ -33,7 +35,7 @@
                 "sucursales": ["CASA CENTRAL"]
             },
             "enviar_a": {
-                "Antonio Cabrerizo": { "via": ["email"] }
+                "Gonzalo Farah": { "via": ["whatsapp"] }
             }
         },
         {

@@ -193,6 +193,7 @@ def _run_ventas_report(report, merged: dict) -> list[tuple[Path, dict]]:
         nombre_archivo=report.nombre,
         con_slicers=merged["con_slicers"],
         con_cobertura=merged["con_cobertura"],
+        con_montos=merged.get("con_montos", True),
     )
 
     service = VentasService()
@@ -237,6 +238,11 @@ def _run_resumen_report(report, merged: dict) -> list[tuple[Path, dict]]:
         genericos=merged["genericos"],
         nombre_archivo=report.nombre,
         detalle_movimientos_path=merged.get("detalle_movimientos_path"),
+        detalle_movimientos_ma_path=merged.get("detalle_movimientos_ma_path"),
+        detalle_movimientos_mmaa_path=merged.get("detalle_movimientos_mmaa_path"),
+        categorias_deposito_path=merged.get("categorias_deposito_path"),
+        genericos_sin_prvta=merged.get("genericos_sin_prvta"),
+        marca_splits=merged.get("marca_splits"),
     )
 
     result = ResumenMensualService().generar_reporte(config)

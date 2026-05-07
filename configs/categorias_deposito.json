@@ -1,0 +1,8 @@
+[
+    { "codigo": 27, "concatenar": "27DEPOSITO DM SALTA-DISTRIBUIDOR", "division": "SUPERMERCADOS SALTA" },
+    { "codigo": 31, "concatenar": "31DEP. ORAN", "division": "SUPERMERCADOS INTERIOR" },
+    { "codigo": 45, "concatenar": "45DEP. LIBERTADOR", "division": "SUPERMERCADOS JUJUY" },
+    { "codigo": 13, "concatenar": "13DEP. TARTAGAL", "division": "SUPERMERCADOS INTERIOR" },
+    { "codigo": 29, "concatenar": "29DEP. PERICO", "division": "SUPERMERCADOS JUJUY" },
+    { "codigo": 28, "concatenar": "28DEP. SAN PEDRO", "division": "SUPERMERCADOS JUJUY" }
+]

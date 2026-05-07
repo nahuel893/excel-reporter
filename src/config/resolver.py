@@ -21,6 +21,7 @@ from src.delivery.pipeline import (
     CaptureConfig,
     DeliveryConfig,
     EmailConfig,
+    Recipient,
     WhatsAppConfig,
 )
 
@@ -126,6 +127,7 @@ def resolve_delivery(
     email_recipients: list[str] = []
     email_cc: list[str] = []
     whatsapp_targets: list[str] = []
+    whatsapp_recipients_meta: list[Recipient] = []
 
     for contact_name, target in (effective_enviar_a or {}).items():
         contact = contactos.get(contact_name)
@@ -152,8 +154,18 @@ def resolve_delivery(
         if "whatsapp" in target.via and enviar_whatsapp:
             if contact.whatsapp_grupo:
                 whatsapp_targets.append(contact.whatsapp_grupo)
+                whatsapp_recipients_meta.append(Recipient(
+                    target=contact.whatsapp_grupo,
+                    is_group=True,
+                    contact_name=contact_name,
+                ))
             elif contact.telefono:
                 whatsapp_targets.append(contact.telefono)
+                whatsapp_recipients_meta.append(Recipient(
+                    target=contact.telefono,
+                    is_group=False,
+                    contact_name=contact_name,
+                ))
             else:
                 logger.warning(
                     "Contact '%s' has via 'whatsapp' but no telefono or whatsapp_grupo",
@@ -180,7 +192,11 @@ def resolve_delivery(
         capture_image=capture_list[0] if capture_list else None,  # legacy field, first only
         capture_images=capture_list,
         email=EmailConfig(destinatarios=email_recipients, cc=email_cc, asunto=report.asunto_email, adjuntos=email_adjuntos or ["excel"]) if email_recipients else None,
-        whatsapp=WhatsAppConfig(grupos=whatsapp_targets, enviar_como=whatsapp_enviar_como) if whatsapp_targets else None,
+        whatsapp=WhatsAppConfig(
+            grupos=whatsapp_targets,
+            enviar_como=whatsapp_enviar_como,
+            recipients_meta=whatsapp_recipients_meta,
+        ) if whatsapp_targets else None,
     )
 
 
@@ -202,6 +218,7 @@ def merge_filters(
         "categorias": global_f.categorias,
         "con_slicers": global_f.con_slicers,
         "con_cobertura": global_f.con_cobertura,
+        "con_montos": global_f.con_montos,
         "enviar_email": global_f.enviar_email,
         "enviar_whatsapp": global_f.enviar_whatsapp,
         "supervisores": None,
@@ -213,6 +230,11 @@ def merge_filters(
         "whatsapp_enviar_como": global_f.whatsapp_enviar_como,
         "email_adjuntos": global_f.email_adjuntos,
         "detalle_movimientos_path": global_f.detalle_movimientos_path,
+        "detalle_movimientos_ma_path": global_f.detalle_movimientos_ma_path,
+        "detalle_movimientos_mmaa_path": global_f.detalle_movimientos_mmaa_path,
+        "categorias_deposito_path": global_f.categorias_deposito_path,
+        "genericos_sin_prvta": global_f.genericos_sin_prvta,
+        "marca_splits": global_f.marca_splits,
     }
     if report_f:
         if report_f.genericos is not None:
@@ -223,6 +245,8 @@ def merge_filters(
             merged["con_slicers"] = report_f.con_slicers
         if report_f.con_cobertura is not None:
             merged["con_cobertura"] = report_f.con_cobertura
+        if report_f.con_montos is not None:
+            merged["con_montos"] = report_f.con_montos
         if report_f.enviar_email is not None:
             merged["enviar_email"] = report_f.enviar_email
         if report_f.enviar_whatsapp is not None:
