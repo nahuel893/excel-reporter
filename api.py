@@ -70,7 +70,7 @@ app.include_router(mgmt_configs_router)
 
 @app.on_event("startup")
 async def _startup():
-    """Initialize DB, recover interrupted runs, start scheduler."""
+    """Initialize DB, recover interrupted runs, start scheduler, mount BD Agent."""
     from src.api.db import get_default_engine, init_db, recover_interrupted_runs
     from src.api.runner import RunRegistry
     from src.api.scheduler import build_scheduler, seed_daily_master_job
@@ -97,6 +97,20 @@ async def _startup():
     except Exception as exc:
         logger.warning("Scheduler could not start: %s", exc)
         app.state.scheduler = None
+
+    # 4. BD Agent (optional — skipped if GEMINI_API_KEY or AGENT_DB_URL are absent)
+    try:
+        from bd_agent.wiring import build_agent_runtime
+        runtime = build_agent_runtime()
+        if runtime is not None:
+            app.include_router(runtime.router, prefix="")
+            app.state.bd_agent_runtime = runtime
+            logger.info("BD Agent mounted at /agent")
+        else:
+            app.state.bd_agent_runtime = None
+    except Exception as exc:
+        logger.warning("BD Agent startup error: %s — /agent router not mounted.", exc)
+        app.state.bd_agent_runtime = None
 
 
 @app.on_event("shutdown")
