@@ -155,4 +155,18 @@ def make_router(
         logger.info("contacts_reloaded_via_endpoint")
         return {"ok": True, "action": "contacts_reloaded"}
 
+    @router.get(
+        "/agent/metrics",
+        summary="BD Agent metrics snapshot",
+        status_code=200,
+    )
+    async def get_metrics_endpoint():
+        """Return current in-memory metrics counters (T-111).
+
+        Counters include: messages_received, messages_sent, tool_calls_by_name,
+        errors_by_type, tokens_in_total, tokens_out_total, uptime_seconds.
+        """
+        from bd_agent.observability.metrics import get_metrics
+        return get_metrics().snapshot()
+
     return router

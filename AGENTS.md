@@ -370,9 +370,41 @@ curl -X POST http://localhost:8000/agent/reload-contacts
 curl -X POST http://localhost:8000/agent/reload-schema
 ```
 
-**Ver uso de rate-limit**: no hay UI aun. Revisar logs de la aplicacion buscando mensajes del `SafetyGuard`.
+**Ver metricas en tiempo real**:
+```bash
+curl http://localhost:8000/agent/metrics
+```
+Devuelve un JSON con `messages_received`, `messages_sent`, `tool_calls_by_name`, `tokens_in_total`, `tokens_out_total`, `uptime_seconds` y mas.
+
+**Verificar entorno antes de iniciar** (smoke test):
+```bash
+python -m bd_agent.scripts.smoke_test
+```
+Verifica env vars, ping a la BD, validador sqlglot, y estado de `whatsapp-service`. Sale con codigo 0 si todo pasa.
+
+**Ver uso de rate-limit**: revisar logs de la aplicacion buscando `event_type: "daily_limit_reached"`. Los logs son JSON estructurado — filtrar por `jid_hash` para seguir a un contacto sin exponer el JID real.
 
 **Saludo diario automatico**: el agente envia un saludo a contactos activos (ultima interaccion < 1h) de lunes a viernes a las 08:00 hora Salta, via APScheduler montado en `api.py`.
+
+### Observabilidad
+
+Cada evento del agente se registra como JSON de una sola linea:
+- `inbound_message` — mensaje recibido (con `jid_hash`, `text_len`)
+- `tool_call` — herramienta invocada (con `tool_name`, `duration_ms`, `is_error`)
+- `outbound_message` — respuesta enviada (con `tokens_in`, `tokens_out`, `duration_ms`)
+
+Los JIDs **nunca** aparecen en los logs: solo el `jid_hash` (SHA-256 de 8 chars) para privacidad.
+
+### Documentacion tecnica
+
+Ver `docs/bd_agent/README.md` para:
+- Layout completo del modulo
+- Contratos de los Protocolos (DatabaseGateway, MessagingGateway, etc.)
+- Flujo de datos completo de un turno
+- Capas de seguridad SQL (triple defensa)
+- Estrategia de testing + fakes disponibles
+- Receta para extraer bd_agent como proyecto independiente
+- Limitaciones conocidas (v1)
 
 ### Costo estimado
 

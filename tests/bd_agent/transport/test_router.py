@@ -213,6 +213,35 @@ def test_reload_contacts_calls_repo_reload(client):
 
 
 # ---------------------------------------------------------------------------
+# GET /agent/metrics
+# ---------------------------------------------------------------------------
+
+def test_metrics_endpoint_returns_200(client):
+    """T-111: GET /agent/metrics returns 200 with metrics snapshot."""
+    tc, _, _, _ = client
+    resp = tc.get("/agent/metrics")
+    assert resp.status_code == 200
+
+
+def test_metrics_endpoint_returns_expected_keys(client):
+    """T-111: GET /agent/metrics returns all expected counter keys."""
+    tc, _, _, _ = client
+    resp = tc.get("/agent/metrics")
+    data = resp.json()
+    expected_keys = {
+        "messages_received",
+        "messages_sent",
+        "tool_calls_by_name",
+        "errors_by_type",
+        "errors_total",
+        "tokens_in_total",
+        "tokens_out_total",
+        "uptime_seconds",
+    }
+    assert expected_keys.issubset(set(data.keys()))
+
+
+# ---------------------------------------------------------------------------
 # No imports from src.*
 # ---------------------------------------------------------------------------
 
