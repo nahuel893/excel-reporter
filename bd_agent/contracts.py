@@ -136,3 +136,16 @@ class LLMProvider(Protocol):
         tools: list[dict],  # provider-native tool spec
         max_output_tokens: int = 1024,
     ) -> LLMResponse: ...
+
+
+@runtime_checkable
+class LastActivityStore(Protocol):
+    """Tracks the last time a JID was contacted by the agent.
+
+    Used by GreetingJob to avoid double-greeting a contact who already received
+    a reply in the last hour (RF-053).
+    """
+
+    def last_seen(self, jid: str) -> datetime | None: ...
+
+    def record(self, jid: str, when: datetime) -> None: ...

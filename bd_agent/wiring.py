@@ -40,12 +40,15 @@ class AgentRuntime:
         contacts_repo: JsonContactsRepo — the live allowlist.
         db_gateway:    PgDatabaseGateway — DB access + schema doc.
         router:        FastAPI APIRouter — ready to mount at ``/agent``.
+        messaging:     MessagingGateway — outbound WhatsApp transport (shared
+                       between AgentTurn and GreetingJob).
     """
 
     agent_turn: object
     contacts_repo: object
     db_gateway: object
     router: object
+    messaging: object = dataclasses.field(default=None)
 
 
 def build_agent_runtime(
@@ -222,4 +225,99 @@ def _build(
         contacts_repo=contacts_repo,
         db_gateway=db_gateway,
         router=router,
+        messaging=messaging,
     )
+
+
+# ---------------------------------------------------------------------------
+# Greeting job registration (T-091)
+# ---------------------------------------------------------------------------
+
+
+def register_greeting_job(scheduler, runtime: Optional[AgentRuntime]) -> None:
+    """Register the daily greeting cron job on *scheduler*.
+
+    If *runtime* is None (agent not configured), this is a safe no-op.
+
+    Args:
+        scheduler: An APScheduler BackgroundScheduler instance.
+        runtime:   The AgentRuntime built by build_agent_runtime(), or None.
+
+    The job fires at 08:00 Mon–Fri in Salta TZ (``greeting-agent`` ID).
+    """
+    if runtime is None:
+        logger.warning(
+            "register_greeting_job: runtime is None — greeting job NOT registered."
+        )
+        return
+
+    try:
+        from apscheduler.triggers.cron import CronTrigger
+
+        from bd_agent.safety.active_hours import ActiveHoursGuard
+        from bd_agent.safety.rate_limiter import RateLimiter
+        from bd_agent.scheduler.greeting import (
+            InMemoryLastActivityStore,
+            build_greeting_job,
+        )
+
+        # Read active-hours settings from the contacts JSON (same as _build)
+        import json
+        from pathlib import Path
+
+        contacts_path = _DEFAULT_CONTACTS_PATH
+        try:
+            raw = json.loads(contacts_path.read_text(encoding="utf-8"))
+            settings = raw.get("settings", {})
+        except Exception:
+            settings = {}
+
+        active_hours_start = settings.get("active_hours_start", "07:00")
+        active_hours_end = settings.get("active_hours_end", "22:00")
+        timezone_str = settings.get("timezone", "America/Argentina/Salta")
+
+        active_hours = ActiveHoursGuard(
+            start=active_hours_start,
+            end=active_hours_end,
+            tz=timezone_str,
+        )
+
+        rate_limiter = RateLimiter(
+            daily_limit_resolver=lambda jid: (
+                c.daily_message_limit
+                if (c := runtime.contacts_repo.get(jid)) is not None
+                else 100
+            )
+        )
+
+        activity_store = InMemoryLastActivityStore()
+
+        greeting_job = build_greeting_job(
+            contacts_repo=runtime.contacts_repo,
+            messaging=runtime.messaging,
+            active_hours=active_hours,
+            rate_limiter=rate_limiter,
+            activity_store=activity_store,
+        )
+
+        trigger = CronTrigger(
+            hour=8,
+            minute=0,
+            day_of_week="mon-fri",
+            timezone=timezone_str,
+        )
+
+        scheduler.add_job(
+            func=greeting_job.run,
+            trigger=trigger,
+            id="greeting-agent",
+            replace_existing=True,
+            max_instances=1,
+        )
+        logger.info("Registered 'greeting-agent' cron job at 08:00 Mon-Fri Salta TZ")
+
+    except Exception as exc:
+        logger.warning(
+            "register_greeting_job: failed to register — %s. Greeting job NOT active.",
+            exc,
+        )
