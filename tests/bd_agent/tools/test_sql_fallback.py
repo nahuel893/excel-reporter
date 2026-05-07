@@ -14,6 +14,11 @@ Covers:
 """
 from __future__ import annotations
 
+import pytest
+
+# Skip entire module if sqlglot is not installed (SUGGESTION-1)
+pytest.importorskip("sqlglot")
+
 import json
 from typing import Any
 from unittest.mock import MagicMock

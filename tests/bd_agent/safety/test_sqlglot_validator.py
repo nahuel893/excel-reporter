@@ -7,6 +7,9 @@ TDD cycle: RED first (sqlglot_validator.py does not exist) → GREEN → REFACTO
 """
 import pytest
 
+# Skip entire module if sqlglot is not installed (SUGGESTION-1)
+pytest.importorskip("sqlglot")
+
 
 # ---------------------------------------------------------------------------
 # Attack vectors — MUST be rejected

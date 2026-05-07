@@ -14,7 +14,9 @@ import re
 from pathlib import Path
 
 import pytest
-import sqlglot
+
+# Skip entire module if sqlglot is not installed (SUGGESTION-2)
+sqlglot = pytest.importorskip("sqlglot")
 
 # Path to the SQL script under test
 SQL_FILE = Path(__file__).parent.parent / "scripts" / "sql" / "agent_user.sql"

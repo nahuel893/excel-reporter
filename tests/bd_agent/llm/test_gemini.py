@@ -12,6 +12,9 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+# Skip entire module if google-genai is not installed (SUGGESTION-1)
+pytest.importorskip("google.genai")
+
 from bd_agent.llm.provider import LLMMessage, LLMResponse, LLMToolCall, LLMProvider
 
 

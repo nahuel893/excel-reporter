@@ -171,3 +171,40 @@ def get_bd_agent_logger() -> BDAgentLogger:
     if _singleton is None:
         _singleton = BDAgentLogger()
     return _singleton
+
+
+# ---------------------------------------------------------------------------
+# RF-091 — Rotating error log handler
+# ---------------------------------------------------------------------------
+
+
+def setup_error_log_handler(
+    log_path,
+    max_bytes: int = 10 * 1024 * 1024,
+    backup_count: int = 3,
+) -> logging.handlers.RotatingFileHandler:
+    """Create and return a RotatingFileHandler for ERROR-level events (RF-091).
+
+    The handler writes ERROR and above to *log_path*.  The file rotates when it
+    reaches *max_bytes* and retains at most *backup_count* old files.
+
+    Args:
+        log_path: Path-like object for the log file (e.g. ``bd_agent/errors.log``).
+        max_bytes: Rotation size in bytes.  Default 10 MB.
+        backup_count: Number of backup files to retain.  Default 3.
+
+    Returns:
+        A :class:`logging.handlers.RotatingFileHandler` configured at ERROR level
+        with a :class:`JsonFormatter`.
+    """
+    from pathlib import Path
+
+    handler = logging.handlers.RotatingFileHandler(
+        filename=str(Path(log_path).resolve()),
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    handler.setLevel(logging.ERROR)
+    handler.setFormatter(JsonFormatter())
+    return handler

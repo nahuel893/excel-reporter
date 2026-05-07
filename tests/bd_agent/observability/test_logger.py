@@ -210,3 +210,122 @@ class TestBDAgentLogger:
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("src."):
                     pytest.fail(f"Found forbidden import: from {node.module} in logger.py")
+
+
+# ---------------------------------------------------------------------------
+# RF-091 RotatingFileHandler tests
+# ---------------------------------------------------------------------------
+
+class TestSetupErrorLogHandler:
+    """setup_error_log_handler must produce a properly configured RotatingFileHandler.
+
+    RF-091: Errors are written to bd_agent/errors.log; rotates at 10MB; 3 backups.
+    """
+
+    def test_function_importable(self):
+        """setup_error_log_handler must be importable from bd_agent.observability.logger."""
+        from bd_agent.observability.logger import setup_error_log_handler  # noqa: F401
+
+    def test_returns_rotating_file_handler(self, tmp_path):
+        """setup_error_log_handler returns a RotatingFileHandler instance."""
+        from logging.handlers import RotatingFileHandler
+        from bd_agent.observability.logger import setup_error_log_handler
+
+        log_path = tmp_path / "errors.log"
+        handler = setup_error_log_handler(log_path=log_path)
+        assert isinstance(handler, RotatingFileHandler)
+
+    def test_handler_level_is_error(self, tmp_path):
+        """Handler must only emit ERROR and above (RF-091)."""
+        from bd_agent.observability.logger import setup_error_log_handler
+
+        log_path = tmp_path / "errors.log"
+        handler = setup_error_log_handler(log_path=log_path)
+        assert handler.level == logging.ERROR
+
+    def test_handler_max_bytes_default(self, tmp_path):
+        """Default max_bytes is 10MB (10 * 1024 * 1024)."""
+        from bd_agent.observability.logger import setup_error_log_handler
+
+        log_path = tmp_path / "errors.log"
+        handler = setup_error_log_handler(log_path=log_path)
+        assert handler.maxBytes == 10 * 1024 * 1024
+
+    def test_handler_backup_count_default(self, tmp_path):
+        """Default backup_count is 3 (RF-091: retain at most 3 backups)."""
+        from bd_agent.observability.logger import setup_error_log_handler
+
+        log_path = tmp_path / "errors.log"
+        handler = setup_error_log_handler(log_path=log_path)
+        assert handler.backupCount == 3
+
+    def test_handler_custom_max_bytes(self, tmp_path):
+        """max_bytes parameter is forwarded to the handler."""
+        from bd_agent.observability.logger import setup_error_log_handler
+
+        log_path = tmp_path / "errors.log"
+        handler = setup_error_log_handler(log_path=log_path, max_bytes=1024)
+        assert handler.maxBytes == 1024
+
+    def test_handler_custom_backup_count(self, tmp_path):
+        """backup_count parameter is forwarded to the handler."""
+        from bd_agent.observability.logger import setup_error_log_handler
+
+        log_path = tmp_path / "errors.log"
+        handler = setup_error_log_handler(log_path=log_path, backup_count=5)
+        assert handler.backupCount == 5
+
+    def test_handler_writes_to_configured_path(self, tmp_path):
+        """Handler writes to the path passed in log_path."""
+        from bd_agent.observability.logger import setup_error_log_handler
+
+        log_path = tmp_path / "test_errors.log"
+        handler = setup_error_log_handler(log_path=log_path)
+        # The baseFilename is the resolved absolute path string
+        import os
+        assert os.path.abspath(str(log_path)) == handler.baseFilename
+
+    def test_handler_filters_debug_info(self, tmp_path):
+        """DEBUG and INFO records must NOT be written (only ERROR+)."""
+        from bd_agent.observability.logger import setup_error_log_handler
+
+        log_path = tmp_path / "errors.log"
+        handler = setup_error_log_handler(log_path=log_path)
+        handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+
+        inner = logging.getLogger(f"bd_agent.test.rf091.{id(log_path)}")
+        inner.handlers = [handler]
+        inner.propagate = False
+        inner.setLevel(logging.DEBUG)
+
+        inner.debug("should not appear")
+        inner.info("should not appear")
+        inner.warning("should not appear either")
+        inner.error("this should appear")
+
+        handler.flush()
+        handler.close()
+
+        content = log_path.read_text()
+        assert "this should appear" in content
+        assert "should not appear" not in content
+
+    def test_handler_writes_error_record(self, tmp_path):
+        """ERROR-level records are written to the log file."""
+        from bd_agent.observability.logger import setup_error_log_handler
+
+        log_path = tmp_path / "errors.log"
+        handler = setup_error_log_handler(log_path=log_path)
+        handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+
+        inner = logging.getLogger(f"bd_agent.test.rf091.write.{id(log_path)}")
+        inner.handlers = [handler]
+        inner.propagate = False
+        inner.setLevel(logging.DEBUG)
+
+        inner.error("tool_execution_error: DB timeout")
+        handler.flush()
+        handler.close()
+
+        content = log_path.read_text()
+        assert "tool_execution_error" in content

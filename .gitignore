@@ -82,6 +82,8 @@ configs/tmp*.json
 
 # Logs
 *.log
+bd_agent/errors.log
+bd_agent/errors.log.*
 
 # OS
 .DS_Store

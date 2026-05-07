@@ -131,6 +131,19 @@ def _build(
     from bd_agent.agent import AgentTurn  # noqa: F401 (used below)
 
     # ------------------------------------------------------------------
+    # 0. Install rotating error log handler (RF-091)
+    # ------------------------------------------------------------------
+    from bd_agent.observability.logger import setup_error_log_handler
+
+    _errors_log_path = Path(__file__).parent / "errors.log"
+    _error_handler = setup_error_log_handler(log_path=_errors_log_path)
+    _bd_agent_root_logger = logging.getLogger("bd_agent")
+    # Install only once (avoid duplicates on repeated calls, e.g. during tests)
+    from logging.handlers import RotatingFileHandler as _RFH
+    if not any(isinstance(h, _RFH) for h in _bd_agent_root_logger.handlers):
+        _bd_agent_root_logger.addHandler(_error_handler)
+
+    # ------------------------------------------------------------------
     # 1. Contacts repo — parses JSON and builds the allowlist
     # ------------------------------------------------------------------
     contacts_repo = JsonContactsRepo(path=contacts_path)
@@ -198,7 +211,12 @@ def _build(
     # ------------------------------------------------------------------
     # 9. AgentTurn (orchestrator)
     # ------------------------------------------------------------------
-    from bd_agent.safety.rate_limiter import RateLimiter as _RL
+    import time as _time
+
+    def _production_delay_fn() -> None:
+        """Real jitter delay (RF-040): expovariate(1/4) clamped [2, 30] seconds."""
+        _time.sleep(rate_limiter.jitter())
+
     agent_turn = AgentTurn(
         allowlist=allowlist,
         active_hours=active_hours,
@@ -209,6 +227,7 @@ def _build(
         tool_registry=tool_registry,
         messaging=messaging,
         schema_doc_loader=schema_doc_loader,
+        delay_fn=_production_delay_fn,
     )
 
     # ------------------------------------------------------------------
