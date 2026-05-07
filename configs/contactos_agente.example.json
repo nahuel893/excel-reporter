@@ -1,0 +1,27 @@
+{
+  "contacts": [
+    {
+      "name": "Walter Vilte",
+      "jid": "5493870XXXXXX@s.whatsapp.net",
+      "daily_message_limit": 100,
+      "permissions": ["ventas", "clientes", "cobertura", "stock"]
+    },
+    {
+      "name": "Antonio Cabrerizo",
+      "jid": "5493871XXXXXX@s.whatsapp.net",
+      "daily_message_limit": 100,
+      "permissions": ["ventas", "cobertura"]
+    },
+    {
+      "name": "Adrian Garcia",
+      "jid": "5493872XXXXXX@s.whatsapp.net",
+      "daily_message_limit": 50,
+      "permissions": ["ventas", "clientes"]
+    }
+  ],
+  "settings": {
+    "active_hours_start": "07:00",
+    "active_hours_end": "22:00",
+    "timezone": "America/Argentina/Salta"
+  }
+}

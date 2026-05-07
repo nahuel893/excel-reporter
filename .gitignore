@@ -57,6 +57,7 @@ data/runs/
 
 # Sensitive configs (contain PII — emails, phone numbers, etc.)
 configs/contactos.json
+configs/contactos_agente.json
 
 # WhatsApp service runtime state
 whatsapp-service/node_modules/
