@@ -295,3 +295,89 @@ python main.py ventas --config config.json
 - Sucursales van con **descripcion** (texto), no con ID numerico
 - Cobertura se fetchea con try/except: si falla, las columnas quedan en blanco (no rompe el reporte)
 - En Linux: poner `con_slicers: false` en config.json (pywin32 no disponible)
+
+## Asistente WhatsApp (BD Agent)
+
+Agente de lenguaje natural que recibe preguntas via WhatsApp y las responde consultando el Data Warehouse. Solo accede al esquema `gold` con permisos de solo lectura.
+
+**Quien puede usarlo**: contactos autorizados en `configs/contactos_agente.json` (JIDs de WhatsApp). El agente ignora silenciosamente cualquier mensaje de un numero no incluido en esa lista.
+
+### Setup inicial
+
+1. **Crear el usuario de BD** — sustituir la password antes de ejecutar:
+   ```bash
+   psql -h <host> -U <superuser> -d <dbname> -f scripts/sql/agent_user.sql
+   # Editar el script primero: reemplazar 'CHANGEME' con una password real
+   ```
+
+2. **Obtener API key de Gemini** — gratis en https://aistudio.google.com/app/apikey
+   Pegar el valor en `.env` como `GEMINI_API_KEY=<key>`
+
+3. **Configurar contactos autorizados** — editar `configs/contactos_agente.json`
+   (NO editar el ejemplo `configs/contactos_agente.example.json`)
+   ```json
+   {
+     "contacts": [
+       { "jid": "5493874000000@s.whatsapp.net", "name": "Walter Vilte", "permissions": ["ventas", "cobertura"] }
+     ],
+     "active_hours": { "start": "08:00", "end": "20:00", "timezone": "America/Argentina/Salta" },
+     "rate_limit": { "max_requests_per_day": 50 }
+   }
+   ```
+
+4. **Reiniciar servicios**:
+   ```bash
+   # Reiniciar Node (whatsapp-service)
+   cd whatsapp-service && node index.js
+
+   # Reiniciar FastAPI (en otro terminal)
+   uvicorn api:app --reload --port 8000
+   ```
+
+5. **Verificar el flujo completo** — seguir la guia en `whatsapp-service/test-roundtrip.md`
+
+### Arquitectura
+
+```
+WhatsApp (usuario)
+  -> Baileys (whatsapp-service/index.js)  # recibe DMs, filtra, reenvía
+  -> FastAPI POST /agent/message           # bd_agent/transport/router.py
+  -> AgentTurn                             # bd_agent/agent.py -- orquesta pipeline
+  -> SafetyGuard                           # bd_agent/safety/guard.py -- allowlist + horario + rate-limit
+  -> GeminiProvider (Flash Lite)           # bd_agent/llm/gemini.py -- razonamiento
+  -> ToolRegistry / PgDatabaseGateway      # bd_agent/tools/ + bd_agent/integrations/database.py
+  -> WhatsAppMessagingGateway              # bd_agent/integrations/messaging.py -- responde al usuario
+```
+
+Archivos clave:
+- `bd_agent/` — paquete Python completo del agente
+- `whatsapp-service/index.js` — servicio Node con Baileys
+- `configs/contactos_agente.json` — lista de contactos autorizados (gitignored — PII)
+- `configs/contactos_agente.example.json` — plantilla versionada
+
+### Operacion
+
+**Deshabilitar el agente** sin cambiar codigo: poner `GEMINI_API_KEY=""` en `.env` y reiniciar.
+El `build_agent_runtime()` en `bd_agent/wiring.py` detecta la ausencia de la key y no monta el router `/agent`.
+
+**Recargar contactos sin reiniciar**:
+```bash
+curl -X POST http://localhost:8000/agent/reload-contacts
+```
+
+**Recargar schema doc**:
+```bash
+curl -X POST http://localhost:8000/agent/reload-schema
+```
+
+**Ver uso de rate-limit**: no hay UI aun. Revisar logs de la aplicacion buscando mensajes del `SafetyGuard`.
+
+**Saludo diario automatico**: el agente envia un saludo a contactos activos (ultima interaccion < 1h) de lunes a viernes a las 08:00 hora Salta, via APScheduler montado en `api.py`.
+
+### Costo estimado
+
+Modelo: `gemini-2.0-flash-lite`
+- Input: $0.075 / 1M tokens
+- Output: $0.30 / 1M tokens
+- Uso tipico por mensaje: ~2.000 tokens in + ~500 tokens out ~= $0.00031 por interaccion
+- 50 mensajes/dia por 30 dias ~= $0.47/mes por usuario activo
