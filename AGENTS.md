@@ -395,6 +395,21 @@ Cada evento del agente se registra como JSON de una sola linea:
 
 Los JIDs **nunca** aparecen en los logs: solo el `jid_hash` (SHA-256 de 8 chars) para privacidad.
 
+### Sandbox Python Reports (generacion de archivos)
+
+El agente puede generar reportes Excel, PNG o PDF via la tool `execute_python_report`.
+El codigo corre en un container Docker aislado (sin red, solo lectura del filesystem del host).
+
+**Activar**:
+1. `bash scripts/build_sandbox_image.sh` — build de la imagen (~5 min primera vez)
+2. `SANDBOX_ENABLED=true` en `.env`
+3. Reiniciar el servidor FastAPI
+
+Ver seccion "Sandbox Python Reports" en `docs/bd_agent/README.md` para:
+- Modelo de seguridad (defense-in-depth)
+- Troubleshooting (imagen faltante, daemon caido, timeout)
+- Limitaciones (1 archivo de salida, cap 16 MB, sin red)
+
 ### Documentacion tecnica
 
 Ver `docs/bd_agent/README.md` para:
@@ -404,7 +419,8 @@ Ver `docs/bd_agent/README.md` para:
 - Capas de seguridad SQL (triple defensa)
 - Estrategia de testing + fakes disponibles
 - Receta para extraer bd_agent como proyecto independiente
-- Limitaciones conocidas (v1)
+- Sandbox Python Reports (seccion 11)
+- Limitaciones conocidas
 
 ### Costo estimado
 

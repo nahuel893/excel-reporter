@@ -144,3 +144,89 @@ class TestMetricsCollector:
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("src."):
                     pytest.fail(f"Found forbidden import: from {node.module} in metrics.py")
+
+
+# ---------------------------------------------------------------------------
+# T-203 — Sandbox metrics counters (RF-172)
+# ---------------------------------------------------------------------------
+
+class TestSandboxMetrics:
+    """T-203: MetricsCollector exposes sandbox_executions_total,
+    sandbox_failures_total, sandbox_duration_seconds, record_sandbox_execution."""
+
+    def _fresh(self):
+        MetricsCollector, _ = _import()
+        return MetricsCollector()
+
+    def test_sandbox_executions_total_in_snapshot(self):
+        m = self._fresh()
+        snap = m.snapshot()
+        assert "sandbox_executions_total" in snap
+
+    def test_sandbox_failures_total_in_snapshot(self):
+        m = self._fresh()
+        snap = m.snapshot()
+        assert "sandbox_failures_total" in snap
+
+    def test_sandbox_duration_seconds_in_snapshot(self):
+        m = self._fresh()
+        snap = m.snapshot()
+        assert "sandbox_duration_seconds" in snap
+
+    def test_record_sandbox_execution_method_exists(self):
+        m = self._fresh()
+        assert hasattr(m, "record_sandbox_execution")
+
+    def test_success_increments_executions_total(self):
+        m = self._fresh()
+        m.record_sandbox_execution(reason=None, duration_seconds=1.5)
+        snap = m.snapshot()
+        assert snap["sandbox_executions_total"] == 1
+
+    def test_failure_increments_both_total_and_failures(self):
+        m = self._fresh()
+        m.record_sandbox_execution(reason="validation", duration_seconds=0.1)
+        snap = m.snapshot()
+        assert snap["sandbox_executions_total"] == 1
+        assert snap["sandbox_failures_total"] == 1
+
+    def test_success_does_not_increment_failures(self):
+        m = self._fresh()
+        m.record_sandbox_execution(reason=None, duration_seconds=2.0)
+        snap = m.snapshot()
+        assert snap["sandbox_failures_total"] == 0
+
+    def test_multiple_executions_accumulate(self):
+        m = self._fresh()
+        m.record_sandbox_execution(reason=None, duration_seconds=1.0)
+        m.record_sandbox_execution(reason="timeout", duration_seconds=30.0)
+        m.record_sandbox_execution(reason=None, duration_seconds=2.5)
+        snap = m.snapshot()
+        assert snap["sandbox_executions_total"] == 3
+        assert snap["sandbox_failures_total"] == 1
+
+    def test_duration_seconds_accumulates(self):
+        m = self._fresh()
+        m.record_sandbox_execution(reason=None, duration_seconds=1.0)
+        m.record_sandbox_execution(reason=None, duration_seconds=2.0)
+        snap = m.snapshot()
+        # sandbox_duration_seconds is a list or sum — just verify it's non-empty/non-zero
+        durations = snap["sandbox_duration_seconds"]
+        if isinstance(durations, list):
+            assert len(durations) == 2
+        else:
+            assert durations > 0
+
+    def test_reset_clears_sandbox_counters(self):
+        m = self._fresh()
+        m.record_sandbox_execution(reason=None, duration_seconds=1.0)
+        m.record_sandbox_execution(reason="sql", duration_seconds=0.5)
+        m.reset()
+        snap = m.snapshot()
+        assert snap["sandbox_executions_total"] == 0
+        assert snap["sandbox_failures_total"] == 0
+        durations = snap["sandbox_duration_seconds"]
+        if isinstance(durations, list):
+            assert durations == []
+        else:
+            assert durations == 0

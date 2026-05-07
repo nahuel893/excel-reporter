@@ -43,6 +43,10 @@ class MetricsCollector:
         self._tool_calls_by_name: dict[str, int] = {}
         self._errors_by_type: dict[str, int] = {}
         self._errors_total = 0
+        # Sandbox counters (T-203, RF-172)
+        self._sandbox_executions_total = 0
+        self._sandbox_failures_total = 0
+        self._sandbox_duration_seconds: list[float] = []
 
     # ------------------------------------------------------------------
     # Mutation helpers
@@ -75,6 +79,24 @@ class MetricsCollector:
             )
             self._errors_total += 1
 
+    def record_sandbox_execution(
+        self,
+        reason: str | None,
+        duration_seconds: float,
+    ) -> None:
+        """Record one sandbox execution attempt (T-203, RF-172).
+
+        Args:
+            reason: Failure phase name ("validation", "sql", "staging", "execution",
+                "timeout", "output", "send"), or None for a successful execution.
+            duration_seconds: Total execution wall-clock time in seconds.
+        """
+        with self._lock:
+            self._sandbox_executions_total += 1
+            if reason is not None:
+                self._sandbox_failures_total += 1
+            self._sandbox_duration_seconds.append(duration_seconds)
+
     # ------------------------------------------------------------------
     # Snapshot (read-only copy)
     # ------------------------------------------------------------------
@@ -94,6 +116,10 @@ class MetricsCollector:
                 "errors_by_type": copy.deepcopy(self._errors_by_type),
                 "errors_total": self._errors_total,
                 "uptime_seconds": time.monotonic() - self._started_at,
+                # Sandbox metrics (T-203, RF-172)
+                "sandbox_executions_total": self._sandbox_executions_total,
+                "sandbox_failures_total": self._sandbox_failures_total,
+                "sandbox_duration_seconds": list(self._sandbox_duration_seconds),
             }
 
     # ------------------------------------------------------------------
@@ -110,6 +136,9 @@ class MetricsCollector:
             self._tool_calls_by_name = {}
             self._errors_by_type = {}
             self._errors_total = 0
+            self._sandbox_executions_total = 0
+            self._sandbox_failures_total = 0
+            self._sandbox_duration_seconds = []
 
 
 # ---------------------------------------------------------------------------

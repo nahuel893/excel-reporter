@@ -237,7 +237,95 @@ The agent was designed with extraction in mind (RF-070: zero imports from `src.*
 
 ---
 
-## 11. Cost reference
+## 11. Sandbox Python Reports
+
+The sandbox tool lets the agent generate Excel, PNG, PDF, or CSV files on demand
+by running LLM-generated Python code in a hardened Docker container.
+
+### When to use it
+
+The agent invokes `execute_python_report` when the user asks for a generated file
+(e.g. "mandame el resumen de ventas de abril en Excel"). It should NOT be used for
+simple text queries — those go through the curated tools or `run_sql_select`.
+
+### Activation (opt-in)
+
+The sandbox is disabled by default. To activate:
+
+1. Build the image (one-time; ~5 min on first build):
+   ```bash
+   bash scripts/build_sandbox_image.sh
+   ```
+2. Set the environment variable:
+   ```bash
+   SANDBOX_ENABLED=true
+   ```
+3. Restart the FastAPI server. The agent will log `sandbox.tool_registered` on startup.
+
+Optional tuning (`.env`):
+```
+SANDBOX_TIMEOUT_SECONDS=30    # kill container after N seconds (default 30)
+SANDBOX_IMAGE_TAG=bd-agent-sandbox:latest   # image tag
+```
+
+### Security model (defense-in-depth)
+
+The sandbox uses multiple layers of isolation:
+
+| Layer | Mechanism |
+|-------|-----------|
+| AST validator | Whitelist of allowed imports; blocks `eval`, `exec`, `__import__`, dunder attrs |
+| SQL validator | sqlglot pre-validation (SELECT-only, `gold` schema, no DDL/DML) |
+| Container isolation | `--network=none`, `--read-only`, `--user 1000:1000`, `--cap-drop=ALL`, `--security-opt=no-new-privileges` |
+| Resource limits | `--pids-limit=64`, `--memory=256m`, `--cpus=1.0`, `--tmpfs /tmp:size=50m` |
+| Timeout kill | `SANDBOX_TIMEOUT_SECONDS`; container hard-killed on expiry |
+| Output size cap | 16 MB max; MIME type verified (xlsx/png/jpg/pdf/csv only) |
+| JID from context | `_jid` comes from server context, never from LLM arguments |
+
+No container escape is possible through the Python layer — Docker host isolation is the
+practical boundary (same as any Docker deployment on a Linux host).
+
+### Troubleshooting
+
+**Image missing** (`sandbox.image_missing` in logs):
+```bash
+bash scripts/build_sandbox_image.sh
+```
+The smoke test also detects this:
+```bash
+SANDBOX_ENABLED=true python -m bd_agent.scripts.smoke_test
+```
+
+**Docker daemon not running** (`sandbox.image_missing` with FileNotFoundError):
+- Start Docker: `sudo systemctl start docker`
+- Ensure the FastAPI process user is in the `docker` group:
+  `sudo usermod -aG docker <user>` then re-login
+
+**Timeout errors** (phase `"execution"`, timed_out in result):
+- Increase `SANDBOX_TIMEOUT_SECONDS` in `.env`
+- Ask the LLM to reduce data scope (fewer rows, smaller date range)
+
+**File exceeds 16 MB** (phase `"output"`):
+- The LLM retries on `{ok: false, phase: "output"}` — instruct it to aggregate or sample the data
+
+### Cost (Docker overhead)
+
+Each sandbox call adds approximately 1–3 seconds of container startup overhead on top of
+the Python execution time. A typical Excel generation from 1,000 rows takes 2–4 seconds total.
+
+### Known limitations
+
+- **Single output file**: the script must write exactly one file to `/output/<output_filename>`.
+  Multiple files are not supported in v1.
+- **16 MB cap**: WhatsApp DM document limit. Large reports should be aggregated server-side.
+- **No network access**: the script cannot fetch external data; all input must come from the
+  SQL query staged as `/data/input.parquet`.
+- **Container escape boundary**: the practical security boundary is Docker host isolation.
+  This is acceptable for a private internal tool; do not expose the agent to untrusted users.
+
+---
+
+## 12. Cost reference
 
 Model: `gemini-2.0-flash-lite`
 - Input: $0.075 / 1M tokens

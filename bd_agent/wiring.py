@@ -21,6 +21,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -239,6 +240,11 @@ def _build(
         db_gateway=db_gateway,
     )
 
+    # ------------------------------------------------------------------
+    # 11. Sandbox tool (opt-in — SANDBOX_ENABLED=true + image present)
+    # ------------------------------------------------------------------
+    _maybe_register_sandbox_tool(tool_registry, db_gateway, messaging)
+
     return AgentRuntime(
         agent_turn=agent_turn,
         contacts_repo=contacts_repo,
@@ -246,6 +252,83 @@ def _build(
         router=router,
         messaging=messaging,
     )
+
+
+# ---------------------------------------------------------------------------
+# Sandbox tool opt-in registration (T-201)
+# ---------------------------------------------------------------------------
+
+_SANDBOX_IMAGE = "bd-agent-sandbox:latest"
+
+
+def _docker_image_exists(image: str) -> bool:
+    """Return True if the Docker image exists locally; False on any failure."""
+    try:
+        result = subprocess.run(
+            ["docker", "image", "inspect", image],
+            capture_output=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _maybe_register_sandbox_tool(
+    registry,
+    gateway,
+    messaging,
+) -> None:
+    """Register the execute_python_report tool if sandbox is enabled and image exists.
+
+    Gating order:
+      1. SANDBOX_ENABLED env var must be "true" (case-insensitive).
+      2. Docker image bd-agent-sandbox:latest must exist locally.
+
+    On any failure: log and return without registering.  The agent continues to
+    work identically to pre-sandbox behavior.
+
+    Args:
+        registry: ToolRegistry instance.
+        gateway:  DatabaseGateway instance (closed over in the handler).
+        messaging: MessagingGateway instance (closed over in the handler).
+    """
+    if os.environ.get("SANDBOX_ENABLED", "").lower() != "true":
+        logger.info(
+            "sandbox.disabled",
+            extra={"reason": "SANDBOX_ENABLED!=true"},
+        )
+        return
+
+    if not _docker_image_exists(_SANDBOX_IMAGE):
+        logger.warning(
+            "sandbox.image_missing",
+            extra={"image": _SANDBOX_IMAGE},
+        )
+        return
+
+    try:
+        from bd_agent.sandbox.runner import DockerRunner
+        from bd_agent.tools.reports import register_into as register_sandbox_into
+
+        timeout_s = int(os.environ.get("SANDBOX_TIMEOUT_SECONDS", "30"))
+        runner = DockerRunner(image=_SANDBOX_IMAGE)
+        register_sandbox_into(
+            registry,
+            gateway=gateway,
+            messaging=messaging,
+            runner=runner,
+            timeout_s=timeout_s,
+        )
+        logger.info(
+            "sandbox.tool_registered",
+            extra={"image": _SANDBOX_IMAGE, "timeout_s": timeout_s},
+        )
+    except Exception as exc:
+        logger.warning(
+            "sandbox.registration_failed",
+            extra={"error": str(exc)},
+        )
 
 
 # ---------------------------------------------------------------------------

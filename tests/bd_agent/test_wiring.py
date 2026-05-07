@@ -325,3 +325,130 @@ def test_build_agent_runtime_delay_fn_returns_float(tmp_path, monkeypatch):
         # If it calls time.sleep internally, that's also fine (we patched it)
         # The key requirement: it must not raise and must be callable
         delay_fn()  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# T-201 — _maybe_register_sandbox_tool (wiring)
+# ---------------------------------------------------------------------------
+
+
+class TestMaybeRegisterSandboxTool:
+    """T-201: _maybe_register_sandbox_tool only registers when SANDBOX_ENABLED=true
+    AND the Docker image exists. RF-104, RF-144."""
+
+    def _import_maybe(self):
+        from bd_agent.wiring import _maybe_register_sandbox_tool
+        return _maybe_register_sandbox_tool
+
+    def test_import_maybe_register(self):
+        self._import_maybe()
+
+    def test_no_registration_when_sandbox_disabled(self, monkeypatch):
+        """SANDBOX_ENABLED not 'true' -> tool NOT registered, no docker call."""
+        monkeypatch.setenv("SANDBOX_ENABLED", "false")
+
+        from bd_agent.tools.registry import ToolRegistry
+        from bd_agent.wiring import _maybe_register_sandbox_tool
+
+        registry = ToolRegistry()
+        mock_gateway = MagicMock()
+        mock_messaging = MagicMock()
+
+        with patch("subprocess.run") as mock_run:
+            _maybe_register_sandbox_tool(registry, mock_gateway, mock_messaging)
+
+        # docker should not have been called at all
+        mock_run.assert_not_called()
+        assert "execute_python_report" not in registry.list_names()
+
+    def test_no_registration_when_sandbox_env_missing(self, monkeypatch):
+        """SANDBOX_ENABLED absent -> tool NOT registered."""
+        monkeypatch.delenv("SANDBOX_ENABLED", raising=False)
+
+        from bd_agent.tools.registry import ToolRegistry
+        from bd_agent.wiring import _maybe_register_sandbox_tool
+
+        registry = ToolRegistry()
+        mock_gateway = MagicMock()
+        mock_messaging = MagicMock()
+
+        with patch("subprocess.run") as mock_run:
+            _maybe_register_sandbox_tool(registry, mock_gateway, mock_messaging)
+
+        mock_run.assert_not_called()
+        assert "execute_python_report" not in registry.list_names()
+
+    def test_no_registration_when_image_missing(self, monkeypatch):
+        """SANDBOX_ENABLED=true but image absent -> tool NOT registered."""
+        monkeypatch.setenv("SANDBOX_ENABLED", "true")
+
+        from bd_agent.tools.registry import ToolRegistry
+        from bd_agent.wiring import _maybe_register_sandbox_tool
+
+        registry = ToolRegistry()
+        mock_gateway = MagicMock()
+        mock_messaging = MagicMock()
+
+        # docker image inspect exits 1 (not found)
+        fake_result = MagicMock()
+        fake_result.returncode = 1
+        with patch("subprocess.run", return_value=fake_result):
+            _maybe_register_sandbox_tool(registry, mock_gateway, mock_messaging)
+
+        assert "execute_python_report" not in registry.list_names()
+
+    def test_registration_when_enabled_and_image_present(self, monkeypatch):
+        """SANDBOX_ENABLED=true AND image present -> tool registered."""
+        monkeypatch.setenv("SANDBOX_ENABLED", "true")
+        monkeypatch.setenv("SANDBOX_TIMEOUT_SECONDS", "15")
+
+        from bd_agent.tools.registry import ToolRegistry
+        from bd_agent.wiring import _maybe_register_sandbox_tool
+
+        registry = ToolRegistry()
+        mock_gateway = MagicMock()
+        mock_messaging = MagicMock()
+
+        fake_result = MagicMock()
+        fake_result.returncode = 0
+        with patch("subprocess.run", return_value=fake_result):
+            _maybe_register_sandbox_tool(registry, mock_gateway, mock_messaging)
+
+        assert "execute_python_report" in registry.list_names()
+
+    def test_docker_inspect_called_with_image_name(self, monkeypatch):
+        """When SANDBOX_ENABLED=true, _docker_image_exists calls docker image inspect."""
+        monkeypatch.setenv("SANDBOX_ENABLED", "true")
+
+        from bd_agent.tools.registry import ToolRegistry
+        from bd_agent.wiring import _maybe_register_sandbox_tool
+
+        registry = ToolRegistry()
+        mock_gateway = MagicMock()
+        mock_messaging = MagicMock()
+
+        fake_result = MagicMock()
+        fake_result.returncode = 1
+        with patch("subprocess.run", return_value=fake_result) as mock_run:
+            _maybe_register_sandbox_tool(registry, mock_gateway, mock_messaging)
+
+        # Verify docker was called (inspect or similar)
+        assert mock_run.called
+        call_args = mock_run.call_args[0][0]  # first positional arg = command list
+        assert "docker" in call_args
+
+    def test_docker_image_exists_returns_false_on_file_not_found(self, monkeypatch):
+        """If docker binary not found, _docker_image_exists returns False (safe)."""
+        monkeypatch.setenv("SANDBOX_ENABLED", "true")
+
+        from bd_agent.tools.registry import ToolRegistry
+        from bd_agent.wiring import _maybe_register_sandbox_tool
+
+        registry = ToolRegistry()
+        mock_gateway = MagicMock()
+        mock_messaging = MagicMock()
+
+        with patch("subprocess.run", side_effect=FileNotFoundError("docker not found")):
+            _maybe_register_sandbox_tool(registry, mock_gateway, mock_messaging)
+
+        assert "execute_python_report" not in registry.list_names()

@@ -19,6 +19,7 @@ Design rules:
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from typing import Any
 
@@ -115,6 +116,94 @@ def check_sqlglot_validator() -> dict[str, Any]:
     }
 
 
+def check_docker_daemon(
+    *,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Check that the Docker daemon is reachable via ``docker info``.
+
+    This check is SKIPPED (status "skipped", ok=True) when SANDBOX_ENABLED is not "true".
+
+    Args:
+        env: Mapping to check.  Defaults to ``os.environ``.
+
+    Returns:
+        ``{"name": "docker_daemon", "ok": bool, "status": str, "error": str | None}``
+    """
+    _env = env if env is not None else dict(os.environ)
+    if _env.get("SANDBOX_ENABLED", "").lower() != "true":
+        return {"name": "docker_daemon", "ok": True, "status": "skipped", "error": None}
+
+    try:
+        result = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return {"name": "docker_daemon", "ok": True, "status": "ok", "error": None}
+        return {
+            "name": "docker_daemon",
+            "ok": False,
+            "status": "fail",
+            "error": f"docker info exited {result.returncode}",
+        }
+    except FileNotFoundError:
+        return {
+            "name": "docker_daemon",
+            "ok": False,
+            "status": "fail",
+            "error": "docker binary not found",
+        }
+    except Exception as exc:
+        return {"name": "docker_daemon", "ok": False, "status": "fail", "error": str(exc)}
+
+
+def check_sandbox_image(
+    *,
+    env: dict[str, str] | None = None,
+    image: str = "bd-agent-sandbox:latest",
+) -> dict[str, Any]:
+    """Check that the sandbox Docker image exists locally.
+
+    This check is SKIPPED (status "skipped", ok=True) when SANDBOX_ENABLED is not "true".
+
+    Args:
+        env:   Mapping to check.  Defaults to ``os.environ``.
+        image: Image name to verify.  Defaults to ``bd-agent-sandbox:latest``.
+
+    Returns:
+        ``{"name": "sandbox_image", "ok": bool, "status": str, "error": str | None}``
+    """
+    _env = env if env is not None else dict(os.environ)
+    if _env.get("SANDBOX_ENABLED", "").lower() != "true":
+        return {"name": "sandbox_image", "ok": True, "status": "skipped", "error": None}
+
+    try:
+        result = subprocess.run(
+            ["docker", "image", "inspect", image],
+            capture_output=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return {"name": "sandbox_image", "ok": True, "status": "ok", "error": None}
+        return {
+            "name": "sandbox_image",
+            "ok": False,
+            "status": "fail",
+            "error": f"image '{image}' not found locally",
+        }
+    except FileNotFoundError:
+        return {
+            "name": "sandbox_image",
+            "ok": False,
+            "status": "fail",
+            "error": "docker binary not found",
+        }
+    except Exception as exc:
+        return {"name": "sandbox_image", "ok": False, "status": "fail", "error": str(exc)}
+
+
 def check_whatsapp_status(
     *,
     http_client: Any = None,
@@ -148,12 +237,14 @@ def check_whatsapp_status(
                 "error": f"HTTP {response.status_code}",
             }
         data = response.json()
-        status = data.get("status", "")
-        if status != "connected":
+        # whatsapp-service returns {"connected": true, "phone": "..."} in current Baileys impl,
+        # but legacy returned {"status": "connected"}. Accept either shape.
+        connected = bool(data.get("connected")) or data.get("status") == "connected"
+        if not connected:
             return {
                 "name": "whatsapp_status",
                 "ok": False,
-                "error": f"status={status!r} (expected 'connected')",
+                "error": f"not connected (response: {data})",
             }
         return {"name": "whatsapp_status", "ok": True, "error": None}
 
@@ -197,6 +288,12 @@ def run_all_checks(
             wa_url = f"{base}/status"
     results.append(check_whatsapp_status(http_client=http_client, url=wa_url))
 
+    # 5. Sandbox Docker daemon (T-205) — skipped when SANDBOX_ENABLED != true
+    results.append(check_docker_daemon(env=env))
+
+    # 6. Sandbox image check (T-205) — skipped when SANDBOX_ENABLED != true
+    results.append(check_sandbox_image(env=env))
+
     return results
 
 
@@ -235,6 +332,13 @@ def _print_results(results: list[dict[str, Any]]) -> bool:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    # Load .env from project root so the script works as a standalone CLI.
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass  # dotenv is optional — env vars may already be set in shell
+
     results = run_all_checks()
     ok = _print_results(results)
     sys.exit(0 if ok else 1)

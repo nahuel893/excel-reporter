@@ -157,6 +157,46 @@ class BDAgentLogger:
             },
         )
 
+    def log_sandbox_execution(
+        self,
+        *,
+        jid: str,
+        code_hash: str,
+        query_hash: str,
+        exit_code: int,
+        duration_ms: int,
+        file_size: int,
+        error_type: str | None,
+    ) -> None:
+        """Log a sandbox execution event (RF-171, RF-173).
+
+        Emits a structured JSON line with all relevant fields. Raw JID is NEVER
+        logged; only the 8-char SHA-256 hash (``jid_hash``) appears.
+
+        Args:
+            jid: Raw WhatsApp JID (hashed before logging).
+            code_hash: Short hash of the Python code for correlation.
+            query_hash: Short hash of the SQL query for correlation.
+            exit_code: Container exit code (0 = success).
+            duration_ms: Total execution duration in milliseconds.
+            file_size: Output file size in bytes (0 if no file produced).
+            error_type: One of "validation", "sql", "staging", "execution",
+                "timeout", "output", "send", or None on success.
+        """
+        self._log.info(
+            "sandbox_execution",
+            extra={
+                "event_type": "sandbox_execution",
+                "jid_hash": _hash_jid(jid),
+                "code_hash": code_hash,
+                "query_hash": query_hash,
+                "exit_code": exit_code,
+                "duration_ms": duration_ms,
+                "file_size": file_size,
+                "error_type": error_type,
+            },
+        )
+
 
 # ---------------------------------------------------------------------------
 # Singleton getter

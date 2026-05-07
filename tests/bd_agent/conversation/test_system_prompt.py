@@ -252,3 +252,64 @@ def test_returns_non_empty_string():
     )
     assert isinstance(prompt, str)
     assert len(prompt.strip()) > 0
+
+
+# ---------------------------------------------------------------------------
+# T-204 — System prompt update: execute_python_report rule (RF-181..RF-183)
+# ---------------------------------------------------------------------------
+
+class TestSandboxSystemPromptUpdate:
+    """T-204: System prompt must reflect execute_python_report as legitimate
+    execution path and the anti-eval/exec rule must remain. RF-181..RF-183."""
+
+    def _build(self, schema: str = "schema", tools: str = "tools") -> str:
+        return build_system_prompt(
+            schema_doc=schema,
+            tool_specs=tools,
+            contact=_contact(),
+        )
+
+    def test_blanket_python_ban_not_present(self):
+        """RF-181: The unconditional 'NUNCA ejecutes codigo Python/Bash' rule
+        must be replaced with the more nuanced rule that names execute_python_report."""
+        prompt = self._build()
+        # The old blanket rule mentioned 'filesystem, eval, exec, ni código Python/Bash'
+        # It must not exist as the old verbatim phrase:
+        assert "ni código Python/Bash" not in prompt
+
+    def test_execute_python_report_named_as_legitimate_path(self):
+        """RF-181: execute_python_report must appear in the security rule as the
+        sole legitimate path for Python code execution."""
+        prompt = self._build()
+        assert "execute_python_report" in prompt
+
+    def test_anti_eval_exec_rule_still_present(self):
+        """RF-181: The anti-eval/exec prohibition must still be present."""
+        prompt = self._build()
+        assert "eval" in prompt
+        assert "exec" in prompt
+
+    def test_sandbox_isolation_described(self):
+        """RF-182: Prompt must mention that code runs in an isolated sandbox."""
+        prompt = self._build()
+        assert "sandbox" in prompt.lower() or "aislado" in prompt.lower()
+
+    def test_report_use_case_mentioned(self):
+        """RF-182: Prompt must guide LLM to use the tool for report generation."""
+        prompt = self._build()
+        # Must mention Excel, grafico/gráfico, PDF or similar output types
+        mentions_report = any(
+            kw in prompt.lower()
+            for kw in ["excel", "pdf", "reporte", "gráfico", "grafico"]
+        )
+        assert mentions_report
+
+    def test_length_within_20_percent_budget(self):
+        """RF-183: Updated prompt must not exceed pre-change length * 1.20."""
+        # Pre-change template length measured with fixed schema/tools inputs
+        _PRE_CHANGE_LENGTH = 2796  # measured before T-204 changes
+        prompt = self._build(schema="schema", tools="tools")
+        assert len(prompt) <= _PRE_CHANGE_LENGTH * 1.20, (
+            f"Prompt length {len(prompt)} exceeds budget "
+            f"{int(_PRE_CHANGE_LENGTH * 1.20)} (pre-change: {_PRE_CHANGE_LENGTH})"
+        )

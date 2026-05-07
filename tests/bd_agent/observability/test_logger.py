@@ -329,3 +329,132 @@ class TestSetupErrorLogHandler:
 
         content = log_path.read_text()
         assert "tool_execution_error" in content
+
+
+# ---------------------------------------------------------------------------
+# T-202 — BDAgentLogger.log_sandbox_execution (RF-171, RF-173)
+# ---------------------------------------------------------------------------
+
+class TestLogSandboxExecution:
+    """T-202: BDAgentLogger.log_sandbox_execution emits structured JSON, no PII."""
+
+    def _make_logger(self):
+        from bd_agent.observability.logger import BDAgentLogger, JsonFormatter
+        records: list[dict] = []
+
+        class CapturingHandler(logging.Handler):
+            def emit(self, record: logging.LogRecord):
+                records.append(json.loads(self.format(record)))
+
+        handler = CapturingHandler()
+        handler.setFormatter(JsonFormatter())
+
+        inner_logger = logging.getLogger(f"bd_agent.test.sandbox.{id(records)}")
+        inner_logger.handlers = [handler]
+        inner_logger.propagate = False
+        inner_logger.setLevel(logging.DEBUG)
+
+        agent_logger = BDAgentLogger(logger=inner_logger)
+        return agent_logger, records
+
+    def test_method_importable(self):
+        from bd_agent.observability.logger import BDAgentLogger
+        assert hasattr(BDAgentLogger, "log_sandbox_execution")
+
+    def test_emits_sandbox_execution_event_type(self):
+        logger, records = self._make_logger()
+        logger.log_sandbox_execution(
+            jid="5493871111111@s.whatsapp.net",
+            code_hash="abc12345",
+            query_hash="def67890",
+            exit_code=0,
+            duration_ms=1200,
+            file_size=4096,
+            error_type=None,
+        )
+        assert len(records) == 1
+        assert records[0]["event_type"] == "sandbox_execution"
+
+    def test_includes_all_required_fields(self):
+        logger, records = self._make_logger()
+        logger.log_sandbox_execution(
+            jid="5493871111111@s.whatsapp.net",
+            code_hash="abc12345",
+            query_hash="def67890",
+            exit_code=0,
+            duration_ms=1200,
+            file_size=4096,
+            error_type=None,
+        )
+        entry = records[0]
+        assert "jid_hash" in entry
+        assert "code_hash" in entry
+        assert "query_hash" in entry
+        assert "exit_code" in entry
+        assert "duration_ms" in entry
+        assert "file_size" in entry
+        assert "error_type" in entry
+
+    def test_no_raw_jid_in_log(self):
+        """RF-173: Raw JID must not appear in the log output."""
+        logger, records = self._make_logger()
+        raw_jid = "5493879999999@s.whatsapp.net"
+        logger.log_sandbox_execution(
+            jid=raw_jid,
+            code_hash="abc12345",
+            query_hash="def67890",
+            exit_code=0,
+            duration_ms=500,
+            file_size=1024,
+            error_type=None,
+        )
+        dump = json.dumps(records)
+        assert raw_jid not in dump
+
+    def test_jid_hash_is_8_chars(self):
+        logger, records = self._make_logger()
+        jid = "5493871111111@s.whatsapp.net"
+        logger.log_sandbox_execution(
+            jid=jid, code_hash="x", query_hash="y",
+            exit_code=0, duration_ms=100, file_size=0, error_type=None,
+        )
+        assert len(records[0]["jid_hash"]) == 8
+
+    def test_error_type_present_on_failure(self):
+        logger, records = self._make_logger()
+        logger.log_sandbox_execution(
+            jid="5493871111111@s.whatsapp.net",
+            code_hash="abc",
+            query_hash="def",
+            exit_code=1,
+            duration_ms=300,
+            file_size=0,
+            error_type="validation",
+        )
+        assert records[0]["error_type"] == "validation"
+
+    def test_error_type_null_on_success(self):
+        logger, records = self._make_logger()
+        logger.log_sandbox_execution(
+            jid="5493871111111@s.whatsapp.net",
+            code_hash="abc",
+            query_hash="def",
+            exit_code=0,
+            duration_ms=800,
+            file_size=2048,
+            error_type=None,
+        )
+        assert records[0]["error_type"] is None
+
+    def test_exit_code_propagated(self):
+        logger, records = self._make_logger()
+        logger.log_sandbox_execution(
+            jid="5493871111111@s.whatsapp.net",
+            code_hash="h1",
+            query_hash="h2",
+            exit_code=137,
+            duration_ms=100,
+            file_size=0,
+            error_type="execution",
+        )
+        assert records[0]["exit_code"] == 137

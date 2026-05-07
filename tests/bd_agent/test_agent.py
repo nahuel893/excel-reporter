@@ -622,6 +622,72 @@ class TestAgentTurnSystemPrompt:
         assert schema_content in system_prompt
 
 
+class TestAgentTurnContextPropagation:
+    """T-200 — AgentTurn passes context={"_jid": jid} to registry.invoke (RF-143)."""
+
+    def test_registry_receives_context_with_jid(self):
+        """invoke() is called with context={"_jid": jid} for each tool call."""
+        received_contexts: list[dict] = []
+
+        registry = ToolRegistry()
+
+        def context_recording_handler(gateway, *, context=None, **kwargs):
+            received_contexts.append(context)
+            return {"ok": True}
+
+        registry.register(
+            name="ctx_tool",
+            description="records context",
+            params_schema={"type": "object", "properties": {}, "required": []},
+            handler=context_recording_handler,
+        )
+
+        tool_call_response = LLMResponse(
+            text=None,
+            tool_calls=[LLMToolCall(id="c1", name="ctx_tool", arguments={})],
+        )
+        final_response = LLMResponse(text="done", tool_calls=[])
+        llm = ScriptedLLMProvider([tool_call_response, final_response])
+        messaging = RecordingMessagingGateway()
+
+        agent = _make_agent(llm=llm, tool_registry=registry, messaging=messaging)
+        agent.handle_incoming(_KNOWN_JID, "test context", ts=1.0)
+
+        assert len(received_contexts) == 1
+        assert received_contexts[0] == {"_jid": _KNOWN_JID}
+
+    def test_legacy_handler_unaffected_by_context(self):
+        """Legacy handler (no context param) still works correctly with context in invoke."""
+        call_count = [0]
+
+        registry = ToolRegistry()
+
+        def legacy_handler(gateway, **kwargs):
+            call_count[0] += 1
+            return {"result": "legacy_ok"}
+
+        registry.register(
+            name="legacy_tool",
+            description="legacy, no context param",
+            params_schema={"type": "object", "properties": {}, "required": []},
+            handler=legacy_handler,
+        )
+
+        tool_call_response = LLMResponse(
+            text=None,
+            tool_calls=[LLMToolCall(id="c2", name="legacy_tool", arguments={})],
+        )
+        final_response = LLMResponse(text="done", tool_calls=[])
+        llm = ScriptedLLMProvider([tool_call_response, final_response])
+        messaging = RecordingMessagingGateway()
+
+        agent = _make_agent(llm=llm, tool_registry=registry, messaging=messaging)
+        agent.handle_incoming(_KNOWN_JID, "legacy test", ts=1.0)
+
+        assert call_count[0] == 1
+        assert len(messaging.sent) == 1
+
+
 class TestAgentTurnNoSrcImports:
     """bd_agent/agent.py must have zero imports from src.* (RF-070)."""
 

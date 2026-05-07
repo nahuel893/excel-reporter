@@ -207,7 +207,9 @@ class AgentTurn:
                     name=tc.name,
                     arguments=tc.arguments,
                 )
-                tool_result = self._tool_registry.invoke(domain_call, gateway=None)
+                tool_result = self._tool_registry.invoke(
+                    domain_call, gateway=None, context={"_jid": jid}
+                )
 
                 # Append tool-call placeholder (assistant role)
                 llm_messages.append(

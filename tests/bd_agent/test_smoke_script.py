@@ -245,3 +245,128 @@ class TestRunAllChecks:
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("src."):
                     pytest.fail(f"Found forbidden import: from {node.module} in smoke_test.py")
+
+
+# ---------------------------------------------------------------------------
+# T-205 — Sandbox Docker checks in smoke test (RF-104)
+# ---------------------------------------------------------------------------
+
+def _import_sandbox_checks():
+    from bd_agent.scripts.smoke_test import (
+        check_docker_daemon,
+        check_sandbox_image,
+    )
+    return check_docker_daemon, check_sandbox_image
+
+
+class TestCheckDockerDaemon:
+    """T-205: check_docker_daemon verifies docker info exit code (skips when
+    SANDBOX_ENABLED != true)."""
+
+    def test_functions_importable(self):
+        _import_sandbox_checks()
+
+    def test_skipped_when_sandbox_disabled(self, monkeypatch):
+        check_docker_daemon, _ = _import_sandbox_checks()
+        monkeypatch.setenv("SANDBOX_ENABLED", "false")
+        result = check_docker_daemon(env={"SANDBOX_ENABLED": "false"})
+        assert result["name"] == "docker_daemon"
+        assert result["ok"] is True  # skipped = not a failure
+        assert result.get("status") == "skipped"
+
+    def test_skipped_when_sandbox_env_missing(self, monkeypatch):
+        check_docker_daemon, _ = _import_sandbox_checks()
+        result = check_docker_daemon(env={})
+        assert result.get("status") == "skipped"
+
+    def test_pass_when_docker_info_succeeds(self, monkeypatch):
+        check_docker_daemon, _ = _import_sandbox_checks()
+        fake_result = MagicMock()
+        fake_result.returncode = 0
+        with patch("subprocess.run", return_value=fake_result):
+            result = check_docker_daemon(env={"SANDBOX_ENABLED": "true"})
+        assert result["ok"] is True
+
+    def test_fail_when_docker_info_fails(self, monkeypatch):
+        check_docker_daemon, _ = _import_sandbox_checks()
+        fake_result = MagicMock()
+        fake_result.returncode = 1
+        with patch("subprocess.run", return_value=fake_result):
+            result = check_docker_daemon(env={"SANDBOX_ENABLED": "true"})
+        assert result["ok"] is False
+
+    def test_fail_when_docker_not_found(self, monkeypatch):
+        check_docker_daemon, _ = _import_sandbox_checks()
+        with patch("subprocess.run", side_effect=FileNotFoundError("docker not found")):
+            result = check_docker_daemon(env={"SANDBOX_ENABLED": "true"})
+        assert result["ok"] is False
+
+
+class TestCheckSandboxImage:
+    """T-205: check_sandbox_image verifies docker image inspect exit code."""
+
+    def test_skipped_when_sandbox_disabled(self):
+        _, check_sandbox_image = _import_sandbox_checks()
+        result = check_sandbox_image(env={"SANDBOX_ENABLED": "false"})
+        assert result.get("status") == "skipped"
+        assert result["ok"] is True
+
+    def test_skipped_when_sandbox_env_missing(self):
+        _, check_sandbox_image = _import_sandbox_checks()
+        result = check_sandbox_image(env={})
+        assert result.get("status") == "skipped"
+
+    def test_pass_when_image_present(self):
+        _, check_sandbox_image = _import_sandbox_checks()
+        fake_result = MagicMock()
+        fake_result.returncode = 0
+        with patch("subprocess.run", return_value=fake_result):
+            result = check_sandbox_image(env={"SANDBOX_ENABLED": "true"})
+        assert result["ok"] is True
+
+    def test_fail_when_image_absent(self):
+        _, check_sandbox_image = _import_sandbox_checks()
+        fake_result = MagicMock()
+        fake_result.returncode = 1
+        with patch("subprocess.run", return_value=fake_result):
+            result = check_sandbox_image(env={"SANDBOX_ENABLED": "true"})
+        assert result["ok"] is False
+
+    def test_result_has_name_and_ok(self):
+        _, check_sandbox_image = _import_sandbox_checks()
+        result = check_sandbox_image(env={})
+        assert "name" in result
+        assert "ok" in result
+
+
+class TestRunAllChecksIncludesSandbox:
+    """T-205: run_all_checks must include sandbox checks when SANDBOX_ENABLED=true."""
+
+    def test_sandbox_checks_skipped_when_disabled(self, monkeypatch):
+        *_, run_all_checks = _import()
+        mock_engine = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_conn.execute.return_value.scalar.return_value = 1
+        mock_engine.connect.return_value = mock_conn
+        mock_http = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"status": "connected"}
+        mock_http.get.return_value = mock_resp
+
+        env = {
+            "AGENT_DB_URL": "postgresql+psycopg://agent_user:pwd@localhost/db",
+            "GEMINI_API_KEY": "fake-key",
+            "WHATSAPP_SERVICE_URL": "http://localhost:3000",
+            "SANDBOX_ENABLED": "false",
+        }
+        results = run_all_checks(env=env, engine=mock_engine, http_client=mock_http)
+        names = [r["name"] for r in results]
+        assert "docker_daemon" in names
+        assert "sandbox_image" in names
+        # both skipped
+        for r in results:
+            if r["name"] in ("docker_daemon", "sandbox_image"):
+                assert r.get("status") == "skipped"
