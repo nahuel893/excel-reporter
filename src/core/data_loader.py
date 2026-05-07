@@ -550,7 +550,12 @@ class DataLoader:
         marca_splits: dict[str, list[str]] | None = None,
     ) -> pd.DataFrame:
         """
-        Obtiene ventas del mismo rango de fechas pero del anio anterior.
+        Obtiene ventas del MES completo del año anterior (MMAA — Mismo Mes Año Anterior).
+
+        Para cada mes cubierto por [fecha_desde, fecha_hasta] del periodo actual,
+        trae todo el mes equivalente un año atrás. Esto evita comparar rangos
+        parciales (ej: corriendo el reporte el día 7, igual debe traer el mes
+        completo del año anterior, no solo del 1 al 7).
 
         Args:
             fecha_desde: Fecha inicio formato 'YYYY-MM-DD'
@@ -562,11 +567,15 @@ class DataLoader:
         Returns:
             DataFrame con columnas: sucursal, generico, id_ruta, cantidad
         """
-        fecha_desde_aa = f"{int(fecha_desde[:4]) - 1}{fecha_desde[4:]}"
-        fecha_hasta_aa = f"{int(fecha_hasta[:4]) - 1}{fecha_hasta[4:]}"
+        # MMAA: rango completo del/los mes(es) cubierto(s), un año atrás.
+        # desde → primer dia del mes (de fecha_desde) un año atras.
+        # hasta → ultimo dia del mes (de fecha_hasta) un año atras.
+        desde_prev = (datetime.strptime(fecha_desde, "%Y-%m-%d").date() - relativedelta(years=1)).replace(day=1)
+        hasta_prev_first = (datetime.strptime(fecha_hasta, "%Y-%m-%d").date() - relativedelta(years=1)).replace(day=1)
+        hasta_prev = hasta_prev_first + relativedelta(months=1) - timedelta(days=1)
         return self.get_ventas_resumen_mensual(
-            fecha_desde_aa,
-            fecha_hasta_aa,
+            desde_prev.strftime("%Y-%m-%d"),
+            hasta_prev.strftime("%Y-%m-%d"),
             genericos,
             genericos_sin_prvta=genericos_sin_prvta,
             marca_splits=marca_splits,
