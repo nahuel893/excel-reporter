@@ -1,11 +1,9 @@
-"""Tests for the new avances workflow: base + output_dir per period.
+"""Tests for the avances workflow: previous-month resolution + output_dir per period.
 
 Spec:
-- archivo_plantilla is the BASE template, READ-ONLY (input dir, never modified)
+- Base template is resolved automatically: previous month's output > archivo_plantilla
 - Output goes to data/output/avances/{YYYY-MM}/{nombre_archivo}.xlsx
-- Snapshot of the base is saved alongside the output (same folder, original filename)
 - Re-running the same period updates the existing output (preserves user customizations)
-  but always refreshes the base snapshot to reflect the base used in this run
 """
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -142,26 +140,30 @@ class TestAvancesOutputDir:
             "Base file in input/ must never be modified by avances service"
         )
 
-    def test_base_snapshot_saved_alongside_output(self, tmp_path):
-        """A copy of the base lives in the same period folder as the output."""
-        base = tmp_path / "AVANCE BRANCA.xlsx"
-        _make_base(base)
-        output_root = tmp_path / "out"
+    def test_base_snapshot_not_needed_with_prev_month(self, tmp_path):
+        """When previous month's output exists, archivo_plantilla is not required.
 
-        service = AvancesService(data_loader=_mock_loader())
-        config = AvancesConfig(
-            archivo_plantilla=str(base),
-            fecha_desde="2026-04-01",
-            fecha_hasta="2026-04-30",
-            nombre_archivo="AVANCE BRANCA - ABRIL 2026",
-            output_dir=output_root / "avances" / "2026-04",
-        )
-        service.generar_reporte(config)
+        _resolve_base computes the previous month's dir using service_output_dir,
+        so we need to place the prev output under the same path structure that
+        service_output_dir will resolve to (using DATA_OUTPUT patch).
+        """
+        prev_output_dir = tmp_path / "out" / "avances" / "2026-03"
+        prev_output_dir.mkdir(parents=True)
+        prev_output = prev_output_dir / "AVANCE BRANCA - MARZO 2026.xlsx"
+        _make_base(prev_output)
 
-        snapshot = output_root / "avances" / "2026-04" / "AVANCE BRANCA.xlsx"
-        assert snapshot.exists(), "Base snapshot must be saved in the period folder"
-        # Snapshot must match the base byte-for-byte (it's a literal copy)
-        assert snapshot.read_bytes() == base.read_bytes()
+        with patch("config.settings.DATA_OUTPUT", tmp_path / "out"):
+            service = AvancesService(data_loader=_mock_loader())
+            config = AvancesConfig(
+                fecha_desde="2026-04-01",
+                fecha_hasta="2026-04-30",
+                nombre_archivo="AVANCE BRANCA - ABRIL 2026",
+            )
+            result = service.generar_reporte(config)
+
+        assert result.ruta_archivo.exists()
+        wb = load_workbook(str(result.ruta_archivo))
+        assert "MI ANALISIS" in wb.sheetnames  # carried from prev month
 
     def test_user_sheets_preserved_on_first_run(self, tmp_path):
         """User-added sheets in the base survive into the generated output."""
@@ -231,7 +233,7 @@ class TestAvancesOutputDir:
 
         expected_period = tmp_path / "out" / "avances" / "2026-05"
         assert result.ruta_archivo == expected_period / "AVANCE BRANCA - MAYO 2026.xlsx"
-        assert (expected_period / "AVANCE BRANCA.xlsx").exists()  # snapshot
+        assert result.ruta_archivo.exists()
 
     def test_nombre_archivo_required(self, tmp_path):
         """nombre_archivo must be supplied — output filename is not derivable from base alone."""

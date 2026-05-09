@@ -3,20 +3,19 @@ AvancesService - Generates avances Excel reports from a base template,
 preserving formulas and user-added sheets.
 
 Workflow:
-- ``archivo_plantilla`` is the BASE template (read-only — never modified).
+- The base template is resolved automatically: first looks for the previous
+  month's output (so customizations carry forward), then falls back to
+  ``archivo_plantilla`` from config (for first-time runs).
 - Output is written to ``data/output/avances/{YYYY-MM}/{nombre_archivo}.xlsx``.
-- A copy of the base used is saved alongside the output (same folder, original
-  filename) as ``{base_name}.xlsx`` — so reports can be regenerated even if the
-  base evolves later.
 - Re-running the same period UPDATES the existing output (preserving user
-  customizations); the base snapshot is refreshed each run to reflect the base
-  used in the latest run.
+  customizations).
 """
 
 import logging
 import shutil
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -103,11 +102,18 @@ class AvancesConfig:
       - id_sucursal: filtra fact_ventas, dim_cliente, cob_preventista_*
       - id_fuerza_ventas: filtra cob_preventista_*
       - dim_articulo se filtra por articulos vendidos en el rango + sucursal
+
+    Template resolution:
+      - If archivo_plantilla is set and the previous month's output exists,
+        the previous month's output is used as base (customizations carry forward).
+      - If there is no previous month's output, archivo_plantilla is used.
+      - archivo_plantilla is now optional — if omitted, only previous-month
+        resolution is attempted.
     """
 
-    archivo_plantilla: str  # path to BASE template (read-only)
     fecha_desde: str
     fecha_hasta: str
+    archivo_plantilla: str | None = None  # path to BASE template (fallback if no prev output)
     id_sucursal: int = 1
     id_fuerza_ventas: int = 1
     nombre_archivo: str | None = None  # output filename (no extension)
@@ -123,16 +129,49 @@ class AvancesResult:
 
 
 class AvancesService(BaseService):
-    """Generates avances Excel reports from a base template into per-period folders."""
+    """Generates avances Excel reports from a base template into per-period folders.
+
+    Template resolution order (first match wins):
+    1. Previous month's output in data/output/avances/{YYYY-MM}/
+    2. archivo_plantilla from config (fallback for first-time runs)
+    """
 
     SERVICE_SLUG = "avances"
     GRANULARITY = "month"
 
-    def generar_reporte(self, config: AvancesConfig) -> AvancesResult:
-        base_path = Path(config.archivo_plantilla)
-        if not base_path.exists():
-            raise FileNotFoundError(f"Base template not found: {base_path}")
+    def _resolve_base(self, config: AvancesConfig, output_dir: Path) -> Path | None:
+        """Find the base template: previous month's output > archivo_plantilla.
 
+        The previous month is derived from fecha_desde. Looks for any .xlsx
+        file matching the report name pattern in the previous month's output dir.
+        """
+        # 1. Try previous month's output
+        desde = datetime.strptime(config.fecha_desde, "%Y-%m-%d")
+        prev_year = desde.year if desde.month > 1 else desde.year - 1
+        prev_month = desde.month - 1 if desde.month > 1 else 12
+        prev_period = f"{prev_year}-{prev_month:02d}"
+        prev_dir = service_output_dir(self.SERVICE_SLUG, f"{prev_period}-01", "month")
+
+        if prev_dir.is_dir():
+            # Look for any .xlsx that is NOT a capture image
+            candidates = sorted(
+                p for p in prev_dir.glob("*.xlsx")
+                if "_backup" not in p.stem
+            )
+            if candidates:
+                logger.info("Usando output del mes anterior como base: %s", candidates[0])
+                return candidates[0]
+
+        # 2. Fall back to archivo_plantilla from config
+        if config.archivo_plantilla:
+            base_path = Path(config.archivo_plantilla)
+            if base_path.exists():
+                logger.info("Usando archivo_plantilla del config: %s", base_path)
+                return base_path
+
+        return None
+
+    def generar_reporte(self, config: AvancesConfig) -> AvancesResult:
         if not config.nombre_archivo:
             raise ValueError(
                 "nombre_archivo is required — used as the output filename "
@@ -145,21 +184,22 @@ class AvancesService(BaseService):
             else service_output_dir(self.SERVICE_SLUG, config.fecha_desde, "month")
         )
         output_dir.mkdir(parents=True, exist_ok=True)
-
-        snapshot_path = output_dir / base_path.name
         output_path = output_dir / f"{config.nombre_archivo}.xlsx"
 
-        # Always refresh the base snapshot — captures which base was used in this run
-        shutil.copy2(str(base_path), str(snapshot_path))
-        logger.info("Base snapshot guardado: %s", snapshot_path)
+        base_path = self._resolve_base(config, output_dir)
+        if base_path is None:
+            raise FileNotFoundError(
+                "No se encontro plantilla base ni output del mes anterior. "
+                "Proporcione archivo_plantilla en el config."
+            )
 
-        # If output doesn't exist yet, seed it from the base. If it exists,
-        # leave it as-is so user customizations survive regeneration.
-        if not output_path.exists():
+        # If output already exists, update in-place (preserving user customizations).
+        # Otherwise, seed from the resolved base.
+        if output_path.exists():
+            logger.info("Archivo output existente — actualizando in-place: %s", output_path)
+        else:
             shutil.copy2(str(base_path), str(output_path))
             logger.info("Archivo output creado desde base: %s", output_path)
-        else:
-            logger.info("Archivo output existente — actualizando in-place: %s", output_path)
 
         logger.info("Cargando workbook %s ...", output_path.name)
         t0 = time.perf_counter()
