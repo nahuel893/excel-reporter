@@ -23,7 +23,7 @@ GENERICOS_INCLUIDOS: list[str] = [
 ]
 
 MARCAS_POR_GENERICO: dict[str, list[str]] = {
-    "CERVEZAS": ["SALTA", "HEINEKEN", "IMPERIAL", "SCHNEIDER", "AMSTEL"],
+    "CERVEZAS": ["SALTA", "HEINEKEN", "IMPERIAL", "SCHNEIDER", "AMSTEL", "MILLER"],
 }
 
 # Subdivision of AGUAS DANONE: pseudo-generico -> marca list
@@ -70,6 +70,7 @@ COLORES_MARCA: dict[str, str] = {
     "HEINEKEN": "#4CAF50",
     "IMPERIAL": "#F8E71C",
     "AMSTEL": "#D0421B",
+    "MILLER": "#9C27B0",
     "VILLA DEL SUR": "#B0B0B0",
     "VILLAVICENCIO": "#F5A623",
     "BRIO": "#4CAF50",
