@@ -1,0 +1,17 @@
+{
+    "tipo": "avances",
+    "filtros": {
+        "fecha_desde": "2026-05-01",
+        "fecha_hasta": "2026-05-31",
+        "archivo_plantilla": "data/input/avances/AVANCE BADIE MAYO 2026.xlsm",
+        "id_sucursal": 1,
+        "id_fuerza_ventas": 1,
+        "enviar_email": false,
+        "enviar_whatsapp": false
+    },
+    "reportes": [
+        {
+            "nombre": "AVANCE BADIE - MAYO 2026"
+        }
+    ]
+}
