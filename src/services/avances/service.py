@@ -142,9 +142,19 @@ class AvancesService(BaseService):
     def _resolve_base(self, config: AvancesConfig, output_dir: Path) -> Path | None:
         """Find the base template: previous month's output > archivo_plantilla.
 
-        The previous month is derived from fecha_desde. Looks for any .xlsx
-        file matching the report name pattern in the previous month's output dir.
+        The previous month is derived from fecha_desde. When multiple reports
+        share the output directory (e.g. Branca and Badie), we filter candidates
+        by the name prefix extracted from nombre_archivo to avoid picking the
+        wrong report's output.
         """
+        # Extract name prefix for filtering (e.g. "AVANCE BRANCA" from "AVANCE BRANCA - MAYO 2026")
+        name_prefix = ""
+        if config.nombre_archivo:
+            # Split on " - " and take the first part(s) before the date
+            parts = config.nombre_archivo.split(" - ")
+            if len(parts) > 1:
+                name_prefix = parts[0].strip()  # e.g. "AVANCE BRANCA"
+
         # 1. Try previous month's output
         desde = datetime.strptime(config.fecha_desde, "%Y-%m-%d")
         prev_year = desde.year if desde.month > 1 else desde.year - 1
@@ -153,11 +163,17 @@ class AvancesService(BaseService):
         prev_dir = service_output_dir(self.SERVICE_SLUG, f"{prev_period}-01", "month")
 
         if prev_dir.is_dir():
-            # Look for any .xlsx that is NOT a capture image
             candidates = sorted(
                 p for p in prev_dir.glob("*.xlsx")
                 if "_backup" not in p.stem
             )
+            # Filter by name prefix to avoid picking wrong report's output
+            if name_prefix and candidates:
+                matching = [c for c in candidates if c.stem.startswith(name_prefix)]
+                if matching:
+                    logger.info("Usando output del mes anterior como base: %s", matching[0])
+                    return matching[0]
+            # Fallback: if no name match or no prefix, use first candidate
             if candidates:
                 logger.info("Usando output del mes anterior como base: %s", candidates[0])
                 return candidates[0]

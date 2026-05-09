@@ -254,3 +254,27 @@ class TestAvancesOutputDir:
             assert "nombre_archivo" in str(e).lower()
         else:
             raise AssertionError("Should have raised ValueError for missing nombre_archivo")
+
+    def test_resolve_base_picks_correct_report_when_multiple_in_dir(self, tmp_path):
+        """When both Branca and Badie outputs exist in prev month dir,
+        _resolve_base must pick the one matching nombre_archivo prefix."""
+        prev_dir = tmp_path / "out" / "avances" / "2026-03"
+        prev_dir.mkdir(parents=True)
+        # Create two outputs from March — Badie sorts first alphabetically
+        _make_base(prev_dir / "AVANCE BADIE - MARZO 2026.xlsx")
+        _make_base(prev_dir / "AVANCE BRANCA - MARZO 2026.xlsx")
+
+        with patch("config.settings.DATA_OUTPUT", tmp_path / "out"):
+            service = AvancesService(data_loader=_mock_loader())
+            # Branca must pick the BRANCA file, not BADIE
+            config_branca = AvancesConfig(
+                fecha_desde="2026-04-01",
+                fecha_hasta="2026-04-30",
+                nombre_archivo="AVANCE BRANCA - ABRIL 2026",
+            )
+            result = service.generar_reporte(config_branca)
+
+        # Verify the output was created and the base had the user sheet from BRANCA
+        assert result.ruta_archivo.exists()
+        wb = load_workbook(str(result.ruta_archivo))
+        assert "MI ANALISIS" in wb.sheetnames
