@@ -63,7 +63,7 @@ class WhatsAppMessagingGateway:
             httpx.HTTPError: On network-level failures (connection refused, timeout, etc.).
         """
         url = f"{self._base_url}{self._SEND_TEXT_PATH}"
-        payload = {"jid": jid, "text": text}
+        payload = {"to": jid, "text": text}
 
         logger.debug("send_text: posting to %s for jid_prefix=%s", url, jid[:12])
         response = self._client.post(url, json=payload)

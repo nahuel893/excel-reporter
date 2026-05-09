@@ -31,7 +31,7 @@ const { AllowlistManager } = require("./lib/allowlist");
 const { MessageDeduplicator } = require("./lib/dedup");
 const { createSendFileDmRouter } = require("./lib/send-file-dm-router");
 
-const logger = pino({ level: "info" });
+const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -160,26 +160,49 @@ async function initWhatsApp() {
     if (connection === "open") {
       sessionReady = true;
       phoneNumber = sock.user?.id?.split(":")[0] || null;
-      logger.info({ phone: phoneNumber }, "WhatsApp conectado");
+      logger.info({ phone: phoneNumber, lid: sock.user?.lid, userId: sock.user?.id }, "WhatsApp conectado");
     }
   });
 
   // T-080: Inbound handler — forward DMs from allowlisted contacts to Python agent
   sock.ev.on("messages.upsert", ({ messages, type }) => {
+    // Diagnostic: log every event
+    logger.info({ type, count: messages.length, firstKey: messages[0]?.key }, "messages.upsert fired");
     // Only process new messages (not history syncs)
     if (type !== "notify") return;
 
-    // Bot's own JID (sin device suffix). Necesario para distinguir entre:
-    //   - reply del bot a alguien     → fromMe=true, remoteJid=otro  → SKIP (anti-loop)
-    //   - "Mensajes contigo mismo"    → fromMe=true, remoteJid=botJid → ALLOW (self-chat)
+    // Bot's own identifiers — usuarios pueden venir como @s.whatsapp.net (legacy) o @lid (multi-device).
+    // Note to Self llega como fromMe=true con remoteJid = bot's own (jid o lid).
     const botBaseNumber = sock.user?.id?.split(":")[0]?.split("@")[0];
     const botJid = botBaseNumber ? `${botBaseNumber}@s.whatsapp.net` : null;
+    // botLid raw viene como "174272710504653:14@lid" — normalizamos sacando el device suffix
+    const botLidBase = sock.user?.lid?.split(":")[0]?.split("@")[0];
+    const botLid = botLidBase ? `${botLidBase}@lid` : null;
 
     for (const msg of messages) {
-      const from = msg.key?.remoteJid || "";
+      let from = msg.key?.remoteJid || "";
+      const fromMe = !!msg.key?.fromMe;
 
-      // Anti-loop: si el mensaje es del bot pero no es self-chat, lo descartamos
-      if (msg.key?.fromMe && from !== botJid) continue;
+      // Detección de self-chat (Note to Self): fromMe=true Y remoteJid es el bot
+      const isSelfChat = fromMe && ((from && from === botJid) || (from && from === botLid));
+
+      // Anti-loop: si fromMe=true pero NO es self-chat, descartamos (replies del bot)
+      if (fromMe && !isSelfChat) continue;
+
+      // Para self-chat, normalizamos `from` al JID con número (lo que el allowlist espera)
+      if (isSelfChat) from = botJid;
+
+      // Si el mensaje viene con @lid de otro contacto, intentamos resolver via participantPn
+      if (from.endsWith("@lid")) {
+        const pn = msg.key?.participantPn;
+        if (pn && pn.endsWith("@s.whatsapp.net")) {
+          from = pn;
+        } else {
+          // No podemos resolver — descartamos (no podríamos comparar contra allowlist)
+          logger.debug({ from, key: msg.key }, "DM @lid sin participantPn — descartado");
+          continue;
+        }
+      }
 
       // DMs only: JID must end with @s.whatsapp.net (not @g.us for groups)
       if (!from.endsWith("@s.whatsapp.net")) continue;

@@ -235,6 +235,7 @@ def merge_filters(
         "categorias_deposito_path": global_f.categorias_deposito_path,
         "genericos_sin_prvta": global_f.genericos_sin_prvta,
         "marca_splits": global_f.marca_splits,
+        "cupos_manuales": global_f.cupos_manuales,
     }
     if report_f:
         if report_f.genericos is not None:

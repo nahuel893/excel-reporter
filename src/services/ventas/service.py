@@ -3,7 +3,7 @@ VentasService - Servicio para generacion de reportes de ventas.
 
 Orquesta el flujo completo: extraccion, procesamiento y generacion de Excel.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import pandas as pd
 
@@ -93,6 +93,7 @@ def _crear_estilo_ventas(
     info_dias: dict[str, int],
     dias_visibles: int = 2,
     con_montos: bool = True,
+    unidad: str = "bultos",
 ) -> SheetStyle:
     """
     Crea el estilo para el reporte de ventas con grupos de columnas.
@@ -102,6 +103,7 @@ def _crear_estilo_ventas(
         info_dias: Diccionario con info de dias habiles para mostrar en encabezado
         dias_visibles: Cantidad de dias al final que no se agrupan (default: 2)
         con_montos: Si False, omite columnas de monto/descuento del estilo y subtotales.
+        unidad: "bultos" (enteros) o "htls" (con 2 decimales).
 
     Returns:
         SheetStyle configurado con el grupo de dias y filas de resumen
@@ -115,13 +117,24 @@ def _crear_estilo_ventas(
         end_col = columnas_dias[-(dias_visibles + 1)]
         groups.append(ColumnGroup(start_col=start_col, end_col=end_col, collapsed=True))
 
+    # En HTLs los valores son decimales — formato con 2 decimales para no truncar.
+    fmt_cantidad = '#,##0.00' if unidad == "htls" else '#,##0'
+
     # Formato de columnas: base + dias con ancho fijo
     column_formats = dict(VENTAS_COLUMN_FORMATS)
+    if unidad == "htls":
+        # Sobrescribir number_format en columnas de cantidad/tendencia/cupo (no en cobertura)
+        for key in ("cant_generico", "tend_generico", "total_marca", "mmaa_marca",
+                    "tend_marca", "cupo_generico", "cupo_marca"):
+            col_name = COLUMN_NAMES[key]
+            existing = column_formats.get(col_name)
+            if existing is not None:
+                column_formats[col_name] = replace(existing, number_format=fmt_cantidad)
     if not con_montos:
         for col in _MONEY_COLUMNS:
             column_formats.pop(col, None)
     for col_dia in columnas_dias:
-        column_formats[col_dia] = ColumnFormat(number_format='#,##0', width=9.3)
+        column_formats[col_dia] = ColumnFormat(number_format=fmt_cantidad, width=9.3)
 
     # Columnas con subtotal: todas las numéricas menos cobertura, Var% y ratios de cupo
     subtotal_cols = [
@@ -599,7 +612,7 @@ class VentasService(BaseService):
             idx_total = columnas.index(COLUMN_NAMES["total_marca"])
             columnas_dias = columnas[idx_marca + 1:idx_total]
 
-            style = _crear_estilo_ventas(columnas_dias, info_dias, con_montos=con_montos)
+            style = _crear_estilo_ventas(columnas_dias, info_dias, con_montos=con_montos, unidad=unidad)
             writer.add_sheet(df_procesado, sheet_name=sheet_label, style=style)
             total_procesados += len(df_procesado)
             hojas.append(sheet_label)

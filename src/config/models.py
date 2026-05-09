@@ -74,6 +74,9 @@ class GlobalFilters(BaseModel):
     genericos_sin_prvta: list[str] | None = None
     # Mapping {generico: [marcas]} for split-by-marca (resumen-mensual)
     marca_splits: dict[str, list[str]] | None = None
+    # Cupos hardcodeados {sucursal: {generico: cupo}} — se concatenan al df_cupos
+    # antes del merge final. Útil para sucursales que no se cargan en fact_cupos.
+    cupos_manuales: dict[str, dict[str, float]] | None = None
 
 
 class ReportFilters(BaseModel):

@@ -94,6 +94,7 @@ class AgentTurn:
         delay_fn: Callable[[], None] | None = None,
         max_tool_iterations: int = 5,
         now_fn: Callable[[], datetime] | None = None,
+        db_gateway=None,  # DatabaseGateway protocol — passed to tool handlers via registry.invoke
     ) -> None:
         self._allowlist = allowlist
         self._active_hours = active_hours
@@ -103,6 +104,7 @@ class AgentTurn:
         self._llm = llm
         self._tool_registry = tool_registry
         self._messaging = messaging
+        self._db_gateway = db_gateway
         self._schema_doc_loader = schema_doc_loader
         self._delay_fn: Callable[[], None] = delay_fn if delay_fn is not None else _noop
         self._max_tool_iterations = max_tool_iterations
@@ -208,7 +210,7 @@ class AgentTurn:
                     arguments=tc.arguments,
                 )
                 tool_result = self._tool_registry.invoke(
-                    domain_call, gateway=None, context={"_jid": jid}
+                    domain_call, gateway=self._db_gateway, context={"_jid": jid}
                 )
 
                 # Append tool-call placeholder (assistant role)

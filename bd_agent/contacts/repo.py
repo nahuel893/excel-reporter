@@ -23,6 +23,7 @@ def _parse_contact(model) -> Contact:
         jid=model.jid,
         daily_message_limit=model.daily_message_limit,
         permissions=tuple(model.permissions),
+        cargo=model.cargo,
     )
 
 

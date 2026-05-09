@@ -25,6 +25,13 @@ logger = logging.getLogger(__name__)
 # Default genericos when config.genericos is None
 _DEFAULT_GENERICOS = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
 
+# Genericos lógicos cuya carga en fact_cupos está partida en sub-marcas.
+# Cuando una hoja pide "VINOS", el cupo se reconstruye sumando ARIZU + CANCILLER.
+_CUPOS_GENERICO_PARTS: dict[str, list[str]] = {
+    "VINOS": ["ARIZU", "CANCILLER", "TORO"],
+    "FRATELLI B": ["FRATELLI BRANCA"],
+}
+
 # Row labels for subtotals
 _SUBTOTAL_CC = "SUBTOTAL CASA CENTRAL"
 _SUC_SIN_DIRECTA = "SUCURSALES SIN DIRECTA"
@@ -73,6 +80,9 @@ class ResumenMensualConfig:
     # "{generico} (sin {marcas})" group for everything else. Each section gets its
     # own subtotals. Example: {"VINOS FINOS": ["QUARA"]}.
     marca_splits: dict[str, list[str]] | None = None
+    # Cupos hardcodeados {sucursal: {generico: cupo}} — se concatenan al df_cupos
+    # antes del merge. Útil para sucursales que no entran a fact_cupos (e.g. GUEMES).
+    cupos_manuales: dict[str, dict[str, float]] | None = None
 
 
 # Default list of genericos that exclude PRVTA documents (facturas presupuesto).
@@ -638,6 +648,9 @@ def _add_division_totals(
         if detalle_sheet_ma:
             ws.cell(r, 8).value = _sumifs(detalle_sheet_ma, None, r)
         # I (Objetivo) y J (Tend vs Obj %) quedan en blanco — no hay cupos por division.
+        # Formato entero para filas de supermercados (sin redondear, solo visual)
+        for col in range(3, 9):  # C..H (DIA1, DIA2, Total, Tend, MMAA, MA)
+            ws.cell(r, col).number_format = '#,##0'
 
 
 def _build_dim_articulo_sheet(workbook, df: pd.DataFrame) -> None:
@@ -777,13 +790,43 @@ class ResumenMensualService(BaseService):
         # -----------------------------------------------------------------
         periodo = config.fecha_desde[:7]  # "YYYY-MM-DD" → "YYYY-MM"
         genericos_for_cupos = genericos if genericos else _DEFAULT_GENERICOS
+
+        # Expandir genericos lógicos a sub-marcas reales en fact_cupos
+        # (e.g. "VINOS" → ["ARIZU", "CANCILLER"]). Mantener un mapeo inverso
+        # para volver a renombrar después del query.
+        # Si hay marca_splits para un genérico, el cupo "real" se renombra a
+        # "{generico} (sin {marcas})" y cada marca listada se trae por separado.
+        genericos_reales: list[str] = []
+        map_real_a_logico: dict[str, str] = {}
+        for g in genericos_for_cupos:
+            partes = _CUPOS_GENERICO_PARTS.get(g, [g])
+            marcas_split = (marca_splits or {}).get(g, [])
+            if marcas_split:
+                logico_sin = f"{g} (sin {', '.join(marcas_split)})"
+                for parte in partes:
+                    genericos_reales.append(parte)
+                    map_real_a_logico[parte] = logico_sin
+                for marca in marcas_split:
+                    genericos_reales.append(marca)
+                    map_real_a_logico[marca] = marca
+            else:
+                for parte in partes:
+                    genericos_reales.append(parte)
+                    map_real_a_logico[parte] = g
+
         try:
             df_cupos_raw = self.data_loader.get_cupos_resumen_mensual(
-                periodo, genericos_for_cupos
+                periodo, genericos_reales
             )
         except Exception as exc:
             logger.warning("get_cupos_resumen_mensual failed (%s) — Objetivo column will be blank", exc)
             df_cupos_raw = pd.DataFrame(columns=["sucursal", "generico", "cupo"])
+
+        # Renombrar sub-marcas al genérico lógico (ARIZU/CANCILLER → VINOS)
+        if not df_cupos_raw.empty and "generico" in df_cupos_raw.columns:
+            df_cupos_raw["generico"] = (
+                df_cupos_raw["generico"].map(map_real_a_logico).fillna(df_cupos_raw["generico"])
+            )
 
         # Apply segregar + zonas to cupos (segregar PRIMERO; ver nota arriba)
         if not df_cupos_raw.empty and "id_ruta" in df_cupos_raw.columns:
@@ -797,6 +840,20 @@ class ResumenMensualService(BaseService):
             df_cupos_raw = df_cupos_raw.groupby(
                 ["sucursal", "generico"], as_index=False
             )["cupo"].sum()
+
+        # Inyectar cupos manuales (sucursales que no se cargan en fact_cupos)
+        if config.cupos_manuales:
+            manual_rows = [
+                {"sucursal": sucursal, "generico": generico, "cupo": cupo}
+                for sucursal, gens in config.cupos_manuales.items()
+                for generico, cupo in gens.items()
+            ]
+            if manual_rows:
+                df_manual = pd.DataFrame(manual_rows)
+                df_cupos_raw = pd.concat([df_cupos_raw, df_manual], ignore_index=True)
+                df_cupos_raw = df_cupos_raw.groupby(
+                    ["sucursal", "generico"], as_index=False
+                )["cupo"].sum()
 
         # -----------------------------------------------------------------
         # 5. Procesar datos (una llamada para todos los genericos)
@@ -887,12 +944,13 @@ class ResumenMensualService(BaseService):
             sheet_name = logical_gen[:31]  # Excel max 31 caracteres
             ws = writer.add_sheet(df_hoja_ordered, sheet_name=sheet_name, style=style)
 
-            # Caveat note for genericos whose totals exclude PRVTA
-            note = (
-                f"{logical_gen}: cantidades excluyen documentos PRVTA (facturas presupuesto)"
-                if logical_gen in sin_prvta
-                else None
-            )
+            # Caveat note: PRVTA exclusion (FRATELLI B) o aclaración de unidad (TAMBO)
+            if logical_gen in sin_prvta:
+                note = f"{logical_gen}: cantidades excluyen documentos PRVTA (facturas presupuesto)"
+            elif logical_gen == "TAMBO":
+                note = "TAMBO: cantidades expresadas en BULTOS"
+            else:
+                note = None
             # T-020/T-022/T-023: post-write — resolve SUM formulas, heatmap, subtotal styling
             _post_write_subtotals_and_heatmap(
                 ws, df_hoja_ordered, summary_rows_count, note=note

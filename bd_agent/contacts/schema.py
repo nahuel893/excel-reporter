@@ -30,6 +30,7 @@ class ContactModel(BaseModel):
     jid: str
     daily_message_limit: int
     permissions: list[Permission]
+    cargo: str | None = None
 
     @field_validator("jid")
     @classmethod

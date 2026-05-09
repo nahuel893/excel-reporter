@@ -243,6 +243,7 @@ def _run_resumen_report(report, merged: dict) -> list[tuple[Path, dict]]:
         categorias_deposito_path=merged.get("categorias_deposito_path"),
         genericos_sin_prvta=merged.get("genericos_sin_prvta"),
         marca_splits=merged.get("marca_splits"),
+        cupos_manuales=merged.get("cupos_manuales"),
     )
 
     result = ResumenMensualService().generar_reporte(config)

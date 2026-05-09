@@ -68,12 +68,18 @@ def build_agent_runtime(
         schema_doc_path: Override path to ``CONTEXT_DATABASE.md``.
             Defaults to the project root ``CONTEXT_DATABASE.md``.
     """
+    provider_name = os.environ.get("LLM_PROVIDER", "gemini").lower()
     gemini_key = os.environ.get("GEMINI_API_KEY")
+    opencode_key = os.environ.get("OPENCODE_API_KEY")
     agent_db_url = os.environ.get("AGENT_DB_URL")
 
     missing = []
-    if not gemini_key:
-        missing.append("GEMINI_API_KEY")
+    if provider_name == "opencode":
+        if not opencode_key:
+            missing.append("OPENCODE_API_KEY")
+    else:
+        if not gemini_key:
+            missing.append("GEMINI_API_KEY")
     if not agent_db_url:
         missing.append("AGENT_DB_URL")
 
@@ -121,6 +127,7 @@ def _build(
     from bd_agent.integrations.database import PgDatabaseGateway
     from bd_agent.integrations.messaging import WhatsAppMessagingGateway
     from bd_agent.llm.gemini import GeminiProvider
+    from bd_agent.llm.opencode import OpenCodeProvider
     from bd_agent.safety.active_hours import ActiveHoursGuard
     from bd_agent.safety.allowlist import AllowlistGuard
     from bd_agent.safety.guard import SafetyGuard
@@ -198,10 +205,17 @@ def _build(
     register_sql_fallback(tool_registry)
 
     # ------------------------------------------------------------------
-    # 7. LLM provider
+    # 7. LLM provider — switchable via LLM_PROVIDER env (gemini|opencode)
     # ------------------------------------------------------------------
-    # GeminiProvider reads GEMINI_API_KEY from os.environ automatically
-    llm = GeminiProvider()
+    _provider_name = os.environ.get("LLM_PROVIDER", "gemini").lower()
+    if _provider_name == "opencode":
+        # OpenCodeProvider reads OPENCODE_API_KEY from os.environ
+        # Optional LLM_MODEL override (e.g. deepseek-v4-pro)
+        _model = os.environ.get("LLM_MODEL") or None
+        llm = OpenCodeProvider(model=_model)
+    else:
+        # GeminiProvider reads GEMINI_API_KEY from os.environ automatically
+        llm = GeminiProvider()
 
     # ------------------------------------------------------------------
     # 8. Schema doc loader (cached via db_gateway)
@@ -229,6 +243,7 @@ def _build(
         messaging=messaging,
         schema_doc_loader=schema_doc_loader,
         delay_fn=_production_delay_fn,
+        db_gateway=db_gateway,
     )
 
     # ------------------------------------------------------------------

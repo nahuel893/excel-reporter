@@ -20,7 +20,17 @@
                 }
             ],
             "enviar_a": {
-                "Gonzalo Farah": {"via": ["email", "whatsapp"]}
+                "Gonzalo Farah": {
+                    "via": [
+                        "email",
+                        "whatsapp"
+                    ]
+                },
+                "Nahuel Aguirre": {
+                    "via": [
+                        "email_cc"
+                    ]
+                }
             }
         }
     ]

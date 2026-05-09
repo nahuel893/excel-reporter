@@ -13,11 +13,24 @@
         {
             "nombre": "AVANCE BRANCA - MAYO 2026",
             "capture_images": [
-                { "hoja": "AVANCE",    "rango": "B2:AX35", "renderer": "libreoffice" },
-                { "hoja": "Cobertura", "rango": "B2:AR37", "renderer": "libreoffice" }
+                {
+                    "hoja": "AVANCE",
+                    "rango": "B2:AX35",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cobertura",
+                    "rango": "B2:AR37",
+                    "renderer": "libreoffice"
+                }
             ],
             "enviar_a": {
-                "Nahuel Aguirre": {"via": ["whatsapp"]}
+                "Nahuel Aguirre": {
+                    "via": [
+                        "whatsapp",
+                        "email_cc"
+                    ]
+                }
             }
         }
     ]

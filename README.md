@@ -284,6 +284,20 @@ gold.dim_articulo (id_articulo, generico, marca)
 gold.fact_ventas (id_sucursal, id_articulo, fecha_comprobante, cantidades_total, subtotal_neto)
 ```
 
+## Asistente WhatsApp (BD Agent)
+
+Este proyecto incluye ademas un agente de lenguaje natural que responde consultas sobre el Data Warehouse via WhatsApp. Recibe DMs, los traduce a SQL contra el schema `gold` con conexion read-only, y devuelve la respuesta en el mismo chat. Usa Gemini 2.0 Flash Lite como LLM y un `whatsapp-service` (Node + Baileys) como bridge a WhatsApp.
+
+Opcionalmente puede generar reportes Excel/PDF/PNG ejecutando codigo Python en un sandbox Docker hardened (`SANDBOX_ENABLED=true`).
+
+### Documentacion
+
+- [Getting Started](docs/bd_agent/getting-started.md) — de 0 a agente respondiendo
+- [Architecture Reference](docs/bd_agent/README.md) — modulo, contratos, seguridad, observabilidad
+- [API Reference](docs/bd_agent/api-reference.md) — endpoints HTTP de FastAPI y Node
+- [Configuration](docs/bd_agent/configuration.md) — variables de entorno y JSONs
+- [Troubleshooting](docs/bd_agent/troubleshooting.md) — problemas comunes y fixes
+
 ## Licencia
 
 MIT

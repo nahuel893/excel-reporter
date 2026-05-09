@@ -36,28 +36,16 @@ def _build_caption(
     Caption personalizado con emojis. Distingue grupo vs contacto individual.
     """
     title = sheet or report_name or "Reporte"
-    periodo_line = f"🗓️ {periodo}" if periodo else ""
+    head = f"📊 *{title}*"
+    if periodo:
+        head += f" · 🗓️ {periodo}"
 
     if is_group:
-        body = (
-            "📢 Reporte automatizado\n\n"
-            f"📊 *{title}*"
-        )
-        if periodo_line:
-            body += f"\n{periodo_line}"
-        body += "\n\n🤖 Bot de informes Badie"
-        return body
+        return f"{head}\n🤖 Bot Informes Badie"
 
     first_name = (contact_name or "").split()[0] if contact_name else ""
     saludo = f"👋 Hola {first_name}!" if first_name else "👋 Hola!"
-    body = (
-        f"{saludo}\n\n"
-        f"📊 Reporte: *{title}*"
-    )
-    if periodo_line:
-        body += f"\n{periodo_line}"
-    body += "\n\n🤖 Generado automáticamente"
-    return body
+    return f"{saludo}\n{head}\n🤖 Bot Informes Badie"
 
 
 class SendWhatsAppStep(DeliveryStep):

@@ -29,7 +29,7 @@ from bd_agent.llm.provider import LLMMessage, LLMResponse, LLMToolCall
 # Constants
 # ---------------------------------------------------------------------------
 
-_DEFAULT_MODEL = "gemini-2.0-flash-lite"
+_DEFAULT_MODEL = "gemini-3.1-flash-lite"
 
 # HTTP status codes that are considered transient and eligible for retry
 _RETRYABLE_CODES = {429, 500, 502, 503, 504}

@@ -3,9 +3,29 @@
     "filtros": {
         "fecha_desde": "2026-05-01",
         "fecha_hasta": "2026-05-31",
-        "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "VINOS", "VINOS FINOS", "SIDRAS Y LICORES", "FRATELLI B", "TAMBO", "JUGOS"],
+        "genericos": [
+            "CERVEZAS",
+            "AGUAS DANONE",
+            "VINOS CCU",
+            "VINOS",
+            "VINOS FINOS",
+            "SIDRAS Y LICORES",
+            "FRATELLI B",
+            "TAMBO",
+            "JUGOS"
+        ],
         "marca_splits": {
-            "VINOS FINOS": ["QUARA"]
+            "VINOS FINOS": [
+                "QUARA"
+            ]
+        },
+        "cupos_manuales": {
+            "SUCURSAL GUEMES": {
+                "CERVEZAS": 3500,
+                "AGUAS DANONE": 2000,
+                "SIDRAS Y LICORES": 10,
+                "VINOS CCU": 100
+            }
         },
         "detalle_movimientos_path": "/home/nahuel/VM shared/archivos_diarios/2026-05/detalle_movimientos.xlsx",
         "detalle_movimientos_ma_path": "/home/nahuel/VM shared/archivos_diarios/2026-05/detalle_movimientos_ma.xlsx",
@@ -18,18 +38,59 @@
         {
             "nombre": "Resumen Mensual Mayo",
             "capture_images": [
-                { "hoja": "CERVEZAS",         "rango": "A1:J30", "renderer": "libreoffice" },
-                { "hoja": "AGUAS DANONE",     "rango": "A1:J30", "renderer": "libreoffice" },
-                { "hoja": "VINOS CCU",        "rango": "A1:J30", "renderer": "libreoffice" },
-                { "hoja": "VINOS",            "rango": "A1:J30", "renderer": "libreoffice" },
-                { "hoja": "VINOS FINOS",      "rango": "A1:J50", "renderer": "libreoffice" },
-                { "hoja": "SIDRAS Y LICORES", "rango": "A1:J30", "renderer": "libreoffice" },
-                { "hoja": "FRATELLI B",       "rango": "A1:J30", "renderer": "libreoffice" },
-                { "hoja": "TAMBO",            "rango": "A1:J30", "renderer": "libreoffice" },
-                { "hoja": "JUGOS",            "rango": "A1:J30", "renderer": "libreoffice" }
+                {
+                    "hoja": "CERVEZAS",
+                    "rango": "A1:J30",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "AGUAS DANONE",
+                    "rango": "A1:J30",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "VINOS CCU",
+                    "rango": "A1:J30",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "VINOS",
+                    "rango": "A1:J30",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "VINOS FINOS",
+                    "rango": "A1:J50",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "SIDRAS Y LICORES",
+                    "rango": "A1:J30",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "FRATELLI B",
+                    "rango": "A1:J30",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "TAMBO",
+                    "rango": "A1:J30",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "JUGOS",
+                    "rango": "A1:J30",
+                    "renderer": "libreoffice"
+                }
             ],
             "enviar_a": {
-                "Nahuel Aguirre": {"via": ["whatsapp"]}
+                "Nahuel Aguirre": {
+                    "via": [
+                        "whatsapp",
+                        "email_cc"
+                    ]
+                }
             }
         }
     ]

@@ -494,7 +494,7 @@ class TestGeminiProviderMessageConversion:
         assert "get_clientes_sucursal" in names
 
     def test_uses_gemini_flash_lite_model(self, provider) -> None:
-        """GeminiProvider uses 'gemini-2.0-flash-lite' by default."""
+        """GeminiProvider uses 'gemini-3.1-flash-lite' by default."""
         fake_resp = _make_sdk_response(text="ok", finish_reason="STOP")
 
         with patch.object(
@@ -513,7 +513,7 @@ class TestGeminiProviderMessageConversion:
             call_kwargs.kwargs.get("model")
             or (call_kwargs.args[0] if call_kwargs.args else None)
         )
-        assert model_used == "gemini-2.0-flash-lite"
+        assert model_used == "gemini-3.1-flash-lite"
 
     def test_no_src_imports(self) -> None:
         """gemini.py must have zero imports from src.*"""

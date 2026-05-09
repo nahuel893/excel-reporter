@@ -114,7 +114,7 @@ def procesar_ventas_diarias(
     if df_mmaa is not None and not df_mmaa.empty:
         for _, r in df_mmaa.iterrows():
             val = r.get(col_cantidad, 0)
-            mmaa_dict[(r["sucursal"], r["generico"], r["marca"])] = int(val) if val and val > 0 else None
+            mmaa_dict[(r["sucursal"], r["generico"], r["marca"])] = val if val and val > 0 else None
 
     # Asegurar que fecha sea datetime
     df = df.copy()
@@ -220,14 +220,14 @@ def procesar_ventas_diarias(
             # Cupo de generico (solo primera fila del grupo)
             cupo_gen = cupos_dict.get((sucursal, generico))
             cupo_gen_val = cupo_gen if i == 0 else None
-            tend_gen_rounded = round(totales["tend_generico"]) if i == 0 else None
-            cupo_vs_tend_gen = (tend_gen_rounded / cupo_gen) if (i == 0 and cupo_gen) else None
+            tend_gen_val = totales["tend_generico"] if i == 0 else None
+            cupo_vs_tend_gen = (tend_gen_val / cupo_gen) if (i == 0 and cupo_gen) else None
 
             row = {
                 COLUMN_NAMES["sucursal"]: sucursal,
                 COLUMN_NAMES["generico"]: generico,
                 COLUMN_NAMES["cant_generico"]: totales["cant_generico"] if i == 0 else None,
-                COLUMN_NAMES["tend_generico"]: tend_gen_rounded,
+                COLUMN_NAMES["tend_generico"]: tend_gen_val,
                 COLUMN_NAMES["monto_generico"]: totales["monto_generico"] if i == 0 else None,
                 COLUMN_NAMES["desc_generico"]: totales.get("desc_generico") if i == 0 else None,
                 COLUMN_NAMES["desc_pct_generico"]: (
@@ -241,20 +241,20 @@ def procesar_ventas_diarias(
                 COLUMN_NAMES["marca"]: fila["marca"],
             }
 
-            # Agregar columnas de dias (0 si no hay venta)
+            # Agregar columnas de dias (0 si no hay venta) — sin truncar decimales
             for col_dia in cols_dias:
-                row[col_dia] = int(fila[col_dia])
+                row[col_dia] = fila[col_dia]
 
             # Agregar totales de marca
             row[COLUMN_NAMES["total_marca"]] = fila["total_marca"]
 
-            tend_marca_rounded = round(fila["tend_marca"])
-            row[COLUMN_NAMES["tend_marca"]] = tend_marca_rounded
+            tend_marca_val = fila["tend_marca"]
+            row[COLUMN_NAMES["tend_marca"]] = tend_marca_val
 
             # Cupo de marca
             cupo_marca = cupos_dict.get((sucursal, fila["marca"]))
             row[COLUMN_NAMES["cupo_marca"]] = cupo_marca
-            row[COLUMN_NAMES["cupo_vs_tend_marca"]] = (tend_marca_rounded / cupo_marca) if cupo_marca else None
+            row[COLUMN_NAMES["cupo_vs_tend_marca"]] = (tend_marca_val / cupo_marca) if cupo_marca else None
 
             # MMAA y Var%
             mmaa_val = mmaa_dict.get((sucursal, generico, fila["marca"]))
@@ -321,11 +321,11 @@ def procesar_ventas(df: pd.DataFrame, fecha_desde: str, fecha_hasta: str) -> pd.
                 COLUMN_NAMES["sucursal"]: sucursal,
                 COLUMN_NAMES["generico"]: generico,
                 COLUMN_NAMES["cant_generico"]: totales["cant_generico"] if i == 0 else None,
-                COLUMN_NAMES["tend_generico"]: round(totales["tend_generico"]) if i == 0 else None,
+                COLUMN_NAMES["tend_generico"]: totales["tend_generico"] if i == 0 else None,
                 COLUMN_NAMES["monto_generico"]: totales["monto_generico"] if i == 0 else None,
                 COLUMN_NAMES["marca"]: fila["marca"],
                 COLUMN_NAMES["total_marca"]: fila["cantidad"],
-                COLUMN_NAMES["tend_marca"]: round(tendencia_marca),
+                COLUMN_NAMES["tend_marca"]: tendencia_marca,
                 COLUMN_NAMES["monto_marca"]: fila["monto"],
             }
             rows.append(row)

@@ -4,6 +4,17 @@ Internal documentation for the WhatsApp BD Agent component. For the quick-start 
 
 ---
 
+## 0. Documentacion adicional
+
+Este README cubre la arquitectura interna. Para tareas concretas, consulta los siguientes documentos hermanos:
+
+- **[getting-started.md](./getting-started.md)** — Guia paso a paso de 0 a agente respondiendo. Para alguien que clona el repo por primera vez.
+- **[api-reference.md](./api-reference.md)** — Referencia HTTP de los endpoints de FastAPI (`/agent/*`) y del `whatsapp-service` (`/send-text`, `/send-file-dm`, `/status`).
+- **[configuration.md](./configuration.md)** — Catalogo completo de variables `.env`, schema de `contactos_agente.json`, permisos, y reglas de hot-reload.
+- **[troubleshooting.md](./troubleshooting.md)** — Problemas comunes con sintoma, causa probable y fix concreto.
+
+---
+
 ## 1. What it does
 
 The BD Agent is a natural-language query interface over the PostgreSQL Data Warehouse (`gold` schema). Users send free-text questions via WhatsApp; the agent translates them into SQL queries using Gemini 2.0 Flash Lite, runs them through a read-only DB connection, and replies with formatted results — all inside the same WhatsApp DM thread.

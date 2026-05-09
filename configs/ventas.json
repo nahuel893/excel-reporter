@@ -3,7 +3,12 @@
     "filtros": {
         "fecha_desde": "2026-05-01",
         "fecha_hasta": "2026-05-06",
-        "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
+        "genericos": [
+            "CERVEZAS",
+            "AGUAS DANONE",
+            "VINOS CCU",
+            "SIDRAS Y LICORES"
+        ],
         "con_slicers": false,
         "con_cobertura": true,
         "con_montos": false,
@@ -15,54 +20,127 @@
         {
             "nombre": "Ventas CCU - WV",
             "filtros": {
-                "supervisores": ["Walter Vilte"],
+                "supervisores": [
+                    "Walter Vilte"
+                ],
                 "sucursales": [
-                    "SUCURSAL CAFAYATE", "SUCURSAL ABRA PAMPA", "SUCURSAL SAN PEDRO",
-                    "SUCURSAL JOAQUIN V GONZALEZ", "SUCURSAL LA QUIACA", "SUCURSAL METAN",
-                    "SUCURSAL HUMAHUACA", "SUCURSAL ORAN", "SUCURSAL TARTAGAL",
-                    "SUCURSAL MAIMARA", "SUCURSAL GUEMES", "SUCURSAL LIBERTADOR",
-                    "SUCURSAL PERICO", "CASA CENTRAL"
+                    "SUCURSAL CAFAYATE",
+                    "SUCURSAL ABRA PAMPA",
+                    "SUCURSAL SAN PEDRO",
+                    "SUCURSAL JOAQUIN V GONZALEZ",
+                    "SUCURSAL LA QUIACA",
+                    "SUCURSAL METAN",
+                    "SUCURSAL HUMAHUACA",
+                    "SUCURSAL ORAN",
+                    "SUCURSAL TARTAGAL",
+                    "SUCURSAL MAIMARA",
+                    "SUCURSAL GUEMES",
+                    "SUCURSAL LIBERTADOR",
+                    "SUCURSAL PERICO",
+                    "CASA CENTRAL"
                 ]
             },
             "enviar_a": {
-                "Sebastian Dellamea": { "via": ["whatsapp"] }
+                "Sebastian Dellamea": {
+                    "via": [
+                        "whatsapp"
+                    ]
+                },
+                "Walter Vilte": {
+                    "via": [
+                        "email"
+                    ]
+                },
+                "Nahuel Aguirre": {
+                    "via": [
+                        "email_cc"
+                    ]
+                }
             }
         },
         {
             "nombre": "Ventas Antonio Cabrerizo",
             "filtros": {
-                "supervisores": ["Antonio Cabrerizo"],
-                "sucursales": ["CASA CENTRAL"]
+                "supervisores": [
+                    "Antonio Cabrerizo"
+                ],
+                "sucursales": [
+                    "CASA CENTRAL"
+                ]
             },
             "enviar_a": {
-                "Gonzalo Farah": { "via": ["whatsapp"] }
+                "Gonzalo Farah": {
+                    "via": [
+                        "whatsapp"
+                    ]
+                },
+                "Antonio Cabrerizo": {
+                    "via": [
+                        "email"
+                    ]
+                },
+                "Nahuel Aguirre": {
+                    "via": [
+                        "email_cc"
+                    ]
+                }
             }
         },
         {
             "nombre": "Ventas Adrian Garcia",
             "filtros": {
-                "supervisores": ["Adrian Garcia"],
+                "supervisores": [
+                    "Adrian Garcia"
+                ],
                 "sucursales": [
-                    "SUCURSAL CAFAYATE", "SUCURSAL JOAQUIN V GONZALEZ",
-                    "SUCURSAL METAN", "SUCURSAL GUEMES"
+                    "SUCURSAL CAFAYATE",
+                    "SUCURSAL JOAQUIN V GONZALEZ",
+                    "SUCURSAL METAN",
+                    "SUCURSAL GUEMES"
                 ]
             },
             "enviar_a": {
-                "Adrian Garcia": { "via": ["email"] }
+                "Adrian Garcia": {
+                    "via": [
+                        "email"
+                    ]
+                },
+                "Nahuel Aguirre": {
+                    "via": [
+                        "email_cc"
+                    ]
+                }
             }
         },
         {
             "nombre": "Ventas Hernan Yapura",
             "filtros": {
-                "supervisores": ["Hernan Yapura"],
+                "supervisores": [
+                    "Hernan Yapura"
+                ],
                 "sucursales": [
-                    "SUCURSAL ABRA PAMPA", "SUCURSAL SAN PEDRO", "SUCURSAL LA QUIACA",
-                    "SUCURSAL HUMAHUACA", "SUCURSAL ORAN", "SUCURSAL TARTAGAL",
-                    "SUCURSAL MAIMARA", "SUCURSAL LIBERTADOR", "SUCURSAL PERICO"
+                    "SUCURSAL ABRA PAMPA",
+                    "SUCURSAL SAN PEDRO",
+                    "SUCURSAL LA QUIACA",
+                    "SUCURSAL HUMAHUACA",
+                    "SUCURSAL ORAN",
+                    "SUCURSAL TARTAGAL",
+                    "SUCURSAL MAIMARA",
+                    "SUCURSAL LIBERTADOR",
+                    "SUCURSAL PERICO"
                 ]
             },
             "enviar_a": {
-                "Hernan Yapura": { "via": ["email"] }
+                "Hernan Yapura": {
+                    "via": [
+                        "email"
+                    ]
+                },
+                "Nahuel Aguirre": {
+                    "via": [
+                        "email_cc"
+                    ]
+                }
             }
         }
     ]
