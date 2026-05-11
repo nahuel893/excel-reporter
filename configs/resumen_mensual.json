@@ -85,6 +85,29 @@
                 }
             ],
             "enviar_a": {
+                "Gonzalo Farah": {
+                    "via": [
+                        "whatsapp",
+                        "email"
+                    ]
+                },
+                "Sebastian Dellamea": {
+                    "via": [
+                        "whatsapp",
+                        "email"
+                    ]
+                },
+                "Daniel Manzur": {
+                    "via": [
+                        "whatsapp"
+                    ]
+                },
+                "Fabian Gallardo": {
+                    "via": [
+                        "whatsapp",
+                        "email"
+                    ]
+                },
                 "Nahuel Aguirre": {
                     "via": [
                         "whatsapp",
