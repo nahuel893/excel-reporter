@@ -103,6 +103,19 @@ class DataLoader:
         """
         return self.execute_query(query)
 
+    def get_sucursal_nombres(self) -> dict[int, str]:
+        """Obtiene mapping de id_sucursal -> descripcion desde dim_sucursal.
+
+        Returns:
+            Dict mapping sucursal ID to its descripcion (nombre).
+        """
+        df = self.execute_query(
+            "SELECT id_sucursal, descripcion FROM gold.dim_sucursal ORDER BY id_sucursal"
+        )
+        if df.empty:
+            return {}
+        return dict(zip(df["id_sucursal"].astype(int), df["descripcion"]))
+
     def get_dim_articulo(self) -> pd.DataFrame:
         """
         Obtiene la tabla `dim_articulo` completa para usar como lookup table
