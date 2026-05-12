@@ -26,7 +26,7 @@ class WhatsAppClient:
 
     def send_image(
         self,
-        group_name: str,
+        target: str,
         image_path: Path,
         caption: str = "",
     ) -> dict:
@@ -34,7 +34,7 @@ class WhatsAppClient:
         Envia una imagen a un grupo o contacto de WhatsApp.
 
         Args:
-            group_name: Nombre del grupo o contacto
+            target: Nombre del grupo o numero de contacto
             image_path: Path a la imagen PNG/JPG
             caption: Texto opcional que acompana la imagen
 
@@ -46,7 +46,7 @@ class WhatsAppClient:
         """
         return self._post_multipart(
             endpoint="/send-image",
-            group_name=group_name,
+            target=target,
             file_path=Path(image_path),
             file_field="image",
             caption=caption,
@@ -54,7 +54,7 @@ class WhatsAppClient:
 
     def send_file(
         self,
-        group_name: str,
+        target: str,
         file_path: Path,
         caption: str = "",
     ) -> dict:
@@ -62,7 +62,7 @@ class WhatsAppClient:
         Envia un archivo a un grupo o contacto de WhatsApp.
 
         Args:
-            group_name: Nombre del grupo o contacto
+            target: Nombre del grupo o numero de contacto
             file_path: Path al archivo (xlsx, pdf, etc.)
             caption: Texto opcional que acompana el archivo
 
@@ -74,7 +74,7 @@ class WhatsAppClient:
         """
         return self._post_multipart(
             endpoint="/send-file",
-            group_name=group_name,
+            target=target,
             file_path=Path(file_path),
             file_field="file",
             caption=caption,
@@ -95,21 +95,21 @@ class WhatsAppClient:
     def _post_multipart(
         self,
         endpoint: str,
-        group_name: str,
+        target: str,
         file_path: Path,
         file_field: str,
         caption: str,
     ) -> dict:
         url = f"{self.base_url}{endpoint}"
         try:
-            return self._post_with_httpx(url, group_name, file_path, file_field, caption)
+            return self._post_with_httpx(url, target, file_path, file_field, caption)
         except ImportError:
-            return self._post_with_urllib(url, group_name, file_path, file_field, caption)
+            return self._post_with_urllib(url, target, file_path, file_field, caption)
 
     def _post_with_httpx(
         self,
         url: str,
-        group_name: str,
+        target: str,
         file_path: Path,
         file_field: str,
         caption: str,
@@ -123,7 +123,7 @@ class WhatsAppClient:
             with httpx.Client(timeout=30) as client:
                 response = client.post(
                     url,
-                    data={"group_name": group_name, "caption": caption},
+                    data={"to": target, "caption": caption},
                     files={file_field: (file_path.name, file_content, self._guess_mimetype(file_path))},
                 )
                 response.raise_for_status()
@@ -138,7 +138,7 @@ class WhatsAppClient:
     def _post_with_urllib(
         self,
         url: str,
-        group_name: str,
+        target: str,
         file_path: Path,
         file_field: str,
         caption: str,
@@ -152,7 +152,7 @@ class WhatsAppClient:
             file_content = f.read()
 
         body_parts = [
-            f"--{boundary}\r\nContent-Disposition: form-data; name=\"group_name\"\r\n\r\n{group_name}".encode(),
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"to\"\r\n\r\n{target}".encode(),
             f"--{boundary}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n{caption}".encode(),
             (
                 f"--{boundary}\r\nContent-Disposition: form-data; "
