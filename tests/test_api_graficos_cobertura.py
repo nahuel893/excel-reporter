@@ -335,7 +335,7 @@ class TestDashboardRoute:
 
     def test_dashboard_returns_html(self, client):
         """Dashboard route returns the HTML template with 200."""
-        response = client.get("/dashboard/graficos_cobertura")
+        response = client.get("/dashboard/graficos-cobertura")
         assert response.status_code == 200
         assert "text/html" in response.headers.get("content-type", "")
         body = response.text
@@ -344,7 +344,7 @@ class TestDashboardRoute:
 
     def test_dashboard_contains_generico_dropdown(self, client):
         """Dashboard HTML contains the generico dropdown populated with GENERICOS_INCLUIDOS."""
-        response = client.get("/dashboard/graficos_cobertura")
+        response = client.get("/dashboard/graficos-cobertura")
         assert response.status_code == 200
         body = response.text
         for generico in GENERICOS_INCLUIDOS:
