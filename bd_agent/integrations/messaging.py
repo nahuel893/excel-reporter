@@ -27,7 +27,7 @@ class WhatsAppMessagingGateway:
 
     Args:
         base_url: Base URL of the Baileys Node service
-            (e.g. ``"http://localhost:3000"``).
+            (e.g. ``"http://localhost:3001"``).
         http_client: Optional injected httpx.Client (for testing / reuse).
             If ``None``, a new client is created with a 15-second timeout.
     """

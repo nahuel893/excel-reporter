@@ -189,8 +189,8 @@ def _build(
     # ------------------------------------------------------------------
     # 4. Messaging gateway
     # ------------------------------------------------------------------
-    baileys_base_url = os.environ.get("BAILEYS_BASE_URL", "http://localhost:3000")
-    messaging = WhatsAppMessagingGateway(base_url=baileys_base_url)
+    from config.settings import WHATSAPP_SERVICE_URL
+    messaging = WhatsAppMessagingGateway(base_url=WHATSAPP_SERVICE_URL)
 
     # ------------------------------------------------------------------
     # 5. Conversation history
