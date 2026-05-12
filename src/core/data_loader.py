@@ -1580,6 +1580,90 @@ class DataLoader:
         """
         return self.execute_query(query, params)
 
+    def get_cobertura_sucursal_marca(
+        self,
+        id_fuerza_ventas: int,
+        anios: list[int],
+        id_sucursales: list[int],
+    ) -> pd.DataFrame:
+        """Per-sucursal marca coverage data from cob_sucursal_marca.
+
+        Unlike get_cobertura_graficos_marca_sucursal which aggregates away
+        id_sucursal, this method keeps id_sucursal in SELECT and GROUP BY,
+        returning one row per (anio, mes, id_sucursal, marca) combination.
+
+        Args:
+            id_fuerza_ventas: ID of fuerza_ventas to filter.
+            anios: List of years to include (e.g. [2024, 2025, 2026]).
+            id_sucursales: List of sucursal IDs to filter.
+
+        Returns:
+            DataFrame with columns: [anio, mes, id_sucursal, marca, clientes]
+        """
+        anio_ph = ", ".join(f":anio_{i}" for i in range(len(anios)))
+        suc_ph = ", ".join(f":suc_{i}" for i in range(len(id_sucursales)))
+        params = {"fv": id_fuerza_ventas}
+        params.update({f"anio_{i}": a for i, a in enumerate(anios)})
+        params.update({f"suc_{i}": s for i, s in enumerate(id_sucursales)})
+
+        query = f"""
+        SELECT
+            EXTRACT(YEAR FROM periodo)::int  AS anio,
+            EXTRACT(MONTH FROM periodo)::int AS mes,
+            id_sucursal,
+            marca,
+            SUM(clientes_compradores)::int AS clientes
+        FROM gold.cob_sucursal_marca
+        WHERE id_fuerza_ventas = :fv
+          AND EXTRACT(YEAR FROM periodo) IN ({anio_ph})
+          AND id_sucursal IN ({suc_ph})
+        GROUP BY 1, 2, id_sucursal, marca
+        ORDER BY 1, 2, id_sucursal, marca
+        """
+        return self.execute_query(query, params)
+
+    def get_cobertura_sucursal_generico(
+        self,
+        id_fuerza_ventas: int,
+        anios: list[int],
+        id_sucursales: list[int],
+    ) -> pd.DataFrame:
+        """Per-sucursal generico coverage data from cob_sucursal_generico.
+
+        Unlike get_cobertura_graficos_generico_sucursal which aggregates away
+        id_sucursal, this method keeps id_sucursal in SELECT and GROUP BY,
+        returning one row per (anio, mes, id_sucursal, generico) combination.
+
+        Args:
+            id_fuerza_ventas: ID of fuerza_ventas to filter.
+            anios: List of years to include (e.g. [2024, 2025, 2026]).
+            id_sucursales: List of sucursal IDs to filter.
+
+        Returns:
+            DataFrame with columns: [anio, mes, id_sucursal, generico, clientes]
+        """
+        anio_ph = ", ".join(f":anio_{i}" for i in range(len(anios)))
+        suc_ph = ", ".join(f":suc_{i}" for i in range(len(id_sucursales)))
+        params = {"fv": id_fuerza_ventas}
+        params.update({f"anio_{i}": a for i, a in enumerate(anios)})
+        params.update({f"suc_{i}": s for i, s in enumerate(id_sucursales)})
+
+        query = f"""
+        SELECT
+            EXTRACT(YEAR FROM periodo)::int  AS anio,
+            EXTRACT(MONTH FROM periodo)::int AS mes,
+            id_sucursal,
+            generico,
+            SUM(clientes_compradores)::int AS clientes
+        FROM gold.cob_sucursal_generico
+        WHERE id_fuerza_ventas = :fv
+          AND EXTRACT(YEAR FROM periodo) IN ({anio_ph})
+          AND id_sucursal IN ({suc_ph})
+        GROUP BY 1, 2, id_sucursal, generico
+        ORDER BY 1, 2, id_sucursal, generico
+        """
+        return self.execute_query(query, params)
+
     def get_cobertura_graficos_aguas_sucursal(
         self,
         id_fuerza_ventas: int,

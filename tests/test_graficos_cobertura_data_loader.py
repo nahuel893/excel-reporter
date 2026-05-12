@@ -196,3 +196,109 @@ class TestGetCoberturaGraficosAguasSucursal:
         loader.table_exists = MagicMock(return_value=False)
         loader.execute_query = MagicMock()
         loader.get_cobertura_graficos_aguas_sucursal(1, [2025, 2026])  # no raise
+
+
+class TestGetCoberturaSucursalMarca:
+    """T-001: get_cobertura_sucursal_marca — per-sucursal marca coverage data."""
+
+    def test_returns_expected_columns_with_id_sucursal(self):
+        df = pd.DataFrame({
+            "anio": [2026],
+            "mes": [3],
+            "id_sucursal": [1],
+            "marca": ["SALTA"],
+            "clientes": [100],
+        })
+        loader, mock = _make_loader_with_mock_query(df)
+
+        result = loader.get_cobertura_sucursal_marca(
+            id_fuerza_ventas=1, anios=[2025, 2026], id_sucursales=[1, 3, 4]
+        )
+        assert list(result.columns) == ["anio", "mes", "id_sucursal", "marca", "clientes"]
+        assert len(result) == 1
+
+    def test_query_uses_cob_sucursal_marca_table(self):
+        loader, mock = _make_loader_with_mock_query(pd.DataFrame())
+        loader.get_cobertura_sucursal_marca(1, [2025, 2026], id_sucursales=[1, 3])
+        query = mock.call_args.args[0]
+        assert "gold.cob_sucursal_marca" in query
+
+    def test_query_includes_id_sucursal_in_select_and_group_by(self):
+        loader, mock = _make_loader_with_mock_query(pd.DataFrame())
+        loader.get_cobertura_sucursal_marca(1, [2025, 2026], id_sucursales=[1, 3])
+        query = mock.call_args.args[0]
+        # id_sucursal must appear in both SELECT and GROUP BY
+        assert "id_sucursal" in query
+        assert "GROUP BY" in query
+
+    def test_passes_fv_anios_and_sucursales_params(self):
+        loader, mock = _make_loader_with_mock_query(pd.DataFrame())
+        loader.get_cobertura_sucursal_marca(
+            id_fuerza_ventas=2, anios=[2024, 2025], id_sucursales=[1, 3, 4, 5, 16]
+        )
+        params = mock.call_args.args[1]
+        assert params["fv"] == 2
+        assert params["anio_0"] == 2024
+        assert params["anio_1"] == 2025
+        assert params["suc_0"] == 1
+        assert params["suc_4"] == 16
+
+    def test_single_anio_and_single_sucursal(self):
+        """Triangulation: minimal params."""
+        loader, mock = _make_loader_with_mock_query(pd.DataFrame())
+        loader.get_cobertura_sucursal_marca(1, [2026], id_sucursales=[7])
+        params = mock.call_args.args[1]
+        assert params["anio_0"] == 2026
+        assert params["suc_0"] == 7
+
+
+class TestGetCoberturaSucursalGenerico:
+    """T-001: get_cobertura_sucursal_generico — per-sucursal generico coverage data."""
+
+    def test_returns_expected_columns_with_id_sucursal(self):
+        df = pd.DataFrame({
+            "anio": [2026],
+            "mes": [3],
+            "id_sucursal": [3],
+            "generico": ["CERVEZAS"],
+            "clientes": [100],
+        })
+        loader, mock = _make_loader_with_mock_query(df)
+
+        result = loader.get_cobertura_sucursal_generico(
+            id_fuerza_ventas=1, anios=[2025, 2026], id_sucursales=[3, 4, 5]
+        )
+        assert list(result.columns) == ["anio", "mes", "id_sucursal", "generico", "clientes"]
+        assert len(result) == 1
+
+    def test_query_uses_cob_sucursal_generico_table(self):
+        loader, mock = _make_loader_with_mock_query(pd.DataFrame())
+        loader.get_cobertura_sucursal_generico(1, [2025, 2026], id_sucursales=[3])
+        query = mock.call_args.args[0]
+        assert "gold.cob_sucursal_generico" in query
+
+    def test_query_includes_id_sucursal_in_select_and_group_by(self):
+        loader, mock = _make_loader_with_mock_query(pd.DataFrame())
+        loader.get_cobertura_sucursal_generico(1, [2025, 2026], id_sucursales=[3])
+        query = mock.call_args.args[0]
+        assert "id_sucursal" in query
+        assert "GROUP BY" in query
+
+    def test_passes_fv_anios_and_sucursales_params(self):
+        loader, mock = _make_loader_with_mock_query(pd.DataFrame())
+        loader.get_cobertura_sucursal_generico(
+            id_fuerza_ventas=2, anios=[2024, 2025, 2026], id_sucursales=[1, 3]
+        )
+        params = mock.call_args.args[1]
+        assert params["fv"] == 2
+        assert params["anio_0"] == 2024
+        assert params["suc_0"] == 1
+        assert params["suc_1"] == 3
+
+    def test_single_anio_and_single_sucursal(self):
+        """Triangulation: minimal params."""
+        loader, mock = _make_loader_with_mock_query(pd.DataFrame())
+        loader.get_cobertura_sucursal_generico(1, [2026], id_sucursales=[6])
+        params = mock.call_args.args[1]
+        assert params["anio_0"] == 2026
+        assert params["suc_0"] == 6
