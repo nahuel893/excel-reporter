@@ -6,6 +6,7 @@ python-dotenv>=1.0.0
 pytest>=8.0.0
 pywin32>=306; sys_platform == "win32"  # Slicers en Excel (solo Windows)
 fastapi>=0.109.0
+jinja2>=3.1.0  # Dashboard templates
 uvicorn>=0.27.0
 python-multipart>=0.0.6  # Para form data en FastAPI
 httpx>=0.24.0  # FastAPI TestClient dependency

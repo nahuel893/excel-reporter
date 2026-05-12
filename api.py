@@ -13,7 +13,7 @@ import logging
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -22,6 +22,7 @@ from src.api.routes import ventas_router, resumen_mensual_router, graficos_cober
 from src.api.routes.mgmt_runs import router as mgmt_runs_router
 from src.api.routes.mgmt_configs import router as mgmt_configs_router
 from src.core.data_loader import DataLoader
+from src.services.graficos_cobertura.constants import GENERICOS_INCLUIDOS, COLORES_MARCA, FALLBACK_COLORS
 
 logger = logging.getLogger(__name__)
 
@@ -151,14 +152,19 @@ async def _shutdown():
 
 
 @app.get("/dashboard/graficos-cobertura", tags=["Dashboard"], summary="Dashboard de cobertura por sucursal")
-def dashboard_graficos_cobertura(request):
+def dashboard_graficos_cobertura(request: Request):
     """Renderiza el dashboard HTML con Chart.js para cobertura por sucursal."""
     tmpl = _get_templates()
     if tmpl is None:
         return {"error": "Dashboard templates not configured"}
     return tmpl.TemplateResponse(
         "dashboard_graficos_cobertura.html",
-        {"request": request},
+        {
+            "request": request,
+            "genericos": GENERICOS_INCLUIDOS,
+            "colores_marca": COLORES_MARCA,
+            "fallback_colors": FALLBACK_COLORS,
+        },
     )
 
 

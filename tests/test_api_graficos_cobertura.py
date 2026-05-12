@@ -328,3 +328,24 @@ class TestCoberturaSucursalEndpoint:
             self._cleanup_deps()
 
         assert response.status_code == 200
+
+
+class TestDashboardRoute:
+    """Tests for GET /dashboard/graficos-cobertura."""
+
+    def test_dashboard_returns_html(self, client):
+        """Dashboard route returns the HTML template with 200."""
+        response = client.get("/dashboard/graficos_cobertura")
+        assert response.status_code == 200
+        assert "text/html" in response.headers.get("content-type", "")
+        body = response.text
+        assert "Cobertura por Sucursal" in body
+        assert "chart.js" in body.lower() or "Chart.js" in body
+
+    def test_dashboard_contains_generico_dropdown(self, client):
+        """Dashboard HTML contains the generico dropdown populated with GENERICOS_INCLUIDOS."""
+        response = client.get("/dashboard/graficos_cobertura")
+        assert response.status_code == 200
+        body = response.text
+        for generico in GENERICOS_INCLUIDOS:
+            assert generico in body, f"Generico {generico} not found in dashboard HTML"
