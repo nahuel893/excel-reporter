@@ -16,6 +16,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from src.api.routes import ventas_router, resumen_mensual_router, graficos_cobertura_router
 from src.api.routes.mgmt_runs import router as mgmt_runs_router
@@ -61,6 +62,26 @@ app.include_router(graficos_cobertura_router)
 # Management UI routes
 app.include_router(mgmt_runs_router)
 app.include_router(mgmt_configs_router)
+
+# ── Dashboard templates (lazy init — jinja2 optional) ──────────────────────
+_templates_dir = Path(__file__).parent / "src" / "api" / "templates"
+templates = None
+
+
+def _get_templates():
+    """Lazy init of Jinja2Templates to avoid import-time failure if jinja2 is absent."""
+    global templates
+    if templates is not None:
+        return templates
+    if not _templates_dir.exists():
+        logger.warning("Dashboard templates dir not found: %s", _templates_dir)
+        return None
+    try:
+        templates = Jinja2Templates(directory=str(_templates_dir))
+        return templates
+    except Exception as exc:
+        logger.warning("Jinja2 templates not available: %s", exc)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +148,18 @@ async def _shutdown():
     if runner is not None:
         for sess in list(runner.sessions.values()):
             sess.terminate(grace=5)
+
+
+@app.get("/dashboard/graficos-cobertura", tags=["Dashboard"], summary="Dashboard de cobertura por sucursal")
+def dashboard_graficos_cobertura(request):
+    """Renderiza el dashboard HTML con Chart.js para cobertura por sucursal."""
+    tmpl = _get_templates()
+    if tmpl is None:
+        return {"error": "Dashboard templates not configured"}
+    return tmpl.TemplateResponse(
+        "dashboard_graficos_cobertura.html",
+        {"request": request},
+    )
 
 
 @app.get("/", tags=["Health"], summary="Estado del servicio")
