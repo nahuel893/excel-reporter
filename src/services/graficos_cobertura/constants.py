@@ -48,6 +48,31 @@ SUCS_INTERIOR: list[int] = [3, 4, 5, 16]
 SUCS_SALTA_NORTE: list[int] = [6, 7]
 SUCS_JUJUY: list[int] = [9, 10, 11, 12, 13, 14, 15]
 
+# Mapping zone → list of (id_sucursal, nombre_sucursal) for per-sucursal PPTX generation.
+# NOA NORTE is the aggregate of all zones — not split per-sucursal for PPTX decks.
+ZONA_SUCURSALES: dict[str, list[tuple[int, str]]] = {
+    "SALTA CAPITAL": [(1, "CASA CENTRAL")],
+    "INTERIOR SALTA SUR": [
+        (3, "SUCURSAL TARTAGAL"),
+        (4, "SUCURSAL ORAN"),
+        (5, "SUCURSAL ABRA PAMPA"),
+        (16, "SUCURSAL VALLE SALTA"),
+    ],
+    "INTERIOR SALTA NORTE": [
+        (6, "SUCURSAL CAFAYATE"),
+        (7, "SUCURSAL METAN"),
+    ],
+    "JUJUY INTERIOR": [
+        (9, "SUCURSAL JUJUY"),
+        (10, "SUCURSAL PERICO"),
+        (11, "SUCURSAL LIBERTADOR"),
+        (12, "SUCURSAL SAN PEDRO"),
+        (13, "SUCURSAL LA MENDIETA"),
+        (14, "SUCURSAL PALPALA"),
+        (15, "SUCURSAL EL CARMEN"),
+    ],
+}
+
 ZONAS: list[str] = [
     "NOA NORTE",
     "SALTA CAPITAL",

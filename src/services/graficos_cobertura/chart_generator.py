@@ -61,15 +61,22 @@ def plot_cobertura_zona(
     anios_lineas: list[int],
     output_dir: Path,
     dpi: int = 160,
+    *,
+    title_prefix: str = "",
+    filename_suffix: str = "",
 ) -> Path:
-    """Combo bar+line chart: bars = marcas × mes, lines = generico × anio.
+    """Combo bar+line chart: bars = marcas × mes, line = generico × anio.
 
-    Saves to <output_dir>/cobertura_<zona_slug>_<gen_slug>.png and returns
-    the Path. plt.close(fig) is called in finally — safe even on errors.
+    Saves to <output_dir>/cobertura_<zona_slug><filename_suffix>_<gen_slug>.png
+    and returns the Path. plt.close(fig) is called in finally — safe even on errors.
+
+    Args:
+        title_prefix: Optional prefix for chart title (e.g. "SUCURSAL METAN — ").
+        filename_suffix: Optional suffix for filename (e.g. "_suc6").
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / f"cobertura_{_slug(zona)}_{_slug(generico)}.png"
+    out_path = output_dir / f"cobertura_{_slug(zona)}{filename_suffix}_{_slug(generico)}.png"
 
     fig, ax = plt.subplots(figsize=(16, 7.5))
     try:
@@ -161,8 +168,9 @@ def plot_cobertura_zona(
                     zorder=5,
                 )
 
+        title_text = f"{title_prefix}{zona}  ({generico})" if title_prefix else f"{zona}  ({generico})"
         ax.set_title(
-            f"{zona}  ({generico})",
+            title_text,
             fontsize=17, fontweight="bold", color="#2E7D32", pad=18, loc="center",
         )
         ax.set_xticks(x)
@@ -213,14 +221,21 @@ def plot_comparacion_marca(
     anio_anterior: int,
     output_dir: Path,
     dpi: int = 160,
+    *,
+    title_prefix: str = "",
+    filename_suffix: str = "",
 ) -> Path:
     """Side-by-side bar chart comparing two years for the cutoff month.
 
-    Saves to <output_dir>/comparacion_<zona_slug>_<gen_slug>.png.
+    Saves to <output_dir>/comparacion_<zona_slug><filename_suffix>_<gen_slug>.png.
+
+    Args:
+        title_prefix: Optional prefix for chart title (e.g. "SUCURSAL METAN — ").
+        filename_suffix: Optional suffix for filename (e.g. "_suc6").
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / f"comparacion_{_slug(zona)}_{_slug(generico)}.png"
+    out_path = output_dir / f"comparacion_{_slug(zona)}{filename_suffix}_{_slug(generico)}.png"
 
     fig, ax = plt.subplots(figsize=(16, 7.5))
     try:
@@ -270,8 +285,9 @@ def plot_comparacion_marca(
                     )
 
         mes_nombre = MESES[mes_corte - 1] if 1 <= mes_corte <= 12 else ""
+        title_prefix_text = title_prefix if title_prefix else ""
         ax.set_title(
-            f"{zona} — {generico}  (Comparativo {mes_nombre} {anio_anterior} vs {anio_actual})",
+            f"{title_prefix_text}{zona} — {generico}  (Comparativo {mes_nombre} {anio_anterior} vs {anio_actual})",
             fontsize=17, fontweight="bold", color="#2E7D32", pad=18, loc="center",
         )
         ax.set_xticks(x)

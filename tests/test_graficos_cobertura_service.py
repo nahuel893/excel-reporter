@@ -60,15 +60,32 @@ def _mock_loader() -> MagicMock:
         columns=["anio", "mes", "id_sucursal", "subdivision_aguas", "clientes"]
     )
 
+    # Per-sucursal marca/generico data (Phase 1 data loader methods)
+    loader.get_cobertura_sucursal_marca.return_value = pd.DataFrame({
+        "anio": [2026, 2026],
+        "mes": [3, 3],
+        "id_sucursal": [1, 1],
+        "marca": ["SALTA", "HEINEKEN"],
+        "clientes": [50, 30],
+    })
+    loader.get_cobertura_sucursal_generico.return_value = pd.DataFrame({
+        "anio": [2026, 2025],
+        "mes": [3, 3],
+        "id_sucursal": [1, 1],
+        "generico": ["CERVEZAS", "CERVEZAS"],
+        "clientes": [80, 60],
+    })
+
     return loader
 
 
-def _basic_config(tmp_path, con_aguas=True) -> GraficosCoberturaConfig:
+def _basic_config(tmp_path, con_aguas=True, con_sucursal_slides=False) -> GraficosCoberturaConfig:
     return GraficosCoberturaConfig(
         fecha_desde="2026-01-01",
         fecha_hasta="2026-04-30",
         id_fuerza_ventas=1,
         con_aguas=con_aguas,
+        con_sucursal_slides=con_sucursal_slides,
     )
 
 
@@ -185,3 +202,56 @@ class TestResultArtifacts:
 
         assert result.archivo_xlsx.name == "resumen.xlsx"
         assert result.archivo_generico_pptx.name == "cobertura_todos.pptx"
+
+
+class TestSucursalSlides:
+    """T-005: con_sucursal_slides=True generates per-sucursal PPTX decks."""
+
+    def test_sucursal_pptx_paths_populated(self, tmp_path):
+        """When con_sucursal_slides=True, sucursal_pptx_paths is non-empty."""
+        loader = _mock_loader()
+        service = GraficosCoberturaService(data_loader=loader)
+        config = _basic_config(tmp_path, con_sucursal_slides=True)
+
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
+            result = service.generar_reporte(config)
+
+        assert isinstance(result.sucursal_pptx_paths, dict)
+        # Should have at least one sucursal deck (SALTA CAPITAL has suc 1)
+        assert len(result.sucursal_pptx_paths) > 0
+
+    def test_sucursal_decks_in_sucursales_subdir(self, tmp_path):
+        """Per-sucursal PPTX files are saved under sucursales/ subdir."""
+        loader = _mock_loader()
+        service = GraficosCoberturaService(data_loader=loader)
+        config = _basic_config(tmp_path, con_sucursal_slides=True)
+
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
+            result = service.generar_reporte(config)
+
+        for key, path in result.sucursal_pptx_paths.items():
+            assert path.exists()
+            assert "sucursales" in str(path)
+
+    def test_con_sucursal_slides_false_no_extra_decks(self, tmp_path):
+        """When con_sucursal_slides=False (default), no sucursal decks are generated."""
+        loader = _mock_loader()
+        service = GraficosCoberturaService(data_loader=loader)
+        config = _basic_config(tmp_path, con_sucursal_slides=False)
+
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
+            result = service.generar_reporte(config)
+
+        assert result.sucursal_pptx_paths == {}
+
+    def test_calls_per_sucursal_data_loader(self, tmp_path):
+        """con_sucursal_slides=True triggers get_cobertura_sucursal_marca/generico."""
+        loader = _mock_loader()
+        service = GraficosCoberturaService(data_loader=loader)
+        config = _basic_config(tmp_path, con_sucursal_slides=True)
+
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
+            service.generar_reporte(config)
+
+        assert loader.get_cobertura_sucursal_marca.called
+        assert loader.get_cobertura_sucursal_generico.called

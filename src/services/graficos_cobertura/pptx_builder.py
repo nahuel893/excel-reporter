@@ -161,3 +161,71 @@ def build_decks(
     )
 
     return {"generico": generico_path}
+
+
+def _resolve_zona_name(zona_slug: str) -> str:
+    """Reverse-lookup zona slug to display name."""
+    for name, slug in ZONA_SLUGS.items():
+        if slug == zona_slug:
+            return name
+    return zona_slug.replace("_", " ").title()
+
+
+def build_deck_sucursal(
+    zona_slug: str,
+    generico: str,
+    sucursal_id: int,
+    sucursal_nombre: str,
+    png_paths_zone: dict[str, Path],
+    png_paths_sucursal: dict[str, Path],
+    output_path: Path,
+) -> Path:
+    """Build a per-sucursal PPTX with zone overview + sucursal detail slides.
+
+    Args:
+        zona_slug: Zone identifier (e.g. "salta_capital").
+        generico: Generic name (e.g. "CERVEZAS").
+        sucursal_id: Numeric sucursal ID.
+        sucursal_nombre: Display name (e.g. "SUCURSAL METAN").
+        png_paths_zone: Dict with keys "cobertura"/"comparacion" → Path for zone charts.
+        png_paths_sucursal: Dict with keys "cobertura"/"comparacion" → Path for sucursal charts.
+        output_path: Destination path for the PPTX file.
+
+    Returns:
+        Path to the created PPTX.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    zona_name = _resolve_zona_name(zona_slug)
+
+    prs = Presentation()
+    prs.slide_width = Inches(PPTX_SLIDE_WIDTH_IN)
+    prs.slide_height = Inches(PPTX_SLIDE_HEIGHT_IN)
+
+    # Zone-level slides first
+    for chart_type, margin_top in (("cobertura", 0.95), ("comparacion", 0.7)):
+        img_path = png_paths_zone.get(chart_type)
+        if img_path is None:
+            continue
+        suffix = " (Comparativo)" if chart_type == "comparacion" else ""
+        _add_slide_with_image(
+            prs, Path(img_path),
+            title_text=f"{zona_name} — {generico}{suffix}",
+            margin_top=margin_top,
+        )
+
+    # Sucursal-level detail slides
+    for chart_type, margin_top in (("cobertura", 0.95), ("comparacion", 0.7)):
+        img_path = png_paths_sucursal.get(chart_type)
+        if img_path is None:
+            continue
+        suffix = " (Comparativo)" if chart_type == "comparacion" else ""
+        _add_slide_with_image(
+            prs, Path(img_path),
+            title_text=f"{sucursal_nombre} — {zona_name} — {generico}{suffix}",
+            margin_top=margin_top,
+        )
+
+    prs.save(str(output_path))
+    return output_path
