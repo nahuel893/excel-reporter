@@ -1,8 +1,11 @@
 """Configuration dataclass for graficos-cobertura service."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_fecha(nombre: str, valor: str) -> datetime:
@@ -27,6 +30,7 @@ class GraficosCoberturaConfig:
     id_fuerza_ventas: int = 1
     nombre_archivo: str | None = None
     con_aguas: bool = True
+    con_sucursal_slides: bool = False
 
     def __post_init__(self) -> None:
         desde = _parse_fecha("fecha_desde", self.fecha_desde)
@@ -39,6 +43,11 @@ class GraficosCoberturaConfig:
         if self.id_fuerza_ventas < 1:
             raise ValueError(
                 f"id_fuerza_ventas debe ser >= 1 (recibido: {self.id_fuerza_ventas})"
+            )
+        if self.con_sucursal_slides:
+            logger.warning(
+                "con_sucursal_slides=True but no sucursal mapping is provided — "
+                "sucursal slides will use default zone-to-sucursal mapping"
             )
 
     @property

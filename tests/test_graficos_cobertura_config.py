@@ -134,3 +134,52 @@ class TestGraficosCoberturaConfigValidation:
                 fecha_hasta="2026-04-30",
                 id_fuerza_ventas=-1,
             )
+
+
+class TestGraficosCoberturaConfigSucursalSlides:
+    """T-003: con_sucursal_slides flag."""
+
+    def test_default_is_false(self):
+        config = GraficosCoberturaConfig(
+            fecha_desde="2026-01-01",
+            fecha_hasta="2026-04-30",
+        )
+        assert config.con_sucursal_slides is False
+
+    def test_can_set_to_true(self):
+        config = GraficosCoberturaConfig(
+            fecha_desde="2026-01-01",
+            fecha_hasta="2026-04-30",
+            con_sucursal_slides=True,
+        )
+        assert config.con_sucursal_slides is True
+
+    def test_can_set_to_false_explicitly(self):
+        config = GraficosCoberturaConfig(
+            fecha_desde="2026-01-01",
+            fecha_hasta="2026-04-30",
+            con_sucursal_slides=False,
+        )
+        assert config.con_sucursal_slides is False
+
+    def test_con_sucursal_slides_true_emits_warning(self, caplog):
+        """Triangulation: setting con_sucursal_slides=True should log a warning."""
+        import logging
+        with caplog.at_level(logging.WARNING):
+            GraficosCoberturaConfig(
+                fecha_desde="2026-01-01",
+                fecha_hasta="2026-04-30",
+                con_sucursal_slides=True,
+            )
+        assert any("con_sucursal_slides" in record.message for record in caplog.records)
+
+    def test_con_sucursal_slides_false_no_warning(self, caplog):
+        """Triangulation: con_sucursal_slides=False should NOT log a warning."""
+        import logging
+        with caplog.at_level(logging.WARNING):
+            GraficosCoberturaConfig(
+                fecha_desde="2026-01-01",
+                fecha_hasta="2026-04-30",
+                con_sucursal_slides=False,
+            )
+        assert not any("con_sucursal_slides" in record.message for record in caplog.records)
