@@ -226,7 +226,7 @@ def check_whatsapp_status(
             http_client = httpx.Client(timeout=5)
 
         if url is None:
-            base = os.environ.get("WHATSAPP_SERVICE_URL", "http://localhost:3000")
+            base = os.environ.get("WHATSAPP_SERVICE_URL", "http://localhost:3001")
             url = f"{base}/status"
 
         response = http_client.get(url)
