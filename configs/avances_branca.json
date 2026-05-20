@@ -30,6 +30,11 @@
                         "whatsapp",
                         "email_cc"
                     ]
+                },
+                "Preventa + Vinos Bodega E": {
+                    "via": [
+                        "whatsapp"
+                    ]
                 }
             }
         }

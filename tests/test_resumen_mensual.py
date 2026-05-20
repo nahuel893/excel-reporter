@@ -15,6 +15,7 @@ from src.services.resumen_mensual import (
 )
 from src.services.resumen_mensual.processor import (
     _detectar_dias_habiles_con_ventas,
+    _fechas_columnas_diarias,
     procesar_resumen_mensual,
 )
 from src.services.resumen_mensual.service import _nombre_reporte, _crear_estilo_resumen
@@ -254,8 +255,8 @@ class TestResumenMensual:
     # RF-009 y RF-010: Valores N-1 y N-2 correctos
     # -----------------------------------------------------------------------
 
-    def test_vtas_dia_n1_n2_valores(self):
-        """RF-009/010: Vtas Dia N-1 corresponde a la ultima fecha, N-2 a la penultima."""
+    def test_vtas_dia_actual_y_anterior_valores(self):
+        """RF-009/010: columnas diarias usan fecha_hasta y el dia anterior."""
         df_ventas_mes = pd.DataFrame({
             "sucursal": ["SUC1"],
             "generico": ["CERVEZAS"],
@@ -273,18 +274,55 @@ class TestResumenMensual:
         with patch("src.services.resumen_mensual.processor.calcular_factor_tendencia", return_value=1.0):
             resultado = procesar_resumen_mensual(
                 df_ventas_mes, df_dias, df_ma, df_aa,
-                "2026-02-01", "2026-02-28"
+                "2026-02-01", "2026-02-26"
             )
 
         fila = resultado.iloc[0]
-        col_n2 = resultado.columns[2]  # mas antiguo, columna izquierda
-        col_n1 = resultado.columns[3]  # mas reciente, columna derecha
-        # N-2 es el penultimo (2026-02-25 Miercoles con cantidad 20)
+        col_n2 = resultado.columns[2]  # dia anterior, columna izquierda
+        col_n1 = resultado.columns[3]  # dia actual, columna derecha
         assert "25-02" in col_n2
         assert fila[col_n2] == 20
-        # N-1 es el mas reciente (2026-02-26 Jueves con cantidad 30)
         assert "26-02" in col_n1
         assert fila[col_n1] == 30
+
+    def test_vtas_dia_anterior_domingo_usa_sabado(self):
+        """Si el dia anterior a fecha_hasta es domingo, la columna anterior usa sabado."""
+        df_ventas_mes = pd.DataFrame({
+            "sucursal": ["SUC1"],
+            "generico": ["CERVEZAS"],
+            "cantidad": [300],
+        })
+        df_dias = pd.DataFrame({
+            "sucursal": ["SUC1", "SUC1", "SUC1"],
+            "generico": ["CERVEZAS", "CERVEZAS", "CERVEZAS"],
+            "fecha": pd.to_datetime(["2026-05-16", "2026-05-17", "2026-05-18"]),
+            "cantidad": [10, 20, 30],
+        })
+
+        with patch("src.services.resumen_mensual.processor.calcular_factor_tendencia", return_value=1.0):
+            resultado = procesar_resumen_mensual(
+                df_ventas_mes, df_dias, _df_vacio(), _df_vacio(),
+                "2026-05-01", "2026-05-18"
+            )
+
+        fila = resultado.iloc[0]
+        col_anterior = resultado.columns[2]
+        col_actual = resultado.columns[3]
+        assert "16-05" in col_anterior
+        assert fila[col_anterior] == 10
+        assert "18-05" in col_actual
+        assert fila[col_actual] == 30
+
+    def test_fechas_columnas_usa_hoy_si_cae_dentro_del_periodo(self):
+        """Si el config va hasta fin de mes, las columnas usan hoy como dia actual."""
+        actual, anterior = _fechas_columnas_diarias(
+            "2026-05-01",
+            "2026-05-31",
+            today=date(2026, 5, 18),
+        )
+
+        assert actual == date(2026, 5, 18)
+        assert anterior == date(2026, 5, 16)
 
     # -----------------------------------------------------------------------
     # RF-011: Total Ventas es la suma del periodo

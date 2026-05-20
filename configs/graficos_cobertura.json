@@ -1,8 +1,8 @@
 {
     "tipo": "graficos-cobertura",
     "filtros": {
-        "fecha_desde": "2026-01-01",
-        "fecha_hasta": "2026-04-30",
+        "fecha_desde": "2026-05-01",
+        "fecha_hasta": "2026-05-31",
         "id_fuerza_ventas": 1,
         "con_aguas": true,
         "enviar_email": true,
@@ -11,7 +11,7 @@
     },
     "reportes": [
         {
-            "nombre": "Graficos Cobertura Abril 2026",
+            "nombre": "Graficos Cobertura Mayo 2026",
             "asunto_email": "INFORME GRAFICOS COBERTURA",
             "enviar_a": {
                 "Gonzalo Farah": {

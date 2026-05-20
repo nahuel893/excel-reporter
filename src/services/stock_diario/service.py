@@ -24,6 +24,7 @@ class StockDiarioConfig:
     nombre_archivo: str | None = None
     sucursales: list[str] | None = None
     supervisor: str | None = None
+    db_name: str | None = None  # Override DB name for multi-DB setups
 
 
 @dataclass
@@ -40,22 +41,32 @@ class StockDiarioService(BaseService):
     SERVICE_SLUG = "stock-diario"
     GRANULARITY = "day"
 
+    def _create_data_loader(self, db_name: str | None = None) -> DataLoader:
+        """Create a DataLoader with optional DB name override."""
+        if db_name:
+            return DataLoader(db_name=db_name)
+        return DataLoader()
+
     def generar_reporte(self, config: StockDiarioConfig) -> StockDiarioResult:
         """Generate one Excel file per date in [fecha_desde, fecha_hasta].
 
         If sucursales is set, filters data to only those sucursales.
         If supervisor is set, names files as "Stock {supervisor} - DD-MM-YYYY".
+        If config.db_name is set, uses that database instead of the default.
         """
         desde = pd.to_datetime(config.fecha_desde)
         hasta = pd.to_datetime(config.fecha_hasta)
         result = StockDiarioResult()
+
+        # Create DataLoader with optional DB override
+        data_loader = self._create_data_loader(config.db_name)
 
         nombre_prefijo = f"Stock {config.supervisor}" if config.supervisor else "Stock"
 
         fecha_actual = desde
         while fecha_actual <= hasta:
             fecha_str = fecha_actual.strftime("%Y-%m-%d")
-            df = self.data_loader.get_stock_diario(fecha_str, config.genericos)
+            df = data_loader.get_stock_diario(fecha_str, config.genericos)
 
             # Filter by sucursales if specified
             if config.sucursales and not df.empty:

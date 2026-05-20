@@ -237,18 +237,18 @@ def _aplicar_formula(
             totales = df_grupo.groupby(idx_cols)["cantidad"].sum()
             totales_por_cliente[grupo_nombre] = totales
 
-        # Evaluar: TODOS los grupos deben cumplir su criterio
+        # Evaluar: al menos UN grupo debe cumplir su criterio (OR)
         def evaluar_fila(row):
             key = tuple(row[c] for c in idx_cols)
             for grupo_nombre, grupo_cfg in grupos.items():
                 op, umbral = _parse_operador(grupo_cfg["criterio"])
                 total_grupo = totales_por_cliente.get(grupo_nombre)
                 if total_grupo is None:
-                    return 0
+                    continue
                 val = total_grupo.get(key, 0)
-                if not _evaluar_condicion(val, op, umbral):
-                    return 0
-            return 1
+                if _evaluar_condicion(val, op, umbral):
+                    return 1
+            return 0
 
         df_pivot["CUMPLE"] = df_pivot.apply(evaluar_fila, axis=1)
 

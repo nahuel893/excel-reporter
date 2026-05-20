@@ -30,6 +30,7 @@ from pathlib import Path
 
 from src.services import VentasService, ResumenMensualService, ResumenMensualConfig
 from src.services.ventas import ReporteVentasConfig
+from src.services.subdistribuidores import SubdistribuidoresConfig, SubdistribuidoresService
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,8 @@ REPORT_HANDLERS: dict[str, str] = {
     "ventas-articulo": "_run_ventas_articulo_report",
     "historico-cliente": "_run_historico_cliente_report",
     "reporte-general-badie": "_run_reporte_general_badie_report",
+    "reporte-rebotes": "_run_rebotes_report",
+    "subdistribuidores": "_run_subdistribuidores_report",
 }
 
 
@@ -171,14 +174,17 @@ def _run_reportes(report_config, contactos, test_mode: bool = False, no_delivery
             enviar_whatsapp=merged["enviar_whatsapp"],
             test_mode=test_mode,
             whatsapp_enviar_como=merged.get("whatsapp_enviar_como", "imagen"),
+            whatsapp_caption_imagenes=merged.get("whatsapp_caption_imagenes", True),
             email_adjuntos=merged.get("email_adjuntos", ["excel"]),
         )
         if delivery_config:
             for ruta_archivo, metadata in artifacts:
+                meta = dict(metadata or {})
+                meta["_tipo"] = report_config.tipo
                 _ejecutar_pipeline(
                     ruta_excel=ruta_archivo,
                     delivery_config=delivery_config,
-                    metadata=metadata,
+                    metadata=meta,
                 )
 
     return 0
@@ -389,11 +395,19 @@ def _ejecutar_pipeline(
 
     print("\nPipeline de entrega:")
     for step in result.steps:
-        icon = {"success": "✓", "skipped": "-", "error": "✗"}.get(step.status, "?")
+        icon = {"success": "\u2713", "skipped": "-", "error": "\u2717"}.get(step.status, "?")
         print(f"  [{icon}] {step.step_name}: {step.message}")
 
     if not result.success:
         print("  Advertencia: algunos pasos fallaron (ver logs).")
+
+    from src.core.delivery_log import registrar_envio
+    registrar_envio(
+        tipo=metadata.get("_tipo", "desconocido") if metadata else "desconocido",
+        nombre=metadata.get("nombre", "sin nombre") if metadata else "sin nombre",
+        archivos=[str(ruta_excel)],
+        status="enviado" if result.success else "error",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -799,6 +813,85 @@ def _run_avances_report(report, merged: dict) -> list[tuple[Path, dict]]:
     ]
 
 
+def _run_rebotes_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate reporte-rebotes report. Returns list of (path, metadata) tuples."""
+    from src.services.rebotes import RebotesConfig, RebotesService
+
+    fecha_desde = merged.get("fecha_desde")
+    fecha_hasta = merged.get("fecha_hasta")
+    if not fecha_desde or not fecha_hasta:
+        print("Error: reporte-rebotes requires fecha_desde y fecha_hasta")
+        return []
+
+    print(f"Generando: {report.nombre}")
+    config = RebotesConfig(
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        genericos=merged.get("genericos"),
+        nombre_archivo=report.nombre,
+    )
+    service = RebotesService()
+    result = service.generar_reporte(config)
+    print(f"Rebotes '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Vendedores: {result.vendedores}")
+    print(f"  - Supervisores: {result.supervisores}")
+    print(f"  - Registros procesados: {result.registros_procesados}")
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": fecha_hasta},
+        )
+    ]
+
+
+def cmd_subdistribuidores(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando de subdistribuidores."""
+    if not args.config:
+        print("Error: subdistribuidores requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    else:
+        print(
+            "Error: subdistribuidores solo soporta el nuevo formato de configuracion JSON."
+        )
+        return 1
+
+
+def _run_subdistribuidores_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate subdistribuidores report. Returns list of (path, metadata) tuples."""
+    fecha_desde = merged.get("fecha_desde")
+    fecha_hasta = merged.get("fecha_hasta")
+    if not fecha_desde or not fecha_hasta:
+        print("Error: subdistribuidores requires fecha_desde y fecha_hasta")
+        return []
+
+    print(f"Generando: {report.nombre}")
+    config = SubdistribuidoresConfig(
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        nombre_archivo=report.nombre,
+    )
+    service = SubdistribuidoresService()
+    result = service.generar_reporte(config)
+    print(f"Subdistribuidores '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Clientes unicos: {result.clientes}")
+    print(f"  - Filas en Bultos: {result.filas_bultos}")
+    print(f"  - Hojas: {', '.join(result.hojas)}")
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": fecha_hasta},
+        )
+    ]
+
+
 def cmd_cartesiano(args, test_mode: bool = False) -> int:
     """Ejecuta el comando cartesiano."""
     if not args.config:
@@ -1140,8 +1233,35 @@ Ejemplos:
     )
     reporte_general_badie_parser.set_defaults(func=cmd_reporte_general_badie)
 
+    subdistribuidores_parser = subparsers.add_parser(
+        "subdistribuidores",
+        help="Reporte de ventas para subdistribuidores (ruta 93)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    subdistribuidores_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    subdistribuidores_parser.set_defaults(func=cmd_subdistribuidores)
+
+    # check-delivery: mostrar estado de envios del dia
+    check_parser = subparsers.add_parser(
+        "check-delivery",
+        help="Muestra el registro de envios del dia de hoy.",
+    )
+    check_parser.set_defaults(func=lambda args: None)
+
     # Parsear argumentos
     args = parser.parse_args()
+
+    from src.core.delivery_log import mostrar_resumen
+
+    # check-delivery: show today's send log
+    if hasattr(args, "comando") and args.comando == "check-delivery":
+        print(mostrar_resumen())
+        return 0
 
     test_mode = _resolve_test_mode(args.test_mode)
     if test_mode:

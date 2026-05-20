@@ -50,7 +50,8 @@ class Recipient(BaseModel):
 class WhatsAppConfig(BaseModel):
     """Configuracion para envio por WhatsApp."""
     grupos: list[str]  # Nombres de grupos o contactos individuales (legacy / cardinal)
-    enviar_como: Literal["imagen", "archivo"] = "imagen"
+    enviar_como: Literal["imagen", "archivo", "ambos"] = "imagen"
+    caption_imagenes: bool = True
     # Opcional: metadata paralela a `grupos` para personalizar captions.
     # Misma longitud y orden que `grupos`. Si esta vacia, se usa caption default.
     recipients_meta: list[Recipient] = []

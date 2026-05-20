@@ -365,6 +365,25 @@ class TestSendWhatsAppStepSendModes:
         mock_client.send_file.assert_called_once()
         mock_client.send_image.assert_not_called()
 
+    def test_sends_images_and_file_when_ambos_mode(self, tmp_path):
+        config = DeliveryConfig(
+            whatsapp=WhatsAppConfig(grupos=["Grupo"], enviar_como="ambos")
+        )
+        artifact = _make_artifact_with_image(tmp_path)
+
+        mock_client = MagicMock()
+        with (
+            patch("src.core.whatsapp_client.WhatsAppClient", return_value=mock_client),
+            patch("config.settings.WHATSAPP_SERVICE_URL", "http://localhost:3000"),
+        ):
+            result = SendWhatsAppStep().execute(
+                artifact, config, logging.getLogger("test")
+            )
+
+        assert result.status == "success"
+        mock_client.send_image.assert_called_once()
+        mock_client.send_file.assert_called_once()
+
 
 class TestSendWhatsAppStepErrors:
     def test_connection_error_per_group(self, tmp_path):

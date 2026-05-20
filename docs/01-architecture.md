@@ -195,5 +195,6 @@ Explicit > implicit. Los handlers son funciones simples que crean el config y ll
 | historico-cliente | — | — | — | xlsx |
 | reporte-general-badie | ✓ | — | — | xlsx |
 | cobertura | ✓ | — | ✓ | xlsx |
+| reporte-rebotes | ✓ | — | — | xlsx (4 hojas + PNG) |
 
 Ver detalles de cada servicio en [02-services.md](02-services.md).

@@ -2,7 +2,7 @@
     "tipo": "ventas",
     "filtros": {
         "fecha_desde": "2026-05-01",
-        "fecha_hasta": "2026-05-06",
+        "fecha_hasta": "2026-05-14",
         "genericos": [
             "CERVEZAS",
             "AGUAS DANONE",

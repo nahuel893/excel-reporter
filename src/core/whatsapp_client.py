@@ -24,11 +24,40 @@ class WhatsAppClient:
         """
         self.base_url = base_url.rstrip("/")
 
+    def send_text(
+        self,
+        target: str = "",
+        text: str = "",
+        group_name: str | None = None,
+    ) -> dict:
+        """Envia un mensaje de texto a un grupo o contacto."""
+        import httpx
+
+        data = {}
+        if group_name:
+            data["group_name"] = group_name
+        else:
+            data["to"] = target
+        data["text"] = text
+
+        try:
+            with httpx.Client(timeout=15) as client:
+                resp = client.post(f"{self.base_url}/send-text", json=data)
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.ConnectError as exc:
+            raise ConnectionError(
+                f"No se pudo conectar al microservicio WhatsApp en {self.base_url}: {exc}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise ConnectionError(f"Error HTTP al enviar WhatsApp: {exc}") from exc
+
     def send_image(
         self,
         target: str,
-        image_path: Path,
+        image_path: Path | str,
         caption: str = "",
+        group_name: str | None = None,
     ) -> dict:
         """
         Envia una imagen a un grupo o contacto de WhatsApp.
@@ -37,6 +66,7 @@ class WhatsAppClient:
             target: Nombre del grupo o numero de contacto
             image_path: Path a la imagen PNG/JPG
             caption: Texto opcional que acompana la imagen
+            group_name: Si se pasa, se envia al grupo por nombre en vez de DM
 
         Returns:
             Dict con { "success": bool, "message": str }
@@ -50,6 +80,7 @@ class WhatsAppClient:
             file_path=Path(image_path),
             file_field="image",
             caption=caption,
+            group_name=group_name,
         )
 
     def send_file(
@@ -57,6 +88,7 @@ class WhatsAppClient:
         target: str,
         file_path: Path,
         caption: str = "",
+        group_name: str | None = None,
     ) -> dict:
         """
         Envia un archivo a un grupo o contacto de WhatsApp.
@@ -65,6 +97,7 @@ class WhatsAppClient:
             target: Nombre del grupo o numero de contacto
             file_path: Path al archivo (xlsx, pdf, etc.)
             caption: Texto opcional que acompana el archivo
+            group_name: Si se pasa, se envia al grupo por nombre en vez de DM
 
         Returns:
             Dict con { "success": bool, "message": str }
@@ -78,6 +111,7 @@ class WhatsAppClient:
             file_path=Path(file_path),
             file_field="file",
             caption=caption,
+            group_name=group_name,
         )
 
     @staticmethod
@@ -99,12 +133,13 @@ class WhatsAppClient:
         file_path: Path,
         file_field: str,
         caption: str,
+        group_name: str | None = None,
     ) -> dict:
         url = f"{self.base_url}{endpoint}"
         try:
-            return self._post_with_httpx(url, target, file_path, file_field, caption)
+            return self._post_with_httpx(url, target, file_path, file_field, caption, group_name=group_name)
         except ImportError:
-            return self._post_with_urllib(url, target, file_path, file_field, caption)
+            return self._post_with_urllib(url, target, file_path, file_field, caption, group_name=group_name)
 
     def _post_with_httpx(
         self,
@@ -113,6 +148,7 @@ class WhatsAppClient:
         file_path: Path,
         file_field: str,
         caption: str,
+        group_name: str | None = None,
     ) -> dict:
         import httpx
 
@@ -121,9 +157,14 @@ class WhatsAppClient:
 
         try:
             with httpx.Client(timeout=30) as client:
+                data = {"caption": caption}
+                if group_name:
+                    data["group_name"] = group_name
+                else:
+                    data["to"] = target
                 response = client.post(
                     url,
-                    data={"to": target, "caption": caption},
+                    data=data,
                     files={file_field: (file_path.name, file_content, self._guess_mimetype(file_path))},
                 )
                 response.raise_for_status()
@@ -142,6 +183,7 @@ class WhatsAppClient:
         file_path: Path,
         file_field: str,
         caption: str,
+        group_name: str | None = None,
     ) -> dict:
         import urllib.error
         import urllib.request
@@ -151,8 +193,11 @@ class WhatsAppClient:
         with open(file_path, "rb") as f:
             file_content = f.read()
 
+        target_field = f"group_name" if group_name else "to"
+        target_value = group_name if group_name else target
+
         body_parts = [
-            f"--{boundary}\r\nContent-Disposition: form-data; name=\"to\"\r\n\r\n{target}".encode(),
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{target_field}\"\r\n\r\n{target_value}".encode(),
             f"--{boundary}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n{caption}".encode(),
             (
                 f"--{boundary}\r\nContent-Disposition: form-data; "

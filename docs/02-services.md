@@ -1,6 +1,6 @@
 # 02 — Catálogo de servicios
 
-11 servicios registrados, cada uno en `src/services/{nombre}/` y declarado en `main.py:REPORT_HANDLERS` y en `src/config/models.py:ReportConfig.tipo` (Literal).
+12 servicios registrados, cada uno en `src/services/{nombre}/` y declarado en `main.py:REPORT_HANDLERS` y en `src/config/models.py:ReportConfig.tipo` (Literal).
 
 | # | Slug | Granularidad | Output | Config JSON |
 |---|------|--------------|--------|-------------|
@@ -11,10 +11,11 @@
 | 5 | `stock-diario` | day | xlsx por día | `configs/stock_diario.json` |
 | 6 | `cartesiano` | month | xlsx | `configs/cartesiano.json` |
 | 7 | `avances` | month | actualiza plantilla in-place | `configs/avances_branca.json` |
-| 8 | `graficos-cobertura` | month | xlsx + 2 pptx + ~50 PNGs | `configs/graficos_cobertura.json` |
+| 8 | `graficos-cobertura` | month | xlsx + pptx + ~50 PNGs | `configs/graficos_cobertura.json` |
 | 9 | `ventas-articulo` | month | xlsx por artículo | `configs/schneider710.json` |
 | 10 | `historico-cliente` | month | xlsx | `configs/historico_cliente_example.json` |
 | 11 | `reporte-general-badie` | month | xlsx (normal + EXTENDIDO) | `configs/reporte_general_badie.json` |
+| 12 | `reporte-rebotes` | month | xlsx (4 hojas) + capturas PNG | `configs/rebotes.json` |
 
 ---
 
@@ -227,6 +228,60 @@ Sucursal | Generico | Día N-1 | Día N | Total Ventas | Tendencia
 
 ---
 
+## 12. `reporte-rebotes` — Rebotes/Rechazos por vendedor y cliente
+
+**Servicio**: `RebotesService` (`src/services/rebotes/service.py`, 408 líneas).
+
+**Para qué**: reporte mensual de bounces/rechazos (devoluciones de mercadería). Identifica vendedores y clientes con alto % de rechazo, con semáforo y vistas por genérico.
+
+**Hojas del Excel**:
+1. **Rebotes** (vendedores): `Vendedor | Bultos Vendidos | Bultos Rechazados | % Rechazo | Supervisor`. Incluye fila TOTALES y subtotales por supervisor. GFARAH = total general de sucursal 1.
+2. **Ventas por Cliente**: `Código | Fantasía | Razón Social | [genérico: Bultos Vendidos | Bultos Rechazados | % Rechazo]`. Totales al final.
+3. **Rechazos por Cliente**: `Código | Fantasía | Razón Social | [genérico: Bultos Rechazados]`.
+4. **% Rebotes x Genérico**: pivot vendedor × genérico con columnas intercaladas `Bultos | Rechazados | %`.
+
+**Lógica clave**:
+- **Rebote = bultos_rechazados / bultos_vendidos**. Semáforo: verde < 3%, amarillo 3-5%, rojo > 5%.
+- **Rechazos**: desde `fact_ventas.cantidades_total < 0` (devoluciones con signo negativo).
+- **MULTICCU**: `VINOS CCU + SIDRAS Y LICORES` fusionados antes de calcular %.
+- **GFARAH**: total general de todos los vendedores (no suma de supervisores). Se fuerza en cada pivot.
+- **DIRECTA**: oculta visualmente en la hoja de vendedores, pero suma en totales.
+- **Supervisores**: ANOGALES, FGUANTAY, GFARAH (jefe/total), GFLORES, VCHAPUR.
+- **Filtro**: solo `id_sucursal = 1`, `id_fuerza_ventas = 1`, genéricos CCU.
+
+**Config**:
+```json
+{
+  "tipo": "reporte-rebotes",
+  "filtros": {
+    "fecha_desde": "2026-05-01",
+    "fecha_hasta": "2026-05-31",
+    "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
+    "whatsapp_enviar_como": "ambos"
+  },
+  "reportes": [
+    {
+      "nombre": "Rebotes Mayo 2026",
+      "capture_images": [
+        {"hoja": "% Rebotes x Generico", "rango": "A1:K40", "renderer": "libreoffice"}
+      ],
+      "enviar_a": {
+        "Gonzalo Farah": {"via": ["whatsapp"]},
+        "Sebastian Dellamea": {"via": ["whatsapp"]}
+      }
+    }
+  ]
+}
+```
+
+**Capturas**: 1 PNG de la hoja `% Rebotes x Generico` (vía LibreOffice).
+
+**Processor**: `src/services/rebotes/processor.py` (258 líneas) — `calcular_rebotes_vendedor()`, `agregar_totales_supervisor()`, `pivot_rebotes_por_generico()`, `pivot_rebotes_por_generico_supervisor()`.
+
+**Constants**: `SUPERVISOR_VENDOR_MAP` en `constants.py` — mapeo de vendedores a supervisores.
+
+---
+
 ## Tabla de archivos y métodos del DataLoader por servicio
 
 | Servicio | Métodos DataLoader principales |
@@ -241,5 +296,6 @@ Sucursal | Generico | Día N-1 | Día N | Total Ventas | Tendencia
 | champions-league | `get_articulos_categoria`, `get_cobertura_*` |
 | avances | `get_ventas`, `get_articulos`, `get_clientes`, `get_cobertura_preventista_*` |
 | historico-cliente | `get_ventas_historico_cliente` |
+| reporte-rebotes | `get_rebotes_vendedor`, `get_ventas_por_cliente`, `get_rechazos_por_cliente`, `get_rebotes_vendedor_por_generico` |
 
 Ver método-por-método en [03-database.md](03-database.md).

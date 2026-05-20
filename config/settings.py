@@ -19,6 +19,9 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD"),
 }
 
+# Base de datos alternativa para otros reportes (ej: Suria)
+DB_NAME_SURIA = os.getenv("DB_NAME_SURIA")
+
 # Feriados Argentina 2026 (formato: "YYYY-MM-DD")
 FERIADOS = [
     "2026-01-01",  # Año Nuevo

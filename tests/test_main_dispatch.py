@@ -23,6 +23,7 @@ DISPATCH_MATRIX = [
     ("graficos-cobertura", "_run_graficos_cobertura_report"),
     ("ventas-articulo", "_run_ventas_articulo_report"),
     ("reporte-general-badie", "_run_reporte_general_badie_report"),
+    ("reporte-rebotes", "_run_rebotes_report"),
 ]
 
 

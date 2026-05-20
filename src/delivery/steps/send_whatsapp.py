@@ -32,20 +32,11 @@ def _build_caption(
     sheet: str | None,
     report_name: str | None,
 ) -> str:
-    """
-    Caption personalizado con emojis. Distingue grupo vs contacto individual.
-    """
     title = sheet or report_name or "Reporte"
-    head = f"📊 *{title}*"
+    parts = [title]
     if periodo:
-        head += f" · 🗓️ {periodo}"
-
-    if is_group:
-        return f"{head}\n🤖 Bot Informes Badie"
-
-    first_name = (contact_name or "").split()[0] if contact_name else ""
-    saludo = f"👋 Hola {first_name}!" if first_name else "👋 Hola!"
-    return f"{saludo}\n{head}\n🤖 Bot Informes Badie"
+        parts.append(periodo)
+    return " · ".join(parts)
 
 
 class SendWhatsAppStep(DeliveryStep):
@@ -85,6 +76,8 @@ class SendWhatsAppStep(DeliveryStep):
                 contact_name = meta.contact_name if meta else None
 
                 def _caption_para_imagen(idx: int) -> str:
+                    if not config.whatsapp.caption_imagenes:
+                        return ""
                     sheet = (
                         artifact.nombres_hojas[idx]
                         if idx < len(artifact.nombres_hojas)
@@ -106,6 +99,8 @@ class SendWhatsAppStep(DeliveryStep):
                     report_name=report_name,
                 )
 
+                kwargs = {"group_name": grupo} if is_group else {}
+
                 if config.whatsapp.enviar_como == "imagen":
                     if not artifact.rutas_imagenes:
                         logger.info(
@@ -115,16 +110,16 @@ class SendWhatsAppStep(DeliveryStep):
                         continue
                     for i, img_path in enumerate(artifact.rutas_imagenes):
                         client.send_image(
-                            grupo, img_path, caption=_caption_para_imagen(i)
+                            grupo, img_path, caption=_caption_para_imagen(i), **kwargs
                         )
                 elif config.whatsapp.enviar_como == "ambos":
                     for i, img_path in enumerate(artifact.rutas_imagenes):
                         client.send_image(
-                            grupo, img_path, caption=_caption_para_imagen(i)
+                            grupo, img_path, caption=_caption_para_imagen(i), **kwargs
                         )
-                    client.send_file(grupo, artifact.ruta_excel, caption=caption_archivo)
+                    client.send_file(grupo, artifact.ruta_excel, caption=caption_archivo, **kwargs)
                 else:
-                    client.send_file(grupo, artifact.ruta_excel, caption=caption_archivo)
+                    client.send_file(grupo, artifact.ruta_excel, caption=caption_archivo, **kwargs)
             except Exception as exc:
                 logger.error("Error enviando WhatsApp a '%s': %s", grupo, exc)
                 errores.append(f"{grupo}: {exc}")

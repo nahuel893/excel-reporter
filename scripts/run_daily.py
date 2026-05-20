@@ -122,6 +122,11 @@ SERVICIOS: list[Servicio] = [
         config_path=CONFIGS_DIR / "resumen_mensual.json",
         fecha_modo="mes_a_hoy",
     ),
+    Servicio(
+        nombre="reporte-rebotes",
+        config_path=CONFIGS_DIR / "rebotes.json",
+        fecha_modo="mes_a_hoy",
+    ),
 ]
 
 

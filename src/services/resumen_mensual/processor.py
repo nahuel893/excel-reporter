@@ -5,7 +5,7 @@ Contiene la logica de procesamiento y formato de datos
 para el reporte de resumen mensual por sucursal y generico.
 """
 import pandas as pd
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from config.settings import FERIADOS, DIAS_SEMANA
 from src.core.base_processor import calcular_factor_tendencia
@@ -35,6 +35,27 @@ def _detectar_dias_habiles_con_ventas(df: pd.DataFrame, n: int = 2) -> list:
         reverse=True,
     )
     return fechas_habiles[:n]
+
+
+def _fechas_columnas_diarias(
+    fecha_desde: str,
+    fecha_hasta: str,
+    today: date | None = None,
+) -> tuple[date, date]:
+    """
+    Retorna las dos fechas que debe mostrar el resumen mensual: dia actual y
+    dia anterior. Si hoy cae dentro del periodo configurado, usa hoy como dia
+    actual; si no, usa fecha_hasta. Si el dia anterior es domingo, usa sabado.
+    """
+    desde = datetime.strptime(fecha_desde, "%Y-%m-%d").date()
+    hasta = datetime.strptime(fecha_hasta, "%Y-%m-%d").date()
+    hoy = today or date.today()
+
+    fecha_actual = hoy if desde <= hoy <= hasta else hasta
+    fecha_anterior = fecha_actual - timedelta(days=1)
+    if fecha_anterior.weekday() == 6:  # domingo
+        fecha_anterior -= timedelta(days=1)
+    return fecha_actual, fecha_anterior
 
 
 def procesar_resumen_mensual(
@@ -77,9 +98,7 @@ def procesar_resumen_mensual(
     # -------------------------------------------------------------------------
     # 1. Detectar fechas N-1 y N-2
     # -------------------------------------------------------------------------
-    fechas_nd = _detectar_dias_habiles_con_ventas(df_dias, n=2) if not df_dias.empty else []
-    fecha_n1 = fechas_nd[0] if len(fechas_nd) >= 1 else None
-    fecha_n2 = fechas_nd[1] if len(fechas_nd) >= 2 else None
+    fecha_n1, fecha_n2 = _fechas_columnas_diarias(fecha_desde, fecha_hasta)
 
     col_n1 = _formatear_dia(fecha_n1) if fecha_n1 else "Vtas Dia N-1"
     col_n2 = _formatear_dia(fecha_n2) if fecha_n2 else "Vtas Dia N-2"

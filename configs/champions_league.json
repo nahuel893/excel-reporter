@@ -1,8 +1,8 @@
 {
     "tipo": "champions-league",
     "filtros": {
-        "fecha_desde": "2026-04-01",
-        "fecha_hasta": "2026-04-30",
+        "fecha_desde": "2026-05-01",
+        "fecha_hasta": "2026-05-31",
         "genericos": [
             "CERVEZAS",
             "AGUAS DANONE"
@@ -14,6 +14,12 @@
                 "articulos": [
                     21171,
                     23179
+                ],
+                "formula": ">= 0.25"
+            },
+            "SCHNEIDER REMIX": {
+                "articulos": [
+                    23382
                 ],
                 "formula": ">= 0.25"
             },
@@ -322,10 +328,10 @@
     "reportes": [
         {
             "nombre": "Champions League",
-            "capture_image": {
-                "hoja": "REPORTE",
-                "rango": "auto"
-            },
+            "capture_images": [
+                {"hoja": "REPORTE", "rango": "auto"},
+                {"hoja": "REMIX", "rango": "auto"}
+            ],
             "enviar_a": {
                 "Gonzalo Farah": {
                     "via": [

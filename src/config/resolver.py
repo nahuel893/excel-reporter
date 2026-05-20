@@ -16,6 +16,7 @@ from src.config.models import (
     ReportConfig,
     ReportEntry,
     ReportFilters,
+    WhatsAppEnviarComo,
 )
 from src.delivery.pipeline import (
     CaptureConfig,
@@ -99,7 +100,8 @@ def resolve_delivery(
     enviar_email: bool = True,
     enviar_whatsapp: bool = True,
     test_mode: bool = False,
-    whatsapp_enviar_como: str = "imagen",
+    whatsapp_enviar_como: WhatsAppEnviarComo = "imagen",
+    whatsapp_caption_imagenes: bool = True,
     email_adjuntos: list[str] | None = None,
 ) -> DeliveryConfig | None:
     """
@@ -195,6 +197,7 @@ def resolve_delivery(
         whatsapp=WhatsAppConfig(
             grupos=whatsapp_targets,
             enviar_como=whatsapp_enviar_como,
+            caption_imagenes=whatsapp_caption_imagenes,
             recipients_meta=whatsapp_recipients_meta,
         ) if whatsapp_targets else None,
     )
@@ -228,6 +231,7 @@ def merge_filters(
         "id_fuerza_ventas": global_f.id_fuerza_ventas,
         "id_articulo": global_f.id_articulo,
         "whatsapp_enviar_como": global_f.whatsapp_enviar_como,
+        "whatsapp_caption_imagenes": global_f.whatsapp_caption_imagenes,
         "email_adjuntos": global_f.email_adjuntos,
         "detalle_movimientos_path": global_f.detalle_movimientos_path,
         "detalle_movimientos_ma_path": global_f.detalle_movimientos_ma_path,

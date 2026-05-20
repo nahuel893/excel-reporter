@@ -5,7 +5,7 @@ Proporciona acceso centralizado a la base de datos PostgreSQL
 usando SQLAlchemy con soporte para inyección de dependencias.
 """
 
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, date
 
 import pandas as pd
 from dateutil.relativedelta import relativedelta
@@ -59,20 +59,23 @@ def _build_marca_split_clause(
 class DataLoader:
     """Clase para acceso a datos del Data Warehouse."""
 
-    def __init__(self, engine: Engine | None = None):
+    def __init__(self, engine: Engine | None = None, db_name: str | None = None):
         """
         Inicializa el DataLoader.
 
         Args:
             engine: Engine de SQLAlchemy. Si es None, crea uno con DB_CONFIG.
+            db_name: Nombre de la base de datos override. Si es None, usa DB_NAME de DB_CONFIG.
         """
         self._engine = engine
+        self._db_name = db_name
 
     @property
     def engine(self) -> Engine:
         """Obtiene el engine, creándolo si no existe."""
         if self._engine is None:
-            url = f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+            db = self._db_name or DB_CONFIG['database']
+            url = f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{db}"
             self._engine = create_engine(url)
         return self._engine
 
@@ -1769,6 +1772,198 @@ class DataLoader:
                 "meses_con_compra",
             ])
         return result
+
+    # ── Rebotes ──────────────────────────────────────────────────
+
+    def get_rebotes_vendedor(
+        self, fecha_desde: str, fecha_hasta: str, genericos: list[str] | None = None
+    ) -> pd.DataFrame:
+        """
+        Fetch bultos_vendidos per vendor for CCU generics, id_sucursal=1.
+
+        Returns DataFrame with columns:
+            vendedor, bultos_vendidos, bultos_rechazados, id_fuerza_ventas
+
+        bultos_rechazados is always 0 — placeholder until rejection data is added.
+        Only includes id_fuerza_ventas = 1 (FV1).
+
+        Args:
+            fecha_desde: Start date 'YYYY-MM-DD'
+            fecha_hasta: End date 'YYYY-MM-DD'
+            genericos: List of generics to filter (defaults to CCU generics).
+        """
+        if genericos is None:
+            genericos = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
+
+        placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
+        query = f"""
+        SELECT
+            dv.des_vendedor                              AS vendedor,
+            SUM(CASE WHEN fv.cantidades_total > 0 THEN fv.cantidades_total ELSE 0 END) AS bultos_vendidos,
+            ABS(SUM(CASE WHEN fv.cantidades_total < 0 THEN fv.cantidades_total ELSE 0 END)) AS bultos_rechazados,
+            dv.id_fuerza_ventas
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
+        JOIN gold.dim_vendedor   dv ON fv.id_vendedor  = dv.id_vendedor
+                                    AND fv.id_sucursal = dv.id_sucursal
+        WHERE fv.id_sucursal = 1
+          AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+          AND da.generico IN ({placeholders})
+          AND dv.id_fuerza_ventas = 1
+        GROUP BY dv.des_vendedor, dv.id_fuerza_ventas
+        HAVING SUM(CASE WHEN fv.cantidades_total > 0 THEN fv.cantidades_total ELSE 0 END) > 0
+        ORDER BY dv.id_fuerza_ventas, dv.des_vendedor
+        """
+        params = {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta}
+        params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
+        return self.execute_query(query, params)
+
+    def get_ventas_por_cliente(
+        self, fecha_desde: date, fecha_hasta: date, genericos: list[str] | None = None
+    ) -> pd.DataFrame:
+        """Fetch bultos_vendidos, bultos_rechazados, % rechazo per cliente and generico.
+
+        Returns DataFrame with columns:
+        [fantasia, razon_social, generico, bultos_vendidos, bultos_rechazados, pct_rechazo]
+        """
+        if genericos is None:
+            genericos = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
+
+        placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
+        query = f"""
+        SELECT
+            dc.id_cliente,
+            dc.fantasia,
+            dc.razon_social,
+            da.generico,
+            SUM(CASE WHEN fv.cantidades_total > 0 THEN fv.cantidades_total ELSE 0 END) AS bultos_vendidos,
+            ABS(SUM(CASE WHEN fv.cantidades_total < 0 THEN fv.cantidades_total ELSE 0 END)) AS bultos_rechazados
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
+        JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+        WHERE fv.id_sucursal = 1
+          AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+          AND da.generico IN ({placeholders})
+        GROUP BY dc.id_cliente, dc.fantasia, dc.razon_social, da.generico
+        ORDER BY dc.fantasia, da.generico
+        """
+        params = {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta}
+        params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
+        return self.execute_query(query, params)
+
+    def get_rechazos_por_cliente(
+        self, fecha_desde: date, fecha_hasta: date, genericos: list[str] | None = None
+    ) -> pd.DataFrame:
+        """Fetch bultos_rechazados per cliente and generico (solo rechazos > 0).
+
+        Returns DataFrame with columns:
+        [fantasia, razon_social, generico, bultos_rechazados]
+        """
+        if genericos is None:
+            genericos = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
+
+        placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
+        query = f"""
+        SELECT
+            dc.id_cliente,
+            dc.fantasia,
+            dc.razon_social,
+            da.generico,
+            ABS(SUM(fv.cantidades_total)) AS bultos_rechazados
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
+        JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+        WHERE fv.id_sucursal = 1
+          AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+          AND da.generico IN ({placeholders})
+          AND fv.cantidades_total < 0
+        GROUP BY dc.id_cliente, dc.fantasia, dc.razon_social, da.generico
+        HAVING ABS(SUM(fv.cantidades_total)) > 0
+        ORDER BY dc.fantasia, da.generico
+        """
+        params = {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta}
+        params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
+        return self.execute_query(query, params)
+
+    def get_rebotes_vendedor_por_generico(
+        self, fecha_desde: date, fecha_hasta: date, genericos: list[str] | None = None
+    ) -> pd.DataFrame:
+        """Fetch bultos_vendidos, bultos_rechazados per vendor and generico.
+
+        Returns DataFrame with columns:
+        [vendedor, id_fuerza_ventas, generico, bultos_vendidos, bultos_rechazados]
+        Filtered by id_sucursal=1 and CCU generics.
+        """
+        if genericos is None:
+            genericos = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
+
+        placeholders = ", ".join([f":gen_{i}" for i in range(len(genericos))])
+        query = f"""
+        SELECT
+            dv.des_vendedor                              AS vendedor,
+            dv.id_fuerza_ventas,
+            da.generico,
+            SUM(CASE WHEN fv.cantidades_total > 0 THEN fv.cantidades_total ELSE 0 END) AS bultos_vendidos,
+            ABS(SUM(CASE WHEN fv.cantidades_total < 0 THEN fv.cantidades_total ELSE 0 END)) AS bultos_rechazados
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
+        JOIN gold.dim_vendedor   dv ON fv.id_vendedor  = dv.id_vendedor
+                                    AND fv.id_sucursal = dv.id_sucursal
+        WHERE fv.id_sucursal = 1
+          AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+          AND da.generico IN ({placeholders})
+          AND dv.id_fuerza_ventas = 1
+        GROUP BY dv.des_vendedor, dv.id_fuerza_ventas, da.generico
+        ORDER BY dv.des_vendedor, da.generico
+        """
+        params = {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta}
+        params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
+        return self.execute_query(query, params)
+
+
+# ── Subdistribuidores ─────────────────────────────────────────
+
+    def get_ventas_subdistribuidores(
+        self, fecha_desde: str, fecha_hasta: str
+    ) -> pd.DataFrame:
+        """
+        Obtiene ventas de subdistribuidores (ruta 93) con jerarquia de cliente.
+
+        Filtra fact_ventas a id_ruta = 93 y une dim_cliente para obtener
+        fantasia y razon_social. El join con dim_cliente usa la misma clave
+        (id_cliente, id_sucursal) que el resto del sistema.
+
+        Args:
+            fecha_desde: Fecha inicio formato 'YYYY-MM-DD'
+            fecha_hasta: Fecha fin formato 'YYYY-MM-DD'
+
+        Returns:
+            DataFrame con columnas:
+            - id_cliente, fantasia, razon_social (from dim_cliente)
+            - generico, marca, des_articulo (from dim_articulo)
+            - cantidad (SUM cantidades_total)
+            Filtrado a id_ruta = 93 unicamente.
+        """
+        query = """
+        SELECT
+            dc.id_cliente,
+            COALESCE(dc.fantasia, '')      AS fantasia,
+            COALESCE(dc.razon_social, '')  AS razon_social,
+            da.generico,
+            da.marca,
+            da.des_articulo,
+            SUM(fv.cantidades_total)        AS cantidad
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+        JOIN gold.dim_cliente  dc ON fv.id_cliente   = dc.id_cliente
+                                 AND fv.id_sucursal   = dc.id_sucursal
+        WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+          AND dc.id_ruta_fv1 = 93
+        GROUP BY dc.id_cliente, dc.fantasia, dc.razon_social,
+                 da.generico, da.marca, da.des_articulo
+        ORDER BY dc.fantasia, dc.razon_social, da.generico, da.marca, da.des_articulo
+        """
+        return self.execute_query(query, {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta})
 
 
 # Instancia por defecto para compatibilidad

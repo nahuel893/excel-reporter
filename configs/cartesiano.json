@@ -1,8 +1,8 @@
 {
     "tipo": "cartesiano",
     "filtros": {
-        "fecha_desde": "2026-04-01",
-        "fecha_hasta": "2026-04-30",
+        "fecha_desde": "2026-05-01",
+        "fecha_hasta": "2026-05-31",
         "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
         "enviar_email": false,
         "enviar_whatsapp": false

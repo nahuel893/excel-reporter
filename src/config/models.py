@@ -9,6 +9,9 @@ Config structure:
 """
 from typing import Any, Literal
 
+
+WhatsAppEnviarComo = Literal["imagen", "archivo", "ambos"]
+
 from pydantic import BaseModel, model_validator
 
 
@@ -64,7 +67,8 @@ class GlobalFilters(BaseModel):
     id_sucursal: int | None = None
     id_fuerza_ventas: int | None = None
     id_articulo: int | None = None
-    whatsapp_enviar_como: str = "imagen"  # "imagen" | "archivo" | "ambos"
+    whatsapp_enviar_como: WhatsAppEnviarComo = "imagen"
+    whatsapp_caption_imagenes: bool = True
     email_adjuntos: list[str] = ["excel"]  # ["excel"] | ["imagen"] | ["excel", "imagen"]
     detalle_movimientos_path: str | None = None  # Path to detalle_movimientos.xlsx for merge import
     detalle_movimientos_ma_path: str | None = None    # Mes anterior — imported as separate sheet
@@ -118,7 +122,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "subdistribuidores"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

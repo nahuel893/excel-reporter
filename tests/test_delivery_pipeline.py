@@ -209,6 +209,10 @@ class TestWhatsAppConfig:
         cfg = WhatsAppConfig(grupos=["Grupo"])
         assert cfg.enviar_como == "imagen"
 
+    def test_accepts_enviar_como_ambos(self):
+        cfg = WhatsAppConfig(grupos=["Grupo"], enviar_como="ambos")
+        assert cfg.enviar_como == "ambos"
+
     def test_invalid_enviar_como_raises_validation_error(self):
         with pytest.raises(ValidationError):
             WhatsAppConfig(grupos=["Grupo"], enviar_como="pdf")

@@ -944,16 +944,9 @@ class ResumenMensualService(BaseService):
             sheet_name = logical_gen[:31]  # Excel max 31 caracteres
             ws = writer.add_sheet(df_hoja_ordered, sheet_name=sheet_name, style=style)
 
-            # Caveat note: PRVTA exclusion (FRATELLI B) o aclaración de unidad (TAMBO)
-            if logical_gen in sin_prvta:
-                note = f"{logical_gen}: cantidades excluyen documentos PRVTA (facturas presupuesto)"
-            elif logical_gen == "TAMBO":
-                note = "TAMBO: cantidades expresadas en BULTOS"
-            else:
-                note = None
             # T-020/T-022/T-023: post-write — resolve SUM formulas, heatmap, subtotal styling
             _post_write_subtotals_and_heatmap(
-                ws, df_hoja_ordered, summary_rows_count, note=note
+                ws, df_hoja_ordered, summary_rows_count, note=None
             )
 
         # T-09: Import Detalle Movimientos sheets from external sources

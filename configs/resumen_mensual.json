@@ -19,18 +19,11 @@
                 "QUARA"
             ]
         },
-        "cupos_manuales": {
-            "SUCURSAL GUEMES": {
-                "CERVEZAS": 3500,
-                "AGUAS DANONE": 2000,
-                "SIDRAS Y LICORES": 10,
-                "VINOS CCU": 100
-            }
-        },
         "detalle_movimientos_path": "/home/nahuel/VM shared/archivos_diarios/2026-05/detalle_movimientos.xlsx",
         "detalle_movimientos_ma_path": "/home/nahuel/VM shared/archivos_diarios/2026-05/detalle_movimientos_ma.xlsx",
         "detalle_movimientos_mmaa_path": "/home/nahuel/VM shared/archivos_diarios/2026-05/detalle_movimientos_mmaa.xlsx",
         "categorias_deposito_path": "configs/categorias_deposito.json",
+        "whatsapp_caption_imagenes": false,
         "enviar_email": false,
         "enviar_whatsapp": true
     },

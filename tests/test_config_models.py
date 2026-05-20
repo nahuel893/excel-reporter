@@ -97,6 +97,14 @@ class TestGlobalFilters:
         assert f.genericos == ["CERVEZAS"]
         assert f.con_slicers is False
 
+    def test_accepts_whatsapp_enviar_como_ambos(self):
+        f = GlobalFilters(
+            fecha_desde="2026-01-01",
+            fecha_hasta="2026-01-31",
+            whatsapp_enviar_como="ambos",
+        )
+        assert f.whatsapp_enviar_como == "ambos"
+
 
 # ---------------------------------------------------------------------------
 # ReportConfig
@@ -210,6 +218,22 @@ class TestLoadReportConfig:
         with pytest.raises(FileNotFoundError):
             load_report_config(tmp_path / "no_existe.json")
 
+    def test_loads_config_with_whatsapp_enviar_como_ambos(self, tmp_path):
+        path = tmp_path / "rebotes.json"
+        path.write_text(json.dumps({
+            "tipo": "reporte-rebotes",
+            "filtros": {
+                "fecha_desde": "2026-01-01",
+                "fecha_hasta": "2026-01-31",
+                "whatsapp_enviar_como": "ambos",
+            },
+            "reportes": [{"nombre": "Test"}],
+        }))
+
+        cfg = load_report_config(path)
+
+        assert cfg.filtros.whatsapp_enviar_como == "ambos"
+
 
 # ---------------------------------------------------------------------------
 # resolve_delivery
@@ -319,6 +343,18 @@ class TestResolveDelivery:
         assert result.capture_image is not None
         assert result.capture_image.hoja == "Ventas Bultos"
         assert result.capture_image.rango == "A1:H20"
+
+    def test_propagates_whatsapp_enviar_como_ambos(self):
+        report = ReportEntry(
+            nombre="Test",
+            enviar_a={"Grupo": DeliveryTarget(via=["whatsapp"])},
+        )
+        contactos = {"Grupo": ContactInfo(whatsapp_grupo="Grupo Ventas")}
+
+        result = resolve_delivery(report, contactos, whatsapp_enviar_como="ambos")
+
+        assert result.whatsapp is not None
+        assert result.whatsapp.enviar_como == "ambos"
 
 
 # ---------------------------------------------------------------------------

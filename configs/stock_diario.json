@@ -1,8 +1,8 @@
 {
     "tipo": "stock-diario",
     "filtros": {
-        "fecha_desde": "2026-04-22",
-        "fecha_hasta": "2026-04-22",
+        "fecha_desde": "2026-05-01",
+        "fecha_hasta": "2026-05-14",
         "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
     },
     "reportes": [
