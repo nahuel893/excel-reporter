@@ -329,3 +329,104 @@ class TestAvancesServiceMissingSheet:
         assert "gold cob_preventista_marca" in result.registros_por_hoja
         # Log says sheets were created
         assert any("not found, creating" in record.message for record in caplog.records)
+
+
+# ── Registry unit tests (tasks 1.8 – 1.12) ────────────────────────────────────
+
+
+class TestPlantillaRegistry:
+    """Pure unit tests for PLANTILLA_SHEET_CONFIGS registry and AvancesConfig defaults.
+
+    No file I/O — registry assertions only.
+    """
+
+    def test_registry_branca_resolves(self):
+        """PLANTILLA_SHEET_CONFIGS["branca"] must be the exact SHEET_CONFIGS_BRANCA object."""
+        assert PLANTILLA_SHEET_CONFIGS["branca"] is SHEET_CONFIGS_BRANCA
+
+    def test_registry_badie_resolves(self):
+        """PLANTILLA_SHEET_CONFIGS["badie"] must be the exact SHEET_CONFIGS_BADIE object."""
+        assert PLANTILLA_SHEET_CONFIGS["badie"] is SHEET_CONFIGS_BADIE
+
+    def test_registry_unknown_raises(self):
+        """Accessing a non-existent key must raise KeyError — no silent fallback."""
+        with pytest.raises(KeyError):
+            _ = PLANTILLA_SHEET_CONFIGS["bogus"]
+
+    def test_avances_config_tipo_plantilla_default(self):
+        """AvancesConfig without tipo_plantilla must default to 'branca'."""
+        config = AvancesConfig(fecha_desde="2026-06-01", fecha_hasta="2026-06-30")
+        assert config.tipo_plantilla == "branca"
+
+    def test_avances_config_tipo_plantilla_badie(self):
+        """AvancesConfig with tipo_plantilla='badie' must store that value."""
+        config = AvancesConfig(
+            fecha_desde="2026-06-01",
+            fecha_hasta="2026-06-30",
+            tipo_plantilla="badie",
+        )
+        assert config.tipo_plantilla == "badie"
+
+
+class TestMainForwardsTipoPlantilla:
+    """Verify _run_avances_report forwards tipo_plantilla from merged dict."""
+
+    def test_main_forwards_tipo_plantilla(self, tmp_path):
+        """When merged contains tipo_plantilla='badie', AvancesConfig receives it."""
+        import main as main_module
+        from src.config.models import ReportEntry
+        from unittest.mock import patch, MagicMock
+
+        # Minimal report entry (nombre required by _run_avances_report)
+        report = ReportEntry(nombre="AVANCE BADIE - JUNIO 2026")
+
+        merged = {
+            "tipo_plantilla": "badie",
+            "fecha_desde": "2026-06-01",
+            "fecha_hasta": "2026-06-30",
+            "id_sucursal": 1,
+            "id_fuerza_ventas": 1,
+        }
+
+        captured_configs: list[AvancesConfig] = []
+
+        def fake_generar_reporte(self_svc, config: AvancesConfig):
+            captured_configs.append(config)
+            result = MagicMock()
+            result.ruta_archivo = tmp_path / "output.xlsx"
+            result.registros_por_hoja = {}
+            return result
+
+        with patch("src.services.avances.service.AvancesService.generar_reporte", fake_generar_reporte):
+            main_module._run_avances_report(report, merged)
+
+        assert len(captured_configs) == 1
+        assert captured_configs[0].tipo_plantilla == "badie"
+
+    def test_main_defaults_tipo_plantilla_to_branca(self, tmp_path):
+        """When merged has no tipo_plantilla key, AvancesConfig defaults to 'branca'."""
+        import main as main_module
+        from src.config.models import ReportEntry
+        from unittest.mock import patch, MagicMock
+
+        report = ReportEntry(nombre="AVANCE BRANCA - JUNIO 2026")
+
+        merged = {
+            "fecha_desde": "2026-06-01",
+            "fecha_hasta": "2026-06-30",
+        }
+
+        captured_configs: list[AvancesConfig] = []
+
+        def fake_generar_reporte(self_svc, config: AvancesConfig):
+            captured_configs.append(config)
+            result = MagicMock()
+            result.ruta_archivo = tmp_path / "output.xlsx"
+            result.registros_por_hoja = {}
+            return result
+
+        with patch("src.services.avances.service.AvancesService.generar_reporte", fake_generar_reporte):
+            main_module._run_avances_report(report, merged)
+
+        assert len(captured_configs) == 1
+        assert captured_configs[0].tipo_plantilla == "branca"
