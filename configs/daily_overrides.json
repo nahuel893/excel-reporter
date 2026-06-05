@@ -1,1 +1,42 @@
-{}
+{
+  "stock-diario": {
+    "ejecutar": true,
+    "enviar": true,
+    "razon": "Enviar en daily normal"
+  },
+  "champions-league": {
+    "ejecutar": true,
+    "enviar": true,
+    "razon": "Enviar en daily normal"
+  },
+  "graficos-cobertura": {
+    "ejecutar": true,
+    "enviar": true,
+    "razon": "Enviar en daily normal"
+  },
+  "schneider-710": {
+    "ejecutar": true,
+    "enviar": true,
+    "razon": "Enviar en daily normal"
+  },
+  "avance-branca": {
+    "ejecutar": true,
+    "enviar": false,
+    "razon": "Solo enviar resumen mensual"
+  },
+  "avance-badie": {
+    "ejecutar": true,
+    "enviar": false,
+    "razon": "Activacion pendiente — verificar primer output antes de enviar"
+  },
+  "ventas": {
+    "ejecutar": true,
+    "enviar": true,
+    "razon": "Enviar en daily normal"
+  },
+  "reporte-rebotes": {
+    "ejecutar": true,
+    "enviar": true,
+    "razon": "Enviar en daily normal"
+  }
+}
