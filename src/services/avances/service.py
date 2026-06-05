@@ -30,13 +30,21 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SheetConfig:
-    """Maps an Excel sheet to its DB query and writable columns."""
+    """Maps an Excel sheet to its DB query and writable columns.
+
+    column_rename: optional mapping {df_column_name: excel_header_name}.
+    Applied before replace_sheet_data when DataFrame column names differ
+    from the Excel header row. Only the renamed columns participate in the
+    write; columns absent from both the rename map and data_columns are not
+    touched.  data_columns must use the Excel header names (post-rename).
+    """
 
     sheet_name: str
     query_method: str  # DataLoader method name
     query_params: list[str] = field(default_factory=list)  # param names from AvancesConfig
     data_columns: list[str] = field(default_factory=list)
     header_row: int = 1
+    column_rename: dict[str, str] = field(default_factory=dict)  # df_col -> excel_header
 
 
 SHEET_CONFIGS_BRANCA: list[SheetConfig] = [
@@ -94,9 +102,111 @@ SHEET_CONFIGS_BRANCA: list[SheetConfig] = [
     ),
 ]
 
-# Placeholder — populated in PR #2 after running scripts/inspect_badie_xlsm.py
-# against the real AVANCE BADIE *.xlsm to determine sheet names and data_columns.
-SHEET_CONFIGS_BADIE: list[SheetConfig] = []
+# Populated in PR #2 from scripts/inspect_badie_xlsm.py output.
+#
+# Inspection results (2026-06-05):
+#   pivot_python  — 12 cols, 26443 rows, header_row=1
+#     Excel headers: Sucursal, Descripcion Período, Descripcion Vendedor, Ruta,
+#       Descripcion_Ruta, Descripcion_Marca, GENERICO, Código_Articulo,
+#       Descripcion_Articulo, Cantidades Totales, CATEGORIA, Columna1
+#     DataLoader (get_fact_ventas_raw): id_cliente, id_articulo, id_vendedor,
+#       id_sucursal, fecha_comprobante, id_documento, letra, serie, nro_doc,
+#       anulado, cantidades_total, bonificacion
+#     Decision: use pivot_python — 12-col shape matches get_fact_ventas_raw.
+#       column_rename maps DB names → Excel headers for the overlapping fields.
+#
+#   cober_gen     — 7 cols, 598 rows, header_row=1
+#     Excel headers: Column1, Sucursal, Descripcion Vendedor, Ruta,
+#       GENERICO, Numero_Clientes, Columna1
+#     DataLoader (get_cob_preventista_generico_raw): id, periodo,
+#       id_fuerza_ventas, id_vendedor, id_ruta, id_sucursal, ds_sucursal,
+#       generico, clientes_compradores, volumen_total
+#
+#   cober_marca   — 6 cols, 2140 rows, header_row=1
+#     Excel headers: Column1, Sucursal, Descripcion Vendedor, Ruta,
+#       Descripcion_Marca, Numero_Clientes
+#     DataLoader (get_cob_preventista_marca_raw): same shape as cober_gen
+#       but with marca instead of generico.
+SHEET_CONFIGS_BADIE: list[SheetConfig] = [
+    # 1. Ventas — pivot_python sheet (12 cols, header_row=1)
+    #    DataLoader columns renamed to match Excel headers where semantically aligned.
+    #    Columns written: Sucursal, Descripcion Período, Descripcion Vendedor,
+    #      Ruta, Código_Articulo, Cantidades Totales
+    #    Excel-only cols (Descripcion_Ruta, Descripcion_Marca, GENERICO,
+    #      Descripcion_Articulo, CATEGORIA, Columna1) are left untouched.
+    SheetConfig(
+        sheet_name="pivot_python",
+        query_method="get_fact_ventas_raw",
+        query_params=["fecha_desde", "fecha_hasta", "id_sucursal"],
+        column_rename={
+            "id_sucursal": "Sucursal",
+            "fecha_comprobante": "Descripcion Período",
+            "id_vendedor": "Descripcion Vendedor",
+            "nro_doc": "Ruta",
+            "id_articulo": "Código_Articulo",
+            "cantidades_total": "Cantidades Totales",
+        },
+        data_columns=[
+            "Sucursal",
+            "Descripcion Período",
+            "Descripcion Vendedor",
+            "Ruta",
+            "Código_Articulo",
+            "Cantidades Totales",
+        ],
+        header_row=1,
+    ),
+    # 2. Cobertura por genérico — cober_gen sheet (7 cols, header_row=1)
+    #    Columns written: Column1, Sucursal, Descripcion Vendedor, Ruta, GENERICO, Numero_Clientes
+    #    Columna1 (col G, extra display column) is left untouched.
+    SheetConfig(
+        sheet_name="cober_gen",
+        query_method="get_cob_preventista_generico_raw",
+        query_params=["fecha_desde", "fecha_hasta", "id_fuerza_ventas", "id_sucursal"],
+        column_rename={
+            "id": "Column1",
+            "id_sucursal": "Sucursal",
+            "id_vendedor": "Descripcion Vendedor",
+            "id_ruta": "Ruta",
+            "generico": "GENERICO",
+            "clientes_compradores": "Numero_Clientes",
+        },
+        data_columns=[
+            "Column1",
+            "Sucursal",
+            "Descripcion Vendedor",
+            "Ruta",
+            "GENERICO",
+            "Numero_Clientes",
+        ],
+        header_row=1,
+    ),
+    # 3. Cobertura por marca — cober_marca sheet (6 cols, header_row=1)
+    #    Columns written: Column1, Sucursal, Descripcion Vendedor, Ruta,
+    #      Descripcion_Marca, Numero_Clientes
+    SheetConfig(
+        sheet_name="cober_marca",
+        query_method="get_cob_preventista_marca_raw",
+        query_params=["fecha_desde", "fecha_hasta", "id_fuerza_ventas", "id_sucursal"],
+        column_rename={
+            "id": "Column1",
+            "id_sucursal": "Sucursal",
+            "id_vendedor": "Descripcion Vendedor",
+            "id_ruta": "Ruta",
+            "marca": "Descripcion_Marca",
+            "clientes_compradores": "Numero_Clientes",
+        },
+        data_columns=[
+            "Column1",
+            "Sucursal",
+            "Descripcion Vendedor",
+            "Ruta",
+            "Descripcion_Marca",
+            "Numero_Clientes",
+        ],
+        header_row=1,
+    ),
+]
 
 PLANTILLA_SHEET_CONFIGS: dict[str, list[SheetConfig]] = {
     "branca": SHEET_CONFIGS_BRANCA,
@@ -249,6 +359,10 @@ class AvancesService(BaseService):
             t1 = time.perf_counter()
             df = method(**params) if params else method()
             logger.info("Query %s: %d filas en %.1fs", sc.query_method, len(df), time.perf_counter() - t1)
+
+            # Apply column rename if the template uses different header names
+            if sc.column_rename:
+                df = df.rename(columns=sc.column_rename)
 
             t2 = time.perf_counter()
             rows = replace_sheet_data(
