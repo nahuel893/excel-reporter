@@ -368,6 +368,236 @@ class TestPlantillaRegistry:
         assert config.tipo_plantilla == "badie"
 
 
+# ── Badie integration tests (tasks 2.5–2.6) ───────────────────────────────────
+
+BADIE_FIXTURE = Path(__file__).parent / "fixtures" / "avance_badie_minimal.xlsx"
+
+
+def _make_badie_ventas_df():
+    """Small DataFrame matching get_fact_ventas_raw output columns (pre-rename)."""
+    return pd.DataFrame({
+        "id_cliente": [1, 2, 3],
+        "id_articulo": [101, 102, 103],
+        "id_vendedor": [10, 11, 12],
+        "id_sucursal": [1, 1, 1],
+        "fecha_comprobante": pd.to_datetime(["2026-05-01", "2026-05-02", "2026-05-03"]),
+        "id_documento": [1001, 1002, 1003],
+        "letra": ["A", "B", "C"],
+        "serie": ["0001", "0002", "0003"],
+        "nro_doc": [500001, 500002, 500003],
+        "anulado": [0, 0, 0],
+        "cantidades_total": [10.0, 20.0, 30.0],
+        "bonificacion": [0.0, 5.0, 0.0],
+    })
+
+
+def _make_badie_cob_gen_df():
+    """Small DataFrame matching get_cob_preventista_generico_raw output."""
+    return pd.DataFrame({
+        "id": [1, 2, 3],
+        "periodo": pd.to_datetime(["2026-05-01", "2026-05-01", "2026-05-01"]),
+        "id_fuerza_ventas": [1, 1, 1],
+        "id_vendedor": [10, 10, 11],
+        "id_ruta": [6, 6, 7],
+        "id_sucursal": [1, 1, 1],
+        "ds_sucursal": ["CASA CENTRAL", "CASA CENTRAL", "CASA CENTRAL"],
+        "generico": ["CERVEZAS", "AGUAS DANONE", "VINOS"],
+        "clientes_compradores": [50, 30, 20],
+        "volumen_total": [100.5, 50.3, 25.0],
+    })
+
+
+def _make_badie_cob_marca_df():
+    """Small DataFrame matching get_cob_preventista_marca_raw output."""
+    return pd.DataFrame({
+        "id": [1, 2, 3],
+        "periodo": pd.to_datetime(["2026-05-01", "2026-05-01", "2026-05-01"]),
+        "id_fuerza_ventas": [1, 1, 1],
+        "id_vendedor": [10, 10, 11],
+        "id_ruta": [6, 6, 7],
+        "id_sucursal": [1, 1, 1],
+        "ds_sucursal": ["CASA CENTRAL", "CASA CENTRAL", "CASA CENTRAL"],
+        "marca": ["QUILMES", "BRAHMA", "ARIZU"],
+        "clientes_compradores": [40, 25, 15],
+        "volumen_total": [80.0, 45.0, 22.5],
+    })
+
+
+def _make_badie_mock_loader():
+    loader = MagicMock(spec=DataLoader)
+    loader.get_fact_ventas_raw.return_value = _make_badie_ventas_df()
+    loader.get_cob_preventista_generico_raw.return_value = _make_badie_cob_gen_df()
+    loader.get_cob_preventista_marca_raw.return_value = _make_badie_cob_marca_df()
+    return loader
+
+
+class TestBadieRoundTrip:
+    """Integration tests for tipo_plantilla='badie' using the minimal fixture."""
+
+    def test_badie_round_trip_row_counts(self, tmp_path):
+        """generar_reporte with tipo_plantilla='badie' must refresh all 3 data sheets.
+
+        registros_por_hoja must have exactly 3 keys matching the Badie sheet names,
+        each with the correct row count from the mocked DataLoader.
+
+        Uses fecha_desde in 2019 to avoid picking up real previous-month output.
+        """
+        assert BADIE_FIXTURE.exists(), f"Fixture not found: {BADIE_FIXTURE}"
+
+        mock_loader = _make_badie_mock_loader()
+        service = AvancesService(data_loader=mock_loader)
+        config = AvancesConfig(
+            archivo_plantilla=str(BADIE_FIXTURE),
+            fecha_desde="2019-05-01",
+            fecha_hasta="2019-05-31",
+            tipo_plantilla="badie",
+            id_sucursal=1,
+            id_fuerza_ventas=1,
+            nombre_archivo="AVANCE BADIE - MAYO 2019",
+            output_dir=tmp_path / "out",
+        )
+
+        result = service.generar_reporte(config)
+
+        # Exactly 3 sheets refreshed
+        assert len(result.registros_por_hoja) == 3
+        assert "pivot_python" in result.registros_por_hoja
+        assert "cober_gen" in result.registros_por_hoja
+        assert "cober_marca" in result.registros_por_hoja
+
+        # Row counts match DataLoader mock output
+        assert result.registros_por_hoja["pivot_python"] == 3
+        assert result.registros_por_hoja["cober_gen"] == 3
+        assert result.registros_por_hoja["cober_marca"] == 3
+
+    def test_badie_round_trip_sample_values(self, tmp_path):
+        """Data written to pivot_python and cober_gen must reflect the mocked DF values.
+
+        Uses fecha_desde in 2019 to avoid picking up real previous-month output.
+        """
+        assert BADIE_FIXTURE.exists(), f"Fixture not found: {BADIE_FIXTURE}"
+
+        mock_loader = _make_badie_mock_loader()
+        service = AvancesService(data_loader=mock_loader)
+        config = AvancesConfig(
+            archivo_plantilla=str(BADIE_FIXTURE),
+            fecha_desde="2019-05-01",
+            fecha_hasta="2019-05-31",
+            tipo_plantilla="badie",
+            id_sucursal=1,
+            id_fuerza_ventas=1,
+            nombre_archivo="AVANCE BADIE - MAYO 2019",
+            output_dir=tmp_path / "out",
+        )
+        result = service.generar_reporte(config)
+
+        wb = load_workbook(str(result.ruta_archivo))
+
+        # pivot_python: Cantidades Totales col J, row 2 should be 10.0 (first mock row)
+        ws_piv = wb["pivot_python"]
+        cantidades_col = None
+        for cell in ws_piv[1]:
+            if cell.value == "Cantidades Totales":
+                cantidades_col = cell.column
+                break
+        assert cantidades_col is not None, "Header 'Cantidades Totales' not found in pivot_python"
+        assert ws_piv.cell(row=2, column=cantidades_col).value == 10.0
+
+        # cober_gen: GENERICO col E, row 2 should be "CERVEZAS"
+        ws_cg = wb["cober_gen"]
+        generico_col = None
+        for cell in ws_cg[1]:
+            if cell.value == "GENERICO":
+                generico_col = cell.column
+                break
+        assert generico_col is not None, "Header 'GENERICO' not found in cober_gen"
+        assert ws_cg.cell(row=2, column=generico_col).value == "CERVEZAS"
+
+        # cober_marca: Descripcion_Marca col E, row 2 should be "QUILMES"
+        ws_cm = wb["cober_marca"]
+        marca_col = None
+        for cell in ws_cm[1]:
+            if cell.value == "Descripcion_Marca":
+                marca_col = cell.column
+                break
+        assert marca_col is not None, "Header 'Descripcion_Marca' not found in cober_marca"
+        assert ws_cm.cell(row=2, column=marca_col).value == "QUILMES"
+
+        wb.close()
+
+    def test_badie_avance_formula_sheet_untouched(self, tmp_path):
+        """The Avance formula sheet must exist and its formulas must be preserved.
+
+        Note: formula EVALUATION requires Excel — we only verify the formula text
+        is preserved (cell.value starts with '=').
+
+        Uses fecha_desde in 2019 to avoid picking up any real previous-month output
+        from data/output/avances/ — the resolver falls back to archivo_plantilla.
+        """
+        assert BADIE_FIXTURE.exists(), f"Fixture not found: {BADIE_FIXTURE}"
+
+        mock_loader = _make_badie_mock_loader()
+        service = AvancesService(data_loader=mock_loader)
+        config = AvancesConfig(
+            archivo_plantilla=str(BADIE_FIXTURE),
+            fecha_desde="2019-05-01",
+            fecha_hasta="2019-05-31",
+            tipo_plantilla="badie",
+            id_sucursal=1,
+            id_fuerza_ventas=1,
+            nombre_archivo="AVANCE BADIE - MAYO 2019",
+            output_dir=tmp_path / "out",
+        )
+        result = service.generar_reporte(config)
+
+        wb = load_workbook(str(result.ruta_archivo), data_only=False)
+
+        # Avance sheet must exist
+        assert "Avance" in wb.sheetnames
+
+        # All 3 formula cells in Avance must start with "=" (formula text preserved)
+        ws_avance = wb["Avance"]
+        for col_idx in (1, 2, 3):
+            cell_val = ws_avance.cell(row=1, column=col_idx).value
+            assert isinstance(cell_val, str) and cell_val.startswith("="), (
+                f"Avance!{col_idx}1 expected formula, got {cell_val!r}"
+            )
+
+        wb.close()
+
+    @pytest.mark.parametrize("tipo_plantilla,expected_sheets", [
+        ("branca", {"gold fact_ventas", "gold dim_articulo", "gold dim_cliente",
+                    "gold cob_preventista_generico", "gold cob_preventista_marca"}),
+        ("badie", {"pivot_python", "cober_gen", "cober_marca"}),
+    ])
+    def test_registry_dispatch_correct_sheets(self, tmp_path, tipo_plantilla, expected_sheets):
+        """Registry dispatch must route to the correct sheet set per tipo_plantilla."""
+        from unittest.mock import patch, call
+
+        # For branca, use the branca fixture helper; for badie use the badie fixture
+        if tipo_plantilla == "branca":
+            fixture = _make_template(tmp_path)
+            loader = _make_mock_loader()
+        else:
+            fixture = BADIE_FIXTURE
+            loader = _make_badie_mock_loader()
+
+        service = AvancesService(data_loader=loader)
+        # Use 2019 dates to avoid picking up real previous-month output from
+        # data/output/avances/ — resolver falls back to archivo_plantilla.
+        config = AvancesConfig(
+            archivo_plantilla=str(fixture),
+            fecha_desde="2019-05-01",
+            fecha_hasta="2019-05-31",
+            tipo_plantilla=tipo_plantilla,
+            nombre_archivo=f"AVANCE TEST {tipo_plantilla.upper()} - MAYO 2019",
+            output_dir=tmp_path / f"out_{tipo_plantilla}",
+        )
+
+        result = service.generar_reporte(config)
+        assert set(result.registros_por_hoja.keys()) == expected_sheets
+
+
 class TestMainForwardsTipoPlantilla:
     """Verify _run_avances_report forwards tipo_plantilla from merged dict."""
 
