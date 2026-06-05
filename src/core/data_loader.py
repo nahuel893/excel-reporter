@@ -1823,8 +1823,11 @@ class DataLoader:
     ) -> pd.DataFrame:
         """Fetch bultos_vendidos, bultos_rechazados, % rechazo per cliente and generico.
 
+        Includes preventista (`des_personal_fv1`) from dim_cliente — fuerza ventas 1 (CCU).
+
         Returns DataFrame with columns:
-        [fantasia, razon_social, generico, bultos_vendidos, bultos_rechazados, pct_rechazo]
+        [id_cliente, fantasia, razon_social, des_personal_fv1, generico,
+         bultos_vendidos, bultos_rechazados]
         """
         if genericos is None:
             genericos = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
@@ -1835,6 +1838,7 @@ class DataLoader:
             dc.id_cliente,
             dc.fantasia,
             dc.razon_social,
+            dc.des_personal_fv1,
             da.generico,
             SUM(CASE WHEN fv.cantidades_total > 0 THEN fv.cantidades_total ELSE 0 END) AS bultos_vendidos,
             ABS(SUM(CASE WHEN fv.cantidades_total < 0 THEN fv.cantidades_total ELSE 0 END)) AS bultos_rechazados
@@ -1844,7 +1848,7 @@ class DataLoader:
         WHERE fv.id_sucursal = 1
           AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
           AND da.generico IN ({placeholders})
-        GROUP BY dc.id_cliente, dc.fantasia, dc.razon_social, da.generico
+        GROUP BY dc.id_cliente, dc.fantasia, dc.razon_social, dc.des_personal_fv1, da.generico
         ORDER BY dc.fantasia, da.generico
         """
         params = {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta}
@@ -1856,8 +1860,10 @@ class DataLoader:
     ) -> pd.DataFrame:
         """Fetch bultos_rechazados per cliente and generico (solo rechazos > 0).
 
+        Includes preventista (`des_personal_fv1`) from dim_cliente — fuerza ventas 1 (CCU).
+
         Returns DataFrame with columns:
-        [fantasia, razon_social, generico, bultos_rechazados]
+        [id_cliente, fantasia, razon_social, des_personal_fv1, generico, bultos_rechazados]
         """
         if genericos is None:
             genericos = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
@@ -1868,6 +1874,7 @@ class DataLoader:
             dc.id_cliente,
             dc.fantasia,
             dc.razon_social,
+            dc.des_personal_fv1,
             da.generico,
             ABS(SUM(fv.cantidades_total)) AS bultos_rechazados
         FROM gold.fact_ventas fv
@@ -1877,7 +1884,7 @@ class DataLoader:
           AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
           AND da.generico IN ({placeholders})
           AND fv.cantidades_total < 0
-        GROUP BY dc.id_cliente, dc.fantasia, dc.razon_social, da.generico
+        GROUP BY dc.id_cliente, dc.fantasia, dc.razon_social, dc.des_personal_fv1, da.generico
         HAVING ABS(SUM(fv.cantidades_total)) > 0
         ORDER BY dc.fantasia, da.generico
         """

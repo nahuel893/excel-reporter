@@ -145,9 +145,10 @@ class RebotesService(BaseService):
         ws.column_dimensions["A"].width = 8
         ws.column_dimensions["B"].width = 25
         ws.column_dimensions["C"].width = 35
+        ws.column_dimensions["D"].width = 22  # Preventista
         n_gen = len(genericos)
         for i in range(n_gen):
-            base = 4 + i * 3
+            base = 5 + i * 3  # cols E-... after Preventista (was 4 / D)
             ws.column_dimensions[get_column_letter(base)].width = 16
             ws.column_dimensions[get_column_letter(base + 1)].width = 16
             ws.column_dimensions[get_column_letter(base + 2)].width = 12
@@ -155,7 +156,7 @@ class RebotesService(BaseService):
         border = self._thin_border()
         sub_headers = ["Bultos Vendidos", "Bultos Rechazados", "% Rechazo"]
 
-        col_start = 4
+        col_start = 5
         for g in genericos:
             col_end = col_start + 2
             cell = ws.cell(row=1, column=col_start, value=g)
@@ -165,7 +166,7 @@ class RebotesService(BaseService):
             col_start = col_end + 1
 
         col = 1
-        for h in ["Codigo", "Fantasia", "Razon Social"]:
+        for h in ["Codigo", "Fantasia", "Razon Social", "Preventista"]:
             cell = ws.cell(row=2, column=col, value=h)
             cell.font = Font(bold=True)
             cell.border = border
@@ -179,9 +180,10 @@ class RebotesService(BaseService):
 
         current_row = 3
 
-        for (id_cliente, fantasia, razon_social), group in df_raw.groupby(["id_cliente", "fantasia", "razon_social"]):
+        group_keys = ["id_cliente", "fantasia", "razon_social", "des_personal_fv1"]
+        for (id_cliente, fantasia, razon_social, preventista), group in df_raw.groupby(group_keys, dropna=False):
             col = 1
-            for val in (id_cliente, fantasia, razon_social):
+            for val in (id_cliente, fantasia, razon_social, preventista or ""):
                 cell = ws.cell(row=current_row, column=col, value=val)
                 cell.border = border
                 col += 1
@@ -209,7 +211,7 @@ class RebotesService(BaseService):
             current_row += 1
 
         col = 1
-        for val in ("TOTALES", "", ""):
+        for val in ("TOTALES", "", "", ""):
             cell = ws.cell(row=current_row, column=col, value=val)
             cell.font = Font(bold=True)
             cell.border = border
@@ -238,7 +240,7 @@ class RebotesService(BaseService):
     ) -> None:
         ws = wb.create_sheet(title="Rechazos por Cliente")
 
-        headers = ["Codigo", "Fantasia", "Razon Social"] + genericos
+        headers = ["Codigo", "Fantasia", "Razon Social", "Preventista"] + genericos
         for col_idx, h in enumerate(headers, 1):
             cell = ws.cell(row=1, column=col_idx, value=h)
             cell.font = Font(bold=True)
@@ -247,10 +249,15 @@ class RebotesService(BaseService):
         ws.column_dimensions["A"].width = 8
         ws.column_dimensions["B"].width = 25
         ws.column_dimensions["C"].width = 35
+        ws.column_dimensions["D"].width = 22  # Preventista
+
+        # First text col after Preventista (where generico numbers start)
+        first_num_col = 5
 
         current_row = 2
-        for (id_cliente, fantasia, razon_social), group in df_rechazos.groupby(["id_cliente", "fantasia", "razon_social"]):
-            row_vals = [id_cliente, fantasia, razon_social]
+        group_keys = ["id_cliente", "fantasia", "razon_social", "des_personal_fv1"]
+        for (id_cliente, fantasia, razon_social, preventista), group in df_rechazos.groupby(group_keys, dropna=False):
+            row_vals = [id_cliente, fantasia, razon_social, preventista or ""]
             for g in genericos:
                 g_data = group[group["generico"] == g]
                 row_vals.append(g_data["bultos_rechazados"].sum() if len(g_data) > 0 else 0)
@@ -258,11 +265,11 @@ class RebotesService(BaseService):
             for col_idx, val in enumerate(row_vals, 1):
                 cell = ws.cell(row=current_row, column=col_idx, value=val)
                 cell.border = border
-                if col_idx > 3:
+                if col_idx >= first_num_col:
                     cell.number_format = "#,##0"
             current_row += 1
 
-        row_vals = ["TOTALES", "", ""]
+        row_vals = ["TOTALES", "", "", ""]
         for g in genericos:
             val = df_rechazos[df_rechazos["generico"] == g]["bultos_rechazados"].sum()
             row_vals.append(val)
@@ -271,7 +278,7 @@ class RebotesService(BaseService):
             cell = ws.cell(row=current_row, column=col_idx, value=val)
             cell.border = border
             cell.font = Font(bold=True)
-            if col_idx > 3:
+            if col_idx >= first_num_col:
                 cell.number_format = "#,##0"
 
     def _build_sheet_rebotes_por_generico(
