@@ -102,77 +102,49 @@ SHEET_CONFIGS_BRANCA: list[SheetConfig] = [
     ),
 ]
 
-# Populated in PR #2 from scripts/inspect_badie_xlsm.py output.
+# SHEET_CONFIGS_BADIE — populated from real .xlsm inspection (2026-06-05) +
+# Excel header sample rows. Uses dedicated DataLoader methods that perform the
+# dim_sucursal / dim_vendedor / dim_articulo / dim_cliente joins in SQL, so the
+# DataFrame columns already match the Excel header row exactly. No
+# column_rename layer is required — data_columns lists headers verbatim.
 #
-# Inspection results (2026-06-05):
-#   pivot_python  — 12 cols, 26443 rows, header_row=1
-#     Excel headers: Sucursal, Descripcion Período, Descripcion Vendedor, Ruta,
-#       Descripcion_Ruta, Descripcion_Marca, GENERICO, Código_Articulo,
-#       Descripcion_Articulo, Cantidades Totales, CATEGORIA, Columna1
-#     DataLoader (get_fact_ventas_raw): id_cliente, id_articulo, id_vendedor,
-#       id_sucursal, fecha_comprobante, id_documento, letra, serie, nro_doc,
-#       anulado, cantidades_total, bonificacion
-#     Decision: use pivot_python — 12-col shape matches get_fact_ventas_raw.
-#       column_rename maps DB names → Excel headers for the overlapping fields.
+# Sample row inspection confirmed (pivot_python):
+#   Sucursal = "1 - CASA CENTRAL", Descripcion Vendedor = "AGUIRRE ETHEL",
+#   Ruta = 6 (integer), Descripcion_Ruta = "AGUIRRE ETHEL LUJU",
+#   Descripcion_Marca = "ARIZU", GENERICO = "VINOS",
+#   Código_Articulo = 821016, Descripcion_Articulo = "ARIZU BLANCO 1000 * 12",
+#   Cantidades Totales = 3
 #
-#   cober_gen     — 7 cols, 598 rows, header_row=1
-#     Excel headers: Column1, Sucursal, Descripcion Vendedor, Ruta,
-#       GENERICO, Numero_Clientes, Columna1
-#     DataLoader (get_cob_preventista_generico_raw): id, periodo,
-#       id_fuerza_ventas, id_vendedor, id_ruta, id_sucursal, ds_sucursal,
-#       generico, clientes_compradores, volumen_total
-#
-#   cober_marca   — 6 cols, 2140 rows, header_row=1
-#     Excel headers: Column1, Sucursal, Descripcion Vendedor, Ruta,
-#       Descripcion_Marca, Numero_Clientes
-#     DataLoader (get_cob_preventista_marca_raw): same shape as cober_gen
-#       but with marca instead of generico.
+# Columns NOT written (Excel formulas the user maintains):
+#   pivot_python : CATEGORIA, Columna1  (VLOOKUP formulas)
+#   cober_gen    : Column1 (autoincrement index), Columna1 (VLOOKUP)
+#   cober_marca  : Column1 (autoincrement index)
 SHEET_CONFIGS_BADIE: list[SheetConfig] = [
-    # 1. Ventas — pivot_python sheet (12 cols, header_row=1)
-    #    DataLoader columns renamed to match Excel headers where semantically aligned.
-    #    Columns written: Sucursal, Descripcion Período, Descripcion Vendedor,
-    #      Ruta, Código_Articulo, Cantidades Totales
-    #    Excel-only cols (Descripcion_Ruta, Descripcion_Marca, GENERICO,
-    #      Descripcion_Articulo, CATEGORIA, Columna1) are left untouched.
+    # 1. Ventas — pivot_python sheet (10 data cols of 12; 2 are user formulas)
     SheetConfig(
         sheet_name="pivot_python",
-        query_method="get_fact_ventas_raw",
-        query_params=["fecha_desde", "fecha_hasta", "id_sucursal"],
-        column_rename={
-            "id_sucursal": "Sucursal",
-            "fecha_comprobante": "Descripcion Período",
-            "id_vendedor": "Descripcion Vendedor",
-            "nro_doc": "Ruta",
-            "id_articulo": "Código_Articulo",
-            "cantidades_total": "Cantidades Totales",
-        },
+        query_method="get_fact_ventas_pivot_badie",
+        query_params=["fecha_desde", "fecha_hasta", "id_sucursal", "id_fuerza_ventas"],
         data_columns=[
             "Sucursal",
             "Descripcion Período",
             "Descripcion Vendedor",
             "Ruta",
+            "Descripcion_Ruta",
+            "Descripcion_Marca",
+            "GENERICO",
             "Código_Articulo",
+            "Descripcion_Articulo",
             "Cantidades Totales",
         ],
         header_row=1,
     ),
-    # 2. Cobertura por genérico — cober_gen sheet (7 cols, header_row=1)
-    #    Columns written: Column1, Sucursal, Descripcion Vendedor, Ruta, GENERICO, Numero_Clientes
-    #    Columna1 (col G, extra display column) is left untouched.
+    # 2. Cobertura por genérico — cober_gen sheet (5 data cols; Column1 + Columna1 left alone)
     SheetConfig(
         sheet_name="cober_gen",
-        query_method="get_cob_preventista_generico_raw",
+        query_method="get_cob_preventista_generico_pivot_badie",
         query_params=["fecha_desde", "fecha_hasta", "id_fuerza_ventas", "id_sucursal"],
-        column_rename={
-            "id": "Column1",
-            "id_sucursal": "Sucursal",
-            "id_vendedor": "Descripcion Vendedor",
-            "id_ruta": "Ruta",
-            "generico": "GENERICO",
-            "clientes_compradores": "Numero_Clientes",
-        },
         data_columns=[
-            "Column1",
             "Sucursal",
             "Descripcion Vendedor",
             "Ruta",
@@ -181,23 +153,12 @@ SHEET_CONFIGS_BADIE: list[SheetConfig] = [
         ],
         header_row=1,
     ),
-    # 3. Cobertura por marca — cober_marca sheet (6 cols, header_row=1)
-    #    Columns written: Column1, Sucursal, Descripcion Vendedor, Ruta,
-    #      Descripcion_Marca, Numero_Clientes
+    # 3. Cobertura por marca — cober_marca sheet (5 data cols; Column1 left alone)
     SheetConfig(
         sheet_name="cober_marca",
-        query_method="get_cob_preventista_marca_raw",
+        query_method="get_cob_preventista_marca_pivot_badie",
         query_params=["fecha_desde", "fecha_hasta", "id_fuerza_ventas", "id_sucursal"],
-        column_rename={
-            "id": "Column1",
-            "id_sucursal": "Sucursal",
-            "id_vendedor": "Descripcion Vendedor",
-            "id_ruta": "Ruta",
-            "marca": "Descripcion_Marca",
-            "clientes_compradores": "Numero_Clientes",
-        },
         data_columns=[
-            "Column1",
             "Sucursal",
             "Descripcion Vendedor",
             "Ruta",

@@ -374,60 +374,48 @@ BADIE_FIXTURE = Path(__file__).parent / "fixtures" / "avance_badie_minimal.xlsx"
 
 
 def _make_badie_ventas_df():
-    """Small DataFrame matching get_fact_ventas_raw output columns (pre-rename)."""
+    """DataFrame shape matching get_fact_ventas_pivot_badie — descriptive headers."""
     return pd.DataFrame({
-        "id_cliente": [1, 2, 3],
-        "id_articulo": [101, 102, 103],
-        "id_vendedor": [10, 11, 12],
-        "id_sucursal": [1, 1, 1],
-        "fecha_comprobante": pd.to_datetime(["2026-05-01", "2026-05-02", "2026-05-03"]),
-        "id_documento": [1001, 1002, 1003],
-        "letra": ["A", "B", "C"],
-        "serie": ["0001", "0002", "0003"],
-        "nro_doc": [500001, 500002, 500003],
-        "anulado": [0, 0, 0],
-        "cantidades_total": [10.0, 20.0, 30.0],
-        "bonificacion": [0.0, 5.0, 0.0],
+        "Sucursal": ["1 - CASA CENTRAL", "1 - CASA CENTRAL", "1 - CASA CENTRAL"],
+        "Descripcion Período": pd.to_datetime(["2026-05-01", "2026-05-02", "2026-05-03"]),
+        "Descripcion Vendedor": ["AGUIRRE ETHEL", "AGUIRRE ETHEL", "GOMEZ JUAN"],
+        "Ruta": [6, 6, 7],
+        "Descripcion_Ruta": ["AGUIRRE ETHEL LUJU", "AGUIRRE ETHEL LUJU", "GOMEZ ZONA SUR"],
+        "Descripcion_Marca": ["ARIZU", "BRAHMA", "QUILMES"],
+        "GENERICO": ["VINOS", "CERVEZAS", "CERVEZAS"],
+        "Código_Articulo": [821016, 102, 103],
+        "Descripcion_Articulo": ["ARIZU BLANCO 1000 * 12", "BRAHMA 473", "QUILMES 1L"],
+        "Cantidades Totales": [10.0, 20.0, 30.0],
     })
 
 
 def _make_badie_cob_gen_df():
-    """Small DataFrame matching get_cob_preventista_generico_raw output."""
+    """DataFrame shape matching get_cob_preventista_generico_pivot_badie."""
     return pd.DataFrame({
-        "id": [1, 2, 3],
-        "periodo": pd.to_datetime(["2026-05-01", "2026-05-01", "2026-05-01"]),
-        "id_fuerza_ventas": [1, 1, 1],
-        "id_vendedor": [10, 10, 11],
-        "id_ruta": [6, 6, 7],
-        "id_sucursal": [1, 1, 1],
-        "ds_sucursal": ["CASA CENTRAL", "CASA CENTRAL", "CASA CENTRAL"],
-        "generico": ["CERVEZAS", "AGUAS DANONE", "VINOS"],
-        "clientes_compradores": [50, 30, 20],
-        "volumen_total": [100.5, 50.3, 25.0],
+        "Sucursal": ["1 - CASA CENTRAL", "1 - CASA CENTRAL", "1 - CASA CENTRAL"],
+        "Descripcion Vendedor": ["AGUIRRE ETHEL", "AGUIRRE ETHEL", "GOMEZ JUAN"],
+        "Ruta": [6, 6, 7],
+        "GENERICO": ["CERVEZAS", "AGUAS DANONE", "VINOS"],
+        "Numero_Clientes": [50, 30, 20],
     })
 
 
 def _make_badie_cob_marca_df():
-    """Small DataFrame matching get_cob_preventista_marca_raw output."""
+    """DataFrame shape matching get_cob_preventista_marca_pivot_badie."""
     return pd.DataFrame({
-        "id": [1, 2, 3],
-        "periodo": pd.to_datetime(["2026-05-01", "2026-05-01", "2026-05-01"]),
-        "id_fuerza_ventas": [1, 1, 1],
-        "id_vendedor": [10, 10, 11],
-        "id_ruta": [6, 6, 7],
-        "id_sucursal": [1, 1, 1],
-        "ds_sucursal": ["CASA CENTRAL", "CASA CENTRAL", "CASA CENTRAL"],
-        "marca": ["QUILMES", "BRAHMA", "ARIZU"],
-        "clientes_compradores": [40, 25, 15],
-        "volumen_total": [80.0, 45.0, 22.5],
+        "Sucursal": ["1 - CASA CENTRAL", "1 - CASA CENTRAL", "1 - CASA CENTRAL"],
+        "Descripcion Vendedor": ["AGUIRRE ETHEL", "AGUIRRE ETHEL", "GOMEZ JUAN"],
+        "Ruta": [6, 6, 7],
+        "Descripcion_Marca": ["QUILMES", "BRAHMA", "ARIZU"],
+        "Numero_Clientes": [40, 25, 15],
     })
 
 
 def _make_badie_mock_loader():
     loader = MagicMock(spec=DataLoader)
-    loader.get_fact_ventas_raw.return_value = _make_badie_ventas_df()
-    loader.get_cob_preventista_generico_raw.return_value = _make_badie_cob_gen_df()
-    loader.get_cob_preventista_marca_raw.return_value = _make_badie_cob_marca_df()
+    loader.get_fact_ventas_pivot_badie.return_value = _make_badie_ventas_df()
+    loader.get_cob_preventista_generico_pivot_badie.return_value = _make_badie_cob_gen_df()
+    loader.get_cob_preventista_marca_pivot_badie.return_value = _make_badie_cob_marca_df()
     return loader
 
 

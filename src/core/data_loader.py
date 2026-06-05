@@ -1438,6 +1438,137 @@ class DataLoader:
         )
 
     # ──────────────────────────────────────────────────────────────
+    # Avance Badie queries — same domain as avance-branca but with
+    # descriptive joins (sucursal/vendedor/articulo/ruta) so the Excel
+    # template can display names instead of IDs.
+    # Column aliases match the Badie .xlsm headers exactly so the
+    # service writes them without a rename map.
+    # ──────────────────────────────────────────────────────────────
+
+    def get_fact_ventas_pivot_badie(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        id_sucursal: int,
+        id_fuerza_ventas: int,
+    ) -> pd.DataFrame:
+        """Ventas pivot for Badie pivot_python sheet — aggregated with descriptions.
+
+        Groups fact_ventas by (sucursal, fecha, vendedor, ruta, marca, genérico,
+        artículo) and sums cantidades_total. Joins dim tables to surface display
+        names. Route comes from dim_cliente.id_ruta_fv{1,4}/des_personal_fv{1,4}
+        depending on id_fuerza_ventas.
+        """
+        ruta_col = "id_ruta_fv1" if id_fuerza_ventas == 1 else "id_ruta_fv4"
+        ruta_desc_col = "des_personal_fv1" if id_fuerza_ventas == 1 else "des_personal_fv4"
+        return self.execute_query(
+            f"""
+            SELECT
+                ds.id_sucursal || ' - ' || ds.descripcion        AS "Sucursal",
+                fv.fecha_comprobante                              AS "Descripcion Período",
+                dv.des_vendedor                                   AS "Descripcion Vendedor",
+                dc.{ruta_col}                                     AS "Ruta",
+                dc.{ruta_desc_col}                                AS "Descripcion_Ruta",
+                da.marca                                          AS "Descripcion_Marca",
+                da.generico                                       AS "GENERICO",
+                fv.id_articulo                                    AS "Código_Articulo",
+                da.des_articulo                                   AS "Descripcion_Articulo",
+                SUM(fv.cantidades_total)                          AS "Cantidades Totales"
+            FROM gold.fact_ventas fv
+            LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+            LEFT JOIN gold.dim_vendedor dv
+              ON fv.id_vendedor = dv.id_vendedor
+             AND fv.id_sucursal = dv.id_sucursal
+            LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+            LEFT JOIN gold.dim_cliente  dc
+              ON fv.id_cliente = dc.id_cliente
+             AND fv.id_sucursal = dc.id_sucursal
+            WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+              AND fv.id_sucursal = :id_sucursal
+              AND fv.anulado = false
+            GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
+            """,
+            {
+                "fecha_desde": fecha_desde,
+                "fecha_hasta": fecha_hasta,
+                "id_sucursal": id_sucursal,
+            },
+        )
+
+    def get_cob_preventista_generico_pivot_badie(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        id_fuerza_ventas: int,
+        id_sucursal: int,
+    ) -> pd.DataFrame:
+        """Cobertura por preventista/genérico for Badie cober_gen sheet.
+
+        Adds sucursal+vendedor descriptions. Column aliases match the Excel
+        header row exactly (no rename layer needed).
+        """
+        return self.execute_query(
+            """
+            SELECT
+                ds.id_sucursal || ' - ' || ds.descripcion AS "Sucursal",
+                dv.des_vendedor                            AS "Descripcion Vendedor",
+                cpg.id_ruta                                AS "Ruta",
+                cpg.generico                               AS "GENERICO",
+                cpg.clientes_compradores                   AS "Numero_Clientes"
+            FROM gold.cob_preventista_generico cpg
+            LEFT JOIN gold.dim_sucursal ds ON cpg.id_sucursal = ds.id_sucursal
+            LEFT JOIN gold.dim_vendedor dv
+              ON cpg.id_vendedor = dv.id_vendedor
+             AND cpg.id_sucursal = dv.id_sucursal
+            WHERE cpg.periodo BETWEEN :fecha_desde AND :fecha_hasta
+              AND cpg.id_fuerza_ventas = :id_fuerza_ventas
+              AND cpg.id_sucursal = :id_sucursal
+            """,
+            {
+                "fecha_desde": fecha_desde,
+                "fecha_hasta": fecha_hasta,
+                "id_fuerza_ventas": id_fuerza_ventas,
+                "id_sucursal": id_sucursal,
+            },
+        )
+
+    def get_cob_preventista_marca_pivot_badie(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        id_fuerza_ventas: int,
+        id_sucursal: int,
+    ) -> pd.DataFrame:
+        """Cobertura por preventista/marca for Badie cober_marca sheet.
+
+        Mirror of get_cob_preventista_generico_pivot_badie but with marca.
+        """
+        return self.execute_query(
+            """
+            SELECT
+                ds.id_sucursal || ' - ' || ds.descripcion AS "Sucursal",
+                dv.des_vendedor                            AS "Descripcion Vendedor",
+                cpm.id_ruta                                AS "Ruta",
+                cpm.marca                                  AS "Descripcion_Marca",
+                cpm.clientes_compradores                   AS "Numero_Clientes"
+            FROM gold.cob_preventista_marca cpm
+            LEFT JOIN gold.dim_sucursal ds ON cpm.id_sucursal = ds.id_sucursal
+            LEFT JOIN gold.dim_vendedor dv
+              ON cpm.id_vendedor = dv.id_vendedor
+             AND cpm.id_sucursal = dv.id_sucursal
+            WHERE cpm.periodo BETWEEN :fecha_desde AND :fecha_hasta
+              AND cpm.id_fuerza_ventas = :id_fuerza_ventas
+              AND cpm.id_sucursal = :id_sucursal
+            """,
+            {
+                "fecha_desde": fecha_desde,
+                "fecha_hasta": fecha_hasta,
+                "id_fuerza_ventas": id_fuerza_ventas,
+                "id_sucursal": id_sucursal,
+            },
+        )
+
+    # ──────────────────────────────────────────────────────────────
     # Graficos-Cobertura queries
     # Aggregated per (anio, mes, axis) from cob_* tables. Distinct from the
     # preventista/sucursal queries above because the graficos service needs
