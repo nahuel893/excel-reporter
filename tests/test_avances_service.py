@@ -411,11 +411,48 @@ def _make_badie_cob_marca_df():
     })
 
 
+def _make_badie_cupos_volumen_df():
+    """DataFrame shape matching get_cupos_volumen_badie."""
+    return pd.DataFrame({
+        "Código": [6, 6, 7],
+        "Descripción": ["AGUIRRE ETHEL", "AGUIRRE ETHEL", "GOMEZ JUAN"],
+        "PREVENTISTA": ["AGUIRRE ETHEL LUJU", "AGUIRRE ETHEL LUJU", "GOMEZ ZONA SUR"],
+        "GENERICO": ["CERVEZAS", "AGUAS DANONE", "CERVEZAS"],
+        "DESAGREGADO": ["CERVEZAS", "AGUAS DANONE", "CERVEZAS"],
+        "Cupo ": [800.5, 600.0, 1100.25],
+    })
+
+
+def _make_badie_cupos_cob_gen_df():
+    """DataFrame shape matching get_cupos_cobertura_generico_badie (post-swap)."""
+    return pd.DataFrame({
+        "Ruta": [1, 1, 2],
+        "Preventista": ["ROBLES ORLANDO", "ROBLES ORLANDO", "AGUIRRE ETHEL"],
+        "Generico": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU"],
+        "ZONA": ["1 - CASA CENTRAL", "1 - CASA CENTRAL", "1 - CASA CENTRAL"],
+        "CUPO ": [67.6, 30.5, 12.3],
+    })
+
+
+def _make_badie_cupos_cob_marca_df():
+    """DataFrame shape matching get_cupos_cobertura_marca_badie (post-swap)."""
+    return pd.DataFrame({
+        "Ruta": [1, 1, 2],
+        "Descripción Vendedor": ["ROBLES ORLANDO", "ROBLES ORLANDO", "AGUIRRE ETHEL"],
+        "MARCA": ["GROLSCH", "HEINEKEN", "ARIZU"],
+        "ZONA": ["1 - CASA CENTRAL", "1 - CASA CENTRAL", "1 - CASA CENTRAL"],
+        "CUPO ": [0.89, 19.31, 0.74],
+    })
+
+
 def _make_badie_mock_loader():
     loader = MagicMock(spec=DataLoader)
     loader.get_fact_ventas_pivot_badie.return_value = _make_badie_ventas_df()
     loader.get_cob_preventista_generico_pivot_badie.return_value = _make_badie_cob_gen_df()
     loader.get_cob_preventista_marca_pivot_badie.return_value = _make_badie_cob_marca_df()
+    loader.get_cupos_volumen_badie.return_value = _make_badie_cupos_volumen_df()
+    loader.get_cupos_cobertura_generico_badie.return_value = _make_badie_cupos_cob_gen_df()
+    loader.get_cupos_cobertura_marca_badie.return_value = _make_badie_cupos_cob_marca_df()
     return loader
 
 
@@ -447,16 +484,12 @@ class TestBadieRoundTrip:
 
         result = service.generar_reporte(config)
 
-        # Exactly 3 sheets refreshed
-        assert len(result.registros_por_hoja) == 3
-        assert "pivot_python" in result.registros_por_hoja
-        assert "cober_gen" in result.registros_por_hoja
-        assert "cober_marca" in result.registros_por_hoja
-
-        # Row counts match DataLoader mock output
-        assert result.registros_por_hoja["pivot_python"] == 3
-        assert result.registros_por_hoja["cober_gen"] == 3
-        assert result.registros_por_hoja["cober_marca"] == 3
+        # Exactly 6 sheets refreshed: 3 data + 3 cupos
+        assert len(result.registros_por_hoja) == 6
+        for sheet in ("pivot_python", "cober_gen", "cober_marca",
+                      "CuposVolumen", "CuposCoberGen", "CuposCober"):
+            assert sheet in result.registros_por_hoja, f"Missing sheet: {sheet}"
+            assert result.registros_por_hoja[sheet] == 3, f"{sheet}: expected 3 rows"
 
     def test_badie_round_trip_sample_values(self, tmp_path):
         """Data written to pivot_python and cober_gen must reflect the mocked DF values.
@@ -556,7 +589,8 @@ class TestBadieRoundTrip:
     @pytest.mark.parametrize("tipo_plantilla,expected_sheets", [
         ("branca", {"gold fact_ventas", "gold dim_articulo", "gold dim_cliente",
                     "gold cob_preventista_generico", "gold cob_preventista_marca"}),
-        ("badie", {"pivot_python", "cober_gen", "cober_marca"}),
+        ("badie", {"pivot_python", "cober_gen", "cober_marca",
+                    "CuposVolumen", "CuposCoberGen", "CuposCober"}),
     ])
     def test_registry_dispatch_correct_sheets(self, tmp_path, tipo_plantilla, expected_sheets):
         """Registry dispatch must route to the correct sheet set per tipo_plantilla."""

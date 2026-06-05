@@ -1568,6 +1568,92 @@ class DataLoader:
             },
         )
 
+    def get_cupos_volumen_badie(
+        self,
+        periodo: str,
+        id_sucursal: int,
+    ) -> pd.DataFrame:
+        """Cupos volumen for Badie CuposVolumen sheet.
+
+        Source: gold.fact_cupos. Columns aliased to match Excel headers exactly
+        (including trailing-space header `Cupo `).
+        """
+        return self.execute_query(
+            """
+            SELECT
+                id_ruta     AS "Código",
+                descripcion AS "Descripción",
+                preventista AS "PREVENTISTA",
+                generico    AS "GENERICO",
+                desagregado AS "DESAGREGADO",
+                cupo        AS "Cupo "
+            FROM gold.fact_cupos
+            WHERE periodo = :periodo
+              AND id_sucursal = :id_sucursal
+            """,
+            {"periodo": periodo, "id_sucursal": id_sucursal},
+        )
+
+    def get_cupos_cobertura_generico_badie(
+        self,
+        periodo: str,
+        id_sucursal: int,
+    ) -> pd.DataFrame:
+        """Cupos de cobertura por genérico for Badie CuposCoberGen sheet.
+
+        Source: gold.fact_cupos_cobertura filtered by tipo_apertura='generico'.
+
+        DATA QUIRK: when tipo_apertura='generico', the table stores the actual
+        generico value in the `marca` column (the `generico` column is NULL).
+        We swap the SELECT to match the Excel header semantics.
+        """
+        return self.execute_query(
+            """
+            SELECT
+                id_ruta     AS "Ruta",
+                preventista AS "Preventista",
+                marca       AS "Generico",
+                sucursal    AS "ZONA",
+                cupo        AS "CUPO "
+            FROM gold.fact_cupos_cobertura
+            WHERE periodo = :periodo
+              AND id_sucursal = :id_sucursal
+              AND tipo_apertura = 'generico'
+            """,
+            {"periodo": periodo, "id_sucursal": id_sucursal},
+        )
+
+    def get_cupos_cobertura_marca_badie(
+        self,
+        periodo: str,
+        id_sucursal: int,
+    ) -> pd.DataFrame:
+        """Cupos de cobertura por marca for Badie CuposCober sheet.
+
+        Source: gold.fact_cupos_cobertura filtered by tipo_apertura='marca'.
+
+        DATA QUIRK: when tipo_apertura='marca', the table stores the actual
+        marca value in the `generico` column (the `marca` column is NULL).
+        We swap the SELECT to match the Excel header semantics.
+        Note: 'Descripción Vendedor' header in Excel has accented capital ó —
+        SQL alias must match byte-for-byte.
+        """
+        return self.execute_query(
+            """
+            SELECT
+                id_ruta     AS "Ruta",
+                preventista AS "Descripción Vendedor",
+                generico    AS "MARCA",
+                sucursal    AS "ZONA",
+                cupo        AS "CUPO "
+            FROM gold.fact_cupos_cobertura
+            WHERE periodo = :periodo
+              AND id_sucursal = :id_sucursal
+              AND tipo_apertura = 'marca'
+            """,
+            {"periodo": periodo, "id_sucursal": id_sucursal},
+        )
+
     # ──────────────────────────────────────────────────────────────
     # Graficos-Cobertura queries
     # Aggregated per (anio, mes, axis) from cob_* tables. Distinct from the

@@ -167,6 +167,52 @@ SHEET_CONFIGS_BADIE: list[SheetConfig] = [
         ],
         header_row=1,
     ),
+    # 4. Cupos volumen — CuposVolumen sheet (6 data cols of 51; rest are user formulas)
+    #    Source: gold.fact_cupos filtered by periodo + id_sucursal
+    SheetConfig(
+        sheet_name="CuposVolumen",
+        query_method="get_cupos_volumen_badie",
+        query_params=["periodo", "id_sucursal"],
+        data_columns=[
+            "Código",
+            "Descripción",
+            "PREVENTISTA",
+            "GENERICO",
+            "DESAGREGADO",
+            "Cupo ",  # trailing space matches Excel header exactly
+        ],
+        header_row=1,
+    ),
+    # 5. Cupos cobertura por genérico — CuposCoberGen sheet (5 data cols of 6)
+    #    Source: gold.fact_cupos_cobertura WHERE tipo_apertura='generico'
+    SheetConfig(
+        sheet_name="CuposCoberGen",
+        query_method="get_cupos_cobertura_generico_badie",
+        query_params=["periodo", "id_sucursal"],
+        data_columns=[
+            "Ruta",
+            "Preventista",
+            "Generico",
+            "ZONA",
+            "CUPO ",  # trailing space matches Excel header
+        ],
+        header_row=1,
+    ),
+    # 6. Cupos cobertura por marca — CuposCober sheet (5 data cols of 15; supervisor cols user-maintained)
+    #    Source: gold.fact_cupos_cobertura WHERE tipo_apertura='marca'
+    SheetConfig(
+        sheet_name="CuposCober",
+        query_method="get_cupos_cobertura_marca_badie",
+        query_params=["periodo", "id_sucursal"],
+        data_columns=[
+            "Ruta",
+            "Descripción Vendedor",
+            "MARCA",
+            "ZONA",
+            "CUPO ",  # trailing space matches Excel header
+        ],
+        header_row=1,
+    ),
 ]
 
 PLANTILLA_SHEET_CONFIGS: dict[str, list[SheetConfig]] = {
@@ -200,6 +246,15 @@ class AvancesConfig:
     id_fuerza_ventas: int = 1
     nombre_archivo: str | None = None  # output filename (no extension)
     output_dir: Path | None = None  # override; if None, derived from fecha_desde
+
+    @property
+    def periodo(self) -> str:
+        """Period key derived from fecha_desde for monthly tables (fact_cupos*).
+
+        Returns 'YYYY-MM' — matches the periodo column format in fact_cupos
+        and fact_cupos_cobertura.
+        """
+        return self.fecha_desde[:7]
 
 
 @dataclass
