@@ -185,10 +185,11 @@ SHEET_CONFIGS_BADIE: list[SheetConfig] = [
     ),
     # 5. Cupos cobertura por genérico — CuposCoberGen sheet (5 data cols of 6)
     #    Source: gold.fact_cupos_cobertura WHERE tipo_apertura='generico'
+    #    No id_sucursal filter: includes CASA CENTRAL (split into ZONAs) + GUEMES
     SheetConfig(
         sheet_name="CuposCoberGen",
         query_method="get_cupos_cobertura_generico_badie",
-        query_params=["periodo", "id_sucursal"],
+        query_params=["periodo"],
         data_columns=[
             "Ruta",
             "Preventista",
@@ -200,10 +201,11 @@ SHEET_CONFIGS_BADIE: list[SheetConfig] = [
     ),
     # 6. Cupos cobertura por marca — CuposCober sheet (5 data cols of 15; supervisor cols user-maintained)
     #    Source: gold.fact_cupos_cobertura WHERE tipo_apertura='marca'
+    #    No id_sucursal filter: includes CASA CENTRAL (split into ZONAs) + GUEMES
     SheetConfig(
         sheet_name="CuposCober",
         query_method="get_cupos_cobertura_marca_badie",
-        query_params=["periodo", "id_sucursal"],
+        query_params=["periodo"],
         data_columns=[
             "Ruta",
             "Descripción Vendedor",

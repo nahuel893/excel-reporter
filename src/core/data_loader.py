@@ -1568,6 +1568,13 @@ class DataLoader:
             },
         )
 
+    # ZONAS_VIRTUALES applied inline in SQL for cupos queries below.
+    # Rutas hardcoded here to keep the queries self-contained; mirrors
+    # config/settings.py:ZONAS_VIRTUALES. Excel sheets use the singular
+    # form "SUB DISTRIBUIDOR" — match that in the CASE expression.
+    _VALLE_SALTA_RUTAS = "(81,82,83,84,85,86,87,88,89,90,91,92,118,119,120,122)"
+    _SUB_DISTRIBUIDOR_RUTAS = "(93)"
+
     def get_cupos_volumen_badie(
         self,
         periodo: str,
@@ -1575,8 +1582,10 @@ class DataLoader:
     ) -> pd.DataFrame:
         """Cupos volumen for Badie CuposVolumen sheet.
 
-        Source: gold.fact_cupos. Columns aliased to match Excel headers exactly
-        (including trailing-space header `Cupo `).
+        Source: gold.fact_cupos filtered to proveedor='CCU' (Badie excludes
+        BRANCA from this sheet — Branca cupos live in the Avance Branca report).
+        Columns aliased to match Excel headers exactly (including trailing-space
+        header 'Cupo ').
         """
         return self.execute_query(
             """
@@ -1590,6 +1599,7 @@ class DataLoader:
             FROM gold.fact_cupos
             WHERE periodo = :periodo
               AND id_sucursal = :id_sucursal
+              AND proveedor = 'CCU'
             """,
             {"periodo": periodo, "id_sucursal": id_sucursal},
         )
@@ -1597,62 +1607,73 @@ class DataLoader:
     def get_cupos_cobertura_generico_badie(
         self,
         periodo: str,
-        id_sucursal: int,
     ) -> pd.DataFrame:
         """Cupos de cobertura por genérico for Badie CuposCoberGen sheet.
 
         Source: gold.fact_cupos_cobertura filtered by tipo_apertura='generico'.
 
-        DATA QUIRK: when tipo_apertura='generico', the table stores the actual
-        generico value in the `marca` column (the `generico` column is NULL).
-        We swap the SELECT to match the Excel header semantics.
+        Includes all sucursales (table only contains id_sucursal IN (1, 16)
+        for the relevant period). CASA CENTRAL rows are re-zoned to
+        'VALLE SALTA' / 'SUB DISTRIBUIDOR' based on id_ruta per ZONAS_VIRTUALES.
+
+        DATA QUIRK: when tipo_apertura='generico', the actual generico value
+        lives in the `marca` column (the `generico` column is NULL). The
+        SELECT swaps to compensate.
         """
-        return self.execute_query(
-            """
-            SELECT
-                id_ruta     AS "Ruta",
-                preventista AS "Preventista",
-                marca       AS "Generico",
-                sucursal    AS "ZONA",
-                cupo        AS "CUPO "
-            FROM gold.fact_cupos_cobertura
-            WHERE periodo = :periodo
-              AND id_sucursal = :id_sucursal
-              AND tipo_apertura = 'generico'
-            """,
-            {"periodo": periodo, "id_sucursal": id_sucursal},
-        )
+        sql = f"""
+        SELECT
+            id_ruta     AS "Ruta",
+            preventista AS "Preventista",
+            marca       AS "Generico",
+            CASE
+                WHEN sucursal = '1 - CASA CENTRAL'
+                     AND id_ruta IN {self._VALLE_SALTA_RUTAS} THEN 'VALLE SALTA'
+                WHEN sucursal = '1 - CASA CENTRAL'
+                     AND id_ruta IN {self._SUB_DISTRIBUIDOR_RUTAS} THEN 'SUB DISTRIBUIDOR'
+                ELSE sucursal
+            END AS "ZONA",
+            cupo        AS "CUPO "
+        FROM gold.fact_cupos_cobertura
+        WHERE periodo = :periodo
+          AND tipo_apertura = 'generico'
+        """
+        return self.execute_query(sql, {"periodo": periodo})
 
     def get_cupos_cobertura_marca_badie(
         self,
         periodo: str,
-        id_sucursal: int,
     ) -> pd.DataFrame:
         """Cupos de cobertura por marca for Badie CuposCober sheet.
 
         Source: gold.fact_cupos_cobertura filtered by tipo_apertura='marca'.
 
-        DATA QUIRK: when tipo_apertura='marca', the table stores the actual
-        marca value in the `generico` column (the `marca` column is NULL).
-        We swap the SELECT to match the Excel header semantics.
-        Note: 'Descripción Vendedor' header in Excel has accented capital ó —
-        SQL alias must match byte-for-byte.
+        Includes all sucursales (table only contains id_sucursal IN (1, 16)
+        for the relevant period). CASA CENTRAL rows are re-zoned to
+        'VALLE SALTA' / 'SUB DISTRIBUIDOR' based on id_ruta per ZONAS_VIRTUALES.
+
+        DATA QUIRK: when tipo_apertura='marca', the actual marca value lives
+        in the `generico` column (the `marca` column is NULL). The SELECT
+        swaps to compensate. 'Descripción Vendedor' header in Excel has
+        accented capital ó — SQL alias must match byte-for-byte.
         """
-        return self.execute_query(
-            """
-            SELECT
-                id_ruta     AS "Ruta",
-                preventista AS "Descripción Vendedor",
-                generico    AS "MARCA",
-                sucursal    AS "ZONA",
-                cupo        AS "CUPO "
-            FROM gold.fact_cupos_cobertura
-            WHERE periodo = :periodo
-              AND id_sucursal = :id_sucursal
-              AND tipo_apertura = 'marca'
-            """,
-            {"periodo": periodo, "id_sucursal": id_sucursal},
-        )
+        sql = f"""
+        SELECT
+            id_ruta     AS "Ruta",
+            preventista AS "Descripción Vendedor",
+            generico    AS "MARCA",
+            CASE
+                WHEN sucursal = '1 - CASA CENTRAL'
+                     AND id_ruta IN {self._VALLE_SALTA_RUTAS} THEN 'VALLE SALTA'
+                WHEN sucursal = '1 - CASA CENTRAL'
+                     AND id_ruta IN {self._SUB_DISTRIBUIDOR_RUTAS} THEN 'SUB DISTRIBUIDOR'
+                ELSE sucursal
+            END AS "ZONA",
+            cupo        AS "CUPO "
+        FROM gold.fact_cupos_cobertura
+        WHERE periodo = :periodo
+          AND tipo_apertura = 'marca'
+        """
+        return self.execute_query(sql, {"periodo": periodo})
 
     # ──────────────────────────────────────────────────────────────
     # Graficos-Cobertura queries
