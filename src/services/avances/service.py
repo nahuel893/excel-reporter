@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from openpyxl import load_workbook
 
@@ -38,7 +39,7 @@ class SheetConfig:
     header_row: int = 1
 
 
-SHEET_CONFIGS = [
+SHEET_CONFIGS_BRANCA: list[SheetConfig] = [
     SheetConfig(
         sheet_name="gold fact_ventas",
         query_method="get_fact_ventas_raw",
@@ -93,6 +94,15 @@ SHEET_CONFIGS = [
     ),
 ]
 
+# Placeholder — populated in PR #2 after running scripts/inspect_badie_xlsm.py
+# against the real AVANCE BADIE *.xlsm to determine sheet names and data_columns.
+SHEET_CONFIGS_BADIE: list[SheetConfig] = []
+
+PLANTILLA_SHEET_CONFIGS: dict[str, list[SheetConfig]] = {
+    "branca": SHEET_CONFIGS_BRANCA,
+    "badie": SHEET_CONFIGS_BADIE,
+}
+
 
 @dataclass
 class AvancesConfig:
@@ -113,6 +123,7 @@ class AvancesConfig:
 
     fecha_desde: str
     fecha_hasta: str
+    tipo_plantilla: Literal["branca", "badie"] = "branca"
     archivo_plantilla: str | None = None  # path to BASE template (fallback if no prev output)
     id_sucursal: int = 1
     id_fuerza_ventas: int = 1
@@ -224,7 +235,7 @@ class AvancesService(BaseService):
 
         registros = {}
 
-        for sc in SHEET_CONFIGS:
+        for sc in PLANTILLA_SHEET_CONFIGS[config.tipo_plantilla]:
             if sc.sheet_name not in wb.sheetnames:
                 logger.info("Sheet '%s' not found, creating", sc.sheet_name)
                 ws = wb.create_sheet(sc.sheet_name)

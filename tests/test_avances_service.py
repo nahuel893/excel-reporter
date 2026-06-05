@@ -8,7 +8,13 @@ from openpyxl.worksheet.table import Table
 from openpyxl.utils import get_column_letter
 
 from src.core.data_loader import DataLoader
-from src.services.avances.service import AvancesService, AvancesConfig, SHEET_CONFIGS
+from src.services.avances.service import (
+    AvancesService,
+    AvancesConfig,
+    SHEET_CONFIGS_BRANCA,
+    SHEET_CONFIGS_BADIE,
+    PLANTILLA_SHEET_CONFIGS,
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
