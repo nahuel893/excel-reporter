@@ -15,16 +15,18 @@ logger = logging.getLogger(__name__)
 
 # ── Style constants ──────────────────────────────────────────────────────────
 
-_HEADER_FILL = PatternFill(fill_type="solid", fgColor="1F4E79")
+# Pastel palette — softer tones across header/total/status fills.
+# Material Design 100-300 range for backgrounds + 700-900 for fonts.
+_HEADER_FILL = PatternFill(fill_type="solid", fgColor="90A4AE")  # Blue Grey 300
 _HEADER_FONT = Font(bold=True, color="FFFFFF")
 _HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center")
 
-_TOTAL_FILL = PatternFill(fill_type="solid", fgColor="2D6A2E")
-_TOTAL_FONT = Font(bold=True, color="FFFFFF")
+_TOTAL_FILL = PatternFill(fill_type="solid", fgColor="A5D6A7")  # Green 200 (semáforo OK pastel)
+_TOTAL_FONT = Font(bold=True, color="1B5E20")  # Green 900
 
-_DOMINGO_FILL = PatternFill(fill_type="solid", fgColor="F2DCDB")
-_CON_VENTA_FILL = PatternFill(fill_type="solid", fgColor="D9E2F3")
-_SIN_VENTA_FILL = PatternFill(fill_type="solid", fgColor="F2F2F2")
+_DOMINGO_FILL = PatternFill(fill_type="solid", fgColor="FFCDD2")    # Red 100 (semáforo no-laboral pastel)
+_CON_VENTA_FILL = PatternFill(fill_type="solid", fgColor="BBDEFB")  # Blue 100 (día con venta)
+_SIN_VENTA_FILL = PatternFill(fill_type="solid", fgColor="ECEFF1")  # Blue Grey 50 (día sin venta)
 
 _THIN_BORDER = Border(
     left=Side(style="thin", color="B0B0B0"),

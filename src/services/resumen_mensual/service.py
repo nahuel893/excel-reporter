@@ -8,6 +8,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 import pandas as pd
+from openpyxl import load_workbook
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -21,6 +22,8 @@ from src.services.base_service import BaseService
 from src.services.resumen_mensual.processor import procesar_resumen_mensual
 
 logger = logging.getLogger(__name__)
+
+_DETALLE_DATE_HEADER = "Fecha Mvto"
 
 # Default genericos when config.genericos is None
 _DEFAULT_GENERICOS = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
@@ -115,6 +118,73 @@ def _nombre_reporte(df_dias: pd.DataFrame, fecha_hasta: str) -> str:
     else:
         ultima_fecha = pd.to_datetime(fecha_hasta).strftime("%d-%m-%Y")
     return f"Resumen - {ultima_fecha}"
+
+
+def _expected_period_for_detalle(sheet_name: str, fecha_desde: str) -> str:
+    """Return the only allowed YYYY-MM period for a detalle sheet."""
+    base = pd.Timestamp(fecha_desde).replace(day=1)
+    if sheet_name == "Detalle Movimientos":
+        return base.strftime("%Y-%m")
+    if sheet_name == "Detalle Movimientos MA":
+        return (base - pd.DateOffset(months=1)).strftime("%Y-%m")
+    if sheet_name == "Detalle Movimientos MMAA":
+        return (base - pd.DateOffset(years=1)).strftime("%Y-%m")
+    raise ValueError(f"Unknown detalle sheet: {sheet_name}")
+
+
+def _extract_detalle_periods(source_path: Path) -> set[str]:
+    """Inspect the source workbook and return all YYYY-MM periods found in date columns."""
+    wb = load_workbook(source_path, data_only=True, read_only=True)
+    try:
+        ws = wb[wb.sheetnames[0]]
+        header_iter = ws.iter_rows(min_row=1, max_row=1, values_only=True)
+        header_row = next(header_iter, None)
+        if not header_row:
+            raise ValueError(f"Detalle source {source_path} has no header row")
+
+        date_col_indexes = [
+            idx for idx, value in enumerate(header_row)
+            if str(value).strip() == _DETALLE_DATE_HEADER
+        ]
+        if not date_col_indexes:
+            raise ValueError(
+                f"Detalle source {source_path} is missing expected date column {_DETALLE_DATE_HEADER}"
+            )
+
+        periods: set[str] = set()
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            for idx in date_col_indexes:
+                if idx >= len(row):
+                    continue
+                raw = row[idx]
+                if raw in (None, ""):
+                    continue
+                parsed = pd.to_datetime(raw, errors="coerce")
+                if pd.isna(parsed):
+                    raise ValueError(
+                        f"Detalle source {source_path} contains an invalid date value {raw!r}"
+                    )
+                periods.add(parsed.strftime("%Y-%m"))
+
+        if not periods:
+            raise ValueError(f"Detalle source {source_path} has no usable dates in date columns")
+        return periods
+    finally:
+        wb.close()
+
+
+def _validate_detalle_period_or_warn(source_path: Path, sheet_name: str, fecha_desde: str) -> None:
+    """Log when a detalle source includes periods beyond the expected month."""
+    expected_period = _expected_period_for_detalle(sheet_name, fecha_desde)
+    periods = _extract_detalle_periods(source_path)
+    if periods != {expected_period}:
+        logger.warning(
+            "%s source %s contains periods %s; expected only %s — importing anyway",
+            sheet_name,
+            source_path,
+            sorted(periods),
+            expected_period,
+        )
 
 
 def _segregar_directa_sucursales(df: pd.DataFrame) -> pd.DataFrame:
@@ -454,10 +524,13 @@ def _post_write_subtotals_and_heatmap(
     tend_obj_col_letter = col_map.get("Tend vs Obj (%)")
     if tend_obj_col_letter and data_start_row <= data_end_row:
         heatmap_range = f"{tend_obj_col_letter}{data_start_row}:{tend_obj_col_letter}{data_end_row}"
+        # Pastel semáforo gradient (Material Design 200 range) — softer than
+        # full-saturation FF0000/FFFF00/00B050 to avoid eye fatigue when the
+        # column has many cells.
         color_scale = ColorScaleRule(
-            start_type="num",   start_value=0,   start_color="FF0000",  # red
-            mid_type="num",     mid_value=1.0,   mid_color="FFFF00",    # yellow
-            end_type="num",     end_value=1.2,   end_color="00B050",    # green
+            start_type="num",   start_value=0,   start_color="EF9A9A",  # Red 200
+            mid_type="num",     mid_value=1.0,   mid_color="FFE082",    # Amber 200
+            end_type="num",     end_value=1.2,   end_color="A5D6A7",    # Green 200
         )
         ws.conditional_formatting.add(heatmap_range, color_scale)
 
@@ -962,6 +1035,7 @@ class ResumenMensualService(BaseService):
                 continue
             src_path = Path(src_str)
             try:
+                _validate_detalle_period_or_warn(src_path, sheet_name, config.fecha_desde)
                 rows_imported = import_xlsx_as_sheet(
                     writer.workbook, src_path, sheet_name
                 )
@@ -973,6 +1047,8 @@ class ResumenMensualService(BaseService):
                 logger.warning(
                     "%s source not found: %s — skipping", sheet_name, src_path
                 )
+            except ValueError:
+                raise
             except Exception as exc:
                 logger.warning(
                     "%s import failed (%s) — skipping", sheet_name, exc

@@ -70,7 +70,7 @@ class TestSundayFill:
         for row in sunday_rows:
             fill = ws.cell(row=row, column=1).fill
             rgb = fill.fgColor.rgb
-            assert "F2DCDB" in rgb, f"Row {row} expected pink but got {rgb}"
+            assert "FFCDD2" in rgb, f"Row {row} expected pink but got {rgb}"
 
 
 class TestConVentaFill:
@@ -82,7 +82,7 @@ class TestConVentaFill:
         # Apr 2 = row 4 + 1 = row 5
         fill = ws.cell(row=5, column=1).fill
         rgb = fill.fgColor.rgb
-        assert "D9E2F3" in rgb, f"Expected light blue but got {rgb}"
+        assert "BBDEFB" in rgb, f"Expected light blue but got {rgb}"
 
 
 class TestSinVentaFill:
@@ -93,7 +93,7 @@ class TestSinVentaFill:
         # Apr 1 = row 4 (Wednesday — not Sunday, no sales)
         fill = ws.cell(row=4, column=1).fill
         rgb = fill.fgColor.rgb
-        assert "F2F2F2" in rgb, f"Expected gray but got {rgb}"
+        assert "ECEFF1" in rgb, f"Expected gray but got {rgb}"
 
 
 class TestTotalRow:
@@ -108,11 +108,11 @@ class TestTotalRow:
 
         fill = ws.cell(row=total_row, column=1).fill
         rgb = fill.fgColor.rgb
-        assert "2D6A2E" in rgb, f"Expected green fill but got {rgb}"
+        assert "A5D6A7" in rgb, f"Expected green fill but got {rgb}"
 
         font = ws.cell(row=total_row, column=1).font
         assert font.bold is True
-        assert "FFFFFF" in font.color.rgb
+        assert "1B5E20" in font.color.rgb
 
 
 class TestBultosBlank:

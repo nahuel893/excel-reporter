@@ -30,13 +30,14 @@ logger = __import__("logging").getLogger(__name__)
 
 CCU_GENERICOS = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
 
-# Colores semaforo
-ROJO = "FF6366"
-AMARILLO = "FFEB9C"
-VERDE = "C6EFCE"
-ROJO_FONT = "9C0006"
-AMARILLO_FONT = "9C5700"
-VERDE_FONT = "006100"
+# Colores semaforo — paleta pastel (Material Design 100-200 range)
+# Suaves para no saturar visualmente cuando hay muchas celdas con color.
+ROJO = "FFCDD2"      # Red 100
+AMARILLO = "FFF59D"  # Yellow 200
+VERDE = "C8E6C9"     # Green 100
+ROJO_FONT = "B71C1C"      # Red 900 — alto contraste sobre rojo pastel
+AMARILLO_FONT = "5D4037"  # Brown 700 — mejor legibilidad que ámbar puro
+VERDE_FONT = "1B5E20"     # Green 900
 
 
 @dataclass
