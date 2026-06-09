@@ -1,8 +1,8 @@
 {
     "tipo": "champions-league",
     "filtros": {
-        "fecha_desde": "2026-05-01",
-        "fecha_hasta": "2026-05-31",
+        "fecha_desde": "2026-06-01",
+        "fecha_hasta": "2026-06-30",
         "genericos": [
             "CERVEZAS",
             "AGUAS DANONE"
@@ -17,12 +17,6 @@
                 ],
                 "formula": ">= 0.25"
             },
-            "SCHNEIDER REMIX": {
-                "articulos": [
-                    23382
-                ],
-                "formula": ">= 0.25"
-            },
             "HEINEKEN CERO": {
                 "articulos": [
                     23250,
@@ -31,22 +25,32 @@
                 ],
                 "formula": ">= 0.25"
             },
-            "CONVIVENCIA": {
+            "MILLER": {
                 "articulos": [
-                    21542,
-                    22832,
-                    21644,
-                    21950,
-                    23363,
-                    22804,
-                    21944,
-                    21957,
-                    21954,
-                    21980,
                     22222,
                     23301
                 ],
-                "formula": "todas_marcas >= 0.25"
+                "formula": {
+                    "por_calibre": {
+                        "lata": {
+                            "calibres": [
+                                "330CC",
+                                "355CC",
+                                "473CC",
+                                "500CC",
+                                "710CC"
+                            ],
+                            "criterio": ">= 0.25"
+                        },
+                        "cajon": {
+                            "calibres": [
+                                "1000CC",
+                                "30LTS"
+                            ],
+                            "criterio": ">= 1"
+                        }
+                    }
+                }
             },
             "LEVITE": {
                 "articulos": [
@@ -173,7 +177,7 @@
                 ],
                 "formula": ">= 1"
             },
-            "SAENZ BRIONES": {
+            "1888": {
                 "articulos": [
                     51220,
                     51218,
@@ -329,8 +333,7 @@
         {
             "nombre": "Champions League",
             "capture_images": [
-                {"hoja": "REPORTE", "rango": "auto"},
-                {"hoja": "REMIX", "rango": "auto"}
+                {"hoja": "REPORTE", "rango": "auto"}
             ],
             "enviar_a": {
                 "Gonzalo Farah": {

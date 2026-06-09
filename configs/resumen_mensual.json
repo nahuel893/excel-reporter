@@ -1,8 +1,8 @@
 {
     "tipo": "resumen-mensual",
     "filtros": {
-        "fecha_desde": "2026-05-01",
-        "fecha_hasta": "2026-05-31",
+        "fecha_desde": "2026-06-01",
+        "fecha_hasta": "2026-06-30",
         "genericos": [
             "CERVEZAS",
             "AGUAS DANONE",
@@ -19,9 +19,9 @@
                 "QUARA"
             ]
         },
-        "detalle_movimientos_path": "/home/nahuel/VM shared/archivos_diarios/2026-05/detalle_movimientos.xlsx",
-        "detalle_movimientos_ma_path": "/home/nahuel/VM shared/archivos_diarios/2026-05/detalle_movimientos_ma.xlsx",
-        "detalle_movimientos_mmaa_path": "/home/nahuel/VM shared/archivos_diarios/2026-05/detalle_movimientos_mmaa.xlsx",
+        "detalle_movimientos_path": "/home/nahuel/VM shared/archivos_diarios/2026-06/detalle_movimientos.xlsx",
+        "detalle_movimientos_ma_path": "/home/nahuel/VM shared/archivos_diarios/2026-06/detalle_movimientos_ma.xlsx",
+        "detalle_movimientos_mmaa_path": "/home/nahuel/VM shared/archivos_diarios/2026-06/detalle_movimientos_mmaa.xlsx",
         "categorias_deposito_path": "configs/categorias_deposito.json",
         "whatsapp_caption_imagenes": false,
         "enviar_email": false,
@@ -29,7 +29,7 @@
     },
     "reportes": [
         {
-            "nombre": "Resumen Mensual Mayo",
+            "nombre": "Resumen Mensual Junio",
             "capture_images": [
                 {
                     "hoja": "CERVEZAS",

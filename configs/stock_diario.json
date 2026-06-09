@@ -21,8 +21,15 @@
             },
             "enviar_a": {
                 "Walter Vilte": { "via": ["email"] },
+                "M Bravo": { "via": ["email"] },
+                "Emiliano Gaston Rivera": { "via": ["email"] },
+                "Diego Martín Aguirre": { "via": ["email"] },
+                "José Alejandro Teran": { "via": ["email"] },
                 "Sebastian Dellamea": { "via": ["email_cc"] },
-                "Nahuel Aguirre": { "via": ["email_cc"] }
+                "Nahuel Aguirre": { "via": ["email_cc"] },
+                "M Mirse": { "via": ["email_cc"] },
+                "M Frank": { "via": ["email_cc"] },
+                "G Teseira": { "via": ["email_cc"] }
             }
         },
         {
