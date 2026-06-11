@@ -1002,7 +1002,15 @@ class ResumenMensualService(BaseService):
 
         structs = self._build_sheet_structs(df_resultado, marca_splits, sin_prvta_effective)
 
-        return to_datos_json(structs, info_dias, col_n1, col_n2, con_objetivo=config.con_objetivo)
+        return to_datos_json(
+            structs,
+            info_dias,
+            col_n1,
+            col_n2,
+            con_objetivo=config.con_objetivo,
+            fecha_desde=config.fecha_desde,
+            fecha_hasta=config.fecha_hasta,
+        )
 
     def generar_reporte(self, config: ResumenMensualConfig) -> ResumenMensualResult:
         """

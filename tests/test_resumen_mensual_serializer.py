@@ -354,12 +354,17 @@ class TestTopLevelSchema:
         assert "sheets" in result
 
     def test_meta_has_required_keys(self):
-        """meta must have col_n1, col_n2, info_dias, con_objetivo."""
+        """meta must have fecha_desde, fecha_hasta, col_n1, col_n2, info_dias, con_objetivo."""
         structs = _simple_struct([_make_row()])
-        result = to_datos_json(structs, _make_info_dias(), _COL_N1, _COL_N2, con_objetivo=True)
+        result = to_datos_json(
+            structs, _make_info_dias(), _COL_N1, _COL_N2, con_objetivo=True,
+            fecha_desde="2026-06-01", fecha_hasta="2026-06-30",
+        )
         meta = result["meta"]
-        for key in ("col_n1", "col_n2", "info_dias", "con_objetivo"):
+        for key in ("fecha_desde", "fecha_hasta", "col_n1", "col_n2", "info_dias", "con_objetivo"):
             assert key in meta, f"meta must have key '{key}'"
+        assert meta["fecha_desde"] == "2026-06-01"
+        assert meta["fecha_hasta"] == "2026-06-30"
 
     def test_sheet_has_required_keys(self):
         """Each sheet must have 'generico', 'note', and 'sections'."""

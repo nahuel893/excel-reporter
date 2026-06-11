@@ -100,6 +100,8 @@ def to_datos_json(
     col_n1: str,
     col_n2: str,
     con_objetivo: bool = True,
+    fecha_desde: str | None = None,
+    fecha_hasta: str | None = None,
 ) -> dict:
     """Convert the ordered sheet structure into the JSON response contract.
 
@@ -129,6 +131,8 @@ def to_datos_json(
         }
     """
     meta = {
+        "fecha_desde": fecha_desde,
+        "fecha_hasta": fecha_hasta,
         "col_n1": col_n1,
         "col_n2": col_n2,
         "info_dias": dict(info_dias),
