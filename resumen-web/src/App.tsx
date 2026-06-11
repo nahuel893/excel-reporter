@@ -5,24 +5,38 @@ import { GenericoTabs } from './components/GenericoTabs'
 import { ReportTable } from './components/ReportTable'
 import { InfoDiasBanner } from './components/InfoDiasBanner'
 
-// Default to the first day of the current month through today
+// Format local date as YYYY-MM-DD without UTC conversion
+function toLocalISODate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Default to the first day of the current month through today (local timezone)
 function getDefaultDesde(): string {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
 }
 
 function getDefaultHasta(): string {
-  const now = new Date()
-  return now.toISOString().slice(0, 10)
+  return toLocalISODate(new Date())
 }
 
 export function App() {
   const [selectedTab, setSelectedTab] = useState(0)
+  const [lastParams, setLastParams] = useState({
+    fecha_desde: getDefaultDesde(),
+    fecha_hasta: getDefaultHasta(),
+  })
   const { mutate, data, isPending, isError, error } = useDatos()
 
   function handlePeriodSubmit(desde: string, hasta: string) {
+    const params = { fecha_desde: desde, fecha_hasta: hasta }
+    setLastParams(params)
     setSelectedTab(0)
-    mutate({ fecha_desde: desde, fecha_hasta: hasta, con_objetivo: true })
+    mutate({ ...params, con_objetivo: true })
+  }
+
+  function handleRetry() {
+    mutate({ ...lastParams, con_objetivo: true })
   }
 
   const activeSheet = data?.sheets[selectedTab]
@@ -85,7 +99,7 @@ export function App() {
             <span aria-hidden="true" className="mr-2" style={{ fontSize: '1.2rem' }}>
               ⟳
             </span>
-            <span style={{ fontFamily: "'Fraunces', serif", fontSize: '0.9rem' }}>
+            <span style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: '0.9rem' }}>
               Cargando datos…
             </span>
           </div>
@@ -98,16 +112,16 @@ export function App() {
             aria-live="assertive"
             className="mx-4 my-4 p-4 rounded border"
             style={{
-              background: '#FEF2F2',
-              borderColor: '#FECACA',
-              color: '#991B1B',
-              fontFamily: "'Fraunces', serif",
+              background: 'var(--error-bg, #FEF2F2)',
+              borderColor: 'var(--error-border, #FECACA)',
+              color: 'var(--error-ink, #991B1B)',
+              fontFamily: "'Fraunces', Georgia, serif",
             }}
           >
             <strong>Error al cargar los datos.</strong>{' '}
             {error?.message ?? 'Por favor intentá de nuevo.'}
             <button
-              onClick={() => mutate({ fecha_desde: getDefaultDesde(), fecha_hasta: getDefaultHasta() })}
+              onClick={handleRetry}
               style={{
                 marginLeft: 12,
                 color: '#1F4E78',
@@ -127,7 +141,7 @@ export function App() {
         {data && data.sheets.length === 0 && (
           <div
             className="flex items-center justify-center py-16"
-            style={{ color: 'var(--ink-soft)', fontFamily: "'Fraunces', serif" }}
+            style={{ color: 'var(--ink-soft)', fontFamily: "'Fraunces', Georgia, serif" }}
           >
             No hay datos para el período seleccionado.
           </div>

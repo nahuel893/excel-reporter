@@ -20,6 +20,10 @@
   --ma: #808000;
   --objetivo: #4472C4;
 
+  --error-bg: #FEF2F2;
+  --error-border: #FECACA;
+  --error-ink: #991B1B;
+
   --tab-height: 48px;
   --thead-top: var(--tab-height);
 }
