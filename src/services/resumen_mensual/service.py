@@ -682,19 +682,26 @@ class ResumenMensualService(BaseService):
     SERVICE_SLUG = "resumen-mensual"
     GRANULARITY = "month"
 
-    def generar_reporte(self, config: ResumenMensualConfig) -> ResumenMensualResult:
+    def _preparar_datos(
+        self, config: ResumenMensualConfig
+    ) -> tuple[pd.DataFrame, dict, str, str, pd.DataFrame]:
         """
-        Genera un reporte de resumen mensual.
+        Extrae, transforma y procesa los datos para el reporte de resumen mensual.
 
-        Genera un archivo Excel con una hoja por cada generico presente en los datos.
-        Cada hoja contiene: Vtas Dia N-1, N-2, Total Ventas, Tendencia,
-        Ventas Mes Anterior, Ventas Mismo Mes AA, Objetivo, Tend vs Obj (%).
+        Shared pipeline consumed by both generar_reporte (Excel sink) and
+        generar_datos (JSON sink). Returns all the artifacts needed to build
+        either output without duplicating business logic.
 
         Args:
             config: Configuracion del reporte.
 
         Returns:
-            ResumenMensualResult con informacion del reporte generado.
+            Tuple of (df_resultado, info_dias, col_n1, col_n2, df_dias) where:
+              - df_resultado: processed DataFrame with 10 columns in fixed order
+              - info_dias: dict with Dias Habiles / Transcurridos / Faltantes
+              - col_n1: dynamic name of the N-1 day column (e.g. "09-06 Martes")
+              - col_n2: dynamic name of the N-2 day column (e.g. "08-06 Lunes")
+              - df_dias: processed daily sales DataFrame (used for filename derivation)
         """
         # Normalizar genericos: lista vacia se trata como None (traer todos)
         genericos = config.genericos if config.genericos else None
@@ -786,7 +793,7 @@ class ResumenMensualService(BaseService):
         info_dias = calcular_info_dias(config.fecha_desde, config.fecha_hasta)
 
         # -----------------------------------------------------------------
-        # 4. T-019: Fetch cupos and pass to processor
+        # 4. Fetch cupos and pass to processor
         # -----------------------------------------------------------------
         periodo = config.fecha_desde[:7]  # "YYYY-MM-DD" → "YYYY-MM"
         genericos_for_cupos = genericos if genericos else _DEFAULT_GENERICOS
@@ -869,9 +876,34 @@ class ResumenMensualService(BaseService):
             df_cupos=df_cupos_raw,
         )
 
+        # Detectar nombres dinámicos de columnas N-1 y N-2 (posiciones 2 y 3)
+        cols = list(df_resultado.columns)
+        col_n1 = cols[2] if len(cols) > 2 else "Vtas Dia N-1"
+        col_n2 = cols[3] if len(cols) > 3 else "Vtas Dia N-2"
+
+        return df_resultado, info_dias, col_n1, col_n2, df_dias
+
+    def generar_reporte(self, config: ResumenMensualConfig) -> ResumenMensualResult:
+        """
+        Genera un reporte de resumen mensual.
+
+        Genera un archivo Excel con una hoja por cada generico presente en los datos.
+        Cada hoja contiene: Vtas Dia N-1, N-2, Total Ventas, Tendencia,
+        Ventas Mes Anterior, Ventas Mismo Mes AA, Objetivo, Tend vs Obj (%).
+
+        Args:
+            config: Configuracion del reporte.
+
+        Returns:
+            ResumenMensualResult con informacion del reporte generado.
+        """
+        df_resultado, info_dias, col_n1, col_n2, df_dias = self._preparar_datos(config)
+
         # -----------------------------------------------------------------
         # 6. Generar Excel: una hoja por generico
         # -----------------------------------------------------------------
+        marca_splits = config.marca_splits or {}
+
         nombre = config.nombre_archivo or _nombre_reporte(df_dias, config.fecha_hasta)
         out = self._output_dir(config.fecha_desde)
         out.mkdir(parents=True, exist_ok=True)
@@ -890,11 +922,6 @@ class ResumenMensualService(BaseService):
             nombre = merge_target.stem
 
         writer = ExcelWriter(nombre, output_dir=out, merge_with=merge_target)
-
-        # Detectar nombres dinámicos de columnas N-1 y N-2 (posiciones 2 y 3)
-        cols = list(df_resultado.columns)
-        col_n1 = cols[2] if len(cols) > 2 else "Vtas Dia N-1"
-        col_n2 = cols[3] if len(cols) > 3 else "Vtas Dia N-2"
 
         style = _crear_estilo_resumen(info_dias, col_n1, col_n2)
         summary_rows_count = len(info_dias)  # used for row offset calculation
