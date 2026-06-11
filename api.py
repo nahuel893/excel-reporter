@@ -180,6 +180,15 @@ else:
         "Run `cd frontend && npm run build` to enable."
     )
 
+_RESUMEN_DIST = Path(__file__).parent / "resumen-web" / "dist"
+if _RESUMEN_DIST.exists():
+    app.mount("/resumen", StaticFiles(directory=str(_RESUMEN_DIST), html=True), name="resumen-spa")
+else:
+    logger.info(
+        "resumen-web/dist/ not found — resumen view not mounted. "
+        "Run `cd resumen-web && npm run build` to enable."
+    )
+
 
 if __name__ == "__main__":
     import uvicorn
