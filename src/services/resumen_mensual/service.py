@@ -5,7 +5,7 @@ Orquesta el flujo completo: extraccion, procesamiento y generacion de Excel.
 """
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import pandas as pd
 from openpyxl.formatting.rule import ColorScaleRule
@@ -671,6 +671,21 @@ def _build_dim_articulo_sheet(workbook, df: pd.DataFrame) -> None:
         ])
 
 
+@dataclass
+class _SheetSection:
+    """One section within a logical sheet (a marca_split group or the whole generico)."""
+    label: str              # human-readable label; equals the logical generico for unsplit sheets
+    df: pd.DataFrame        # ordered rows + 3 injected subtotal rows
+
+
+@dataclass
+class _SheetStruct:
+    """One logical sheet (one entry per generico in the final Excel / JSON)."""
+    logical_generico: str               # sheet name, e.g. "VINOS FINOS"
+    sections: list[_SheetSection] = field(default_factory=list)
+    note: str | None = None             # amber PRVTA-exclusion note when applicable
+
+
 class ResumenMensualService(BaseService):
     """
     Servicio para generacion de reportes de resumen mensual.
@@ -883,6 +898,83 @@ class ResumenMensualService(BaseService):
 
         return df_resultado, info_dias, col_n1, col_n2, df_dias
 
+    def _build_sheet_structs(
+        self,
+        df_resultado: pd.DataFrame,
+        marca_splits: dict[str, list[str]],
+        genericos_sin_prvta: list[str],
+    ) -> list[_SheetStruct]:
+        """
+        Build the ordered sectioned structure consumed by both the Excel writer
+        and the JSON serializer.
+
+        For each logical generico, constructs a _SheetStruct with one _SheetSection
+        per marca_split group (or a single section for unsplit genericos). Each
+        section's DataFrame has already been through _ordenar_e_inyectar_subtotales().
+
+        Args:
+            df_resultado: Processed DataFrame from procesar_resumen_mensual (10 cols).
+            marca_splits: Mapping {generico: [marcas]} defining per-sheet splits.
+            genericos_sin_prvta: Genericos for which the PRVTA-exclusion note applies.
+
+        Returns:
+            Ordered list of _SheetStruct (one per logical generico present in df_resultado).
+        """
+        if df_resultado.empty:
+            return []
+
+        # Map de genericos sinteticos (resultado de marca_splits) -> generico logico
+        synthetic_to_logical: dict[str, str] = {}
+        for logical_gen, marcas in (marca_splits or {}).items():
+            synthetic_to_logical[f"{logical_gen} (sin {', '.join(marcas)})"] = logical_gen
+            for marca in marcas:
+                synthetic_to_logical[marca] = logical_gen
+
+        # Build ordered list of logical genericos, preserving original order from df_resultado
+        seen_logical: set[str] = set()
+        logical_genericos: list[str] = []
+        for syn in df_resultado["Generico"].tolist():
+            logical = synthetic_to_logical.get(syn, syn)
+            if logical not in seen_logical:
+                seen_logical.add(logical)
+                logical_genericos.append(logical)
+
+        structs: list[_SheetStruct] = []
+        for logical_gen in logical_genericos:
+            # Section order: "sin {marcas}" first, then each marca
+            if logical_gen in (marca_splits or {}):
+                marcas = marca_splits[logical_gen]
+                section_order = [f"{logical_gen} (sin {', '.join(marcas)})"] + list(marcas)
+                section_order = [s for s in section_order if s in df_resultado["Generico"].values]
+            else:
+                section_order = [logical_gen]
+
+            sections: list[_SheetSection] = []
+            for syn_gen in section_order:
+                df_section = df_resultado[df_resultado["Generico"] == syn_gen].copy()
+                if df_section.empty:
+                    continue
+                sections.append(_SheetSection(
+                    label=syn_gen,
+                    df=_ordenar_e_inyectar_subtotales(df_section),
+                ))
+
+            if not sections:
+                continue
+
+            # Compute PRVTA-exclusion note
+            note: str | None = None
+            if logical_gen in (genericos_sin_prvta or []):
+                note = f"Nota: {logical_gen} excluye documentos PRVTA (facturas presupuesto)"
+
+            structs.append(_SheetStruct(
+                logical_generico=logical_gen,
+                sections=sections,
+                note=note,
+            ))
+
+        return structs
+
     def generar_reporte(self, config: ResumenMensualConfig) -> ResumenMensualResult:
         """
         Genera un reporte de resumen mensual.
@@ -926,54 +1018,27 @@ class ResumenMensualService(BaseService):
         style = _crear_estilo_resumen(info_dias, col_n1, col_n2)
         summary_rows_count = len(info_dias)  # used for row offset calculation
 
-        # Map de genericos sinteticos (resultado de marca_splits) -> generico logico (sheet name)
-        synthetic_to_logical: dict[str, str] = {}
-        for logical_gen, marcas in (marca_splits or {}).items():
-            synthetic_to_logical[f"{logical_gen} (sin {', '.join(marcas)})"] = logical_gen
-            for marca in marcas:
-                synthetic_to_logical[marca] = logical_gen
+        # Resolve effective genericos_sin_prvta for note signal
+        sin_prvta_effective = (
+            config.genericos_sin_prvta
+            if config.genericos_sin_prvta is not None
+            else list(_DEFAULT_GENERICOS_SIN_PRVTA)
+        )
 
-        # Build ordered list of logical genericos, preserving original order from config
-        if df_resultado.empty:
-            logical_genericos = []
-        else:
-            seen: set[str] = set()
-            logical_genericos = []
-            for syn in df_resultado["Generico"].tolist():
-                logical = synthetic_to_logical.get(syn, syn)
-                if logical not in seen:
-                    seen.add(logical)
-                    logical_genericos.append(logical)
+        # Build the ordered, sectioned, subtotal-injected structure
+        structs = self._build_sheet_structs(df_resultado, marca_splits, sin_prvta_effective)
 
-        for logical_gen in logical_genericos:
-            # Find all synthetic generico values that belong to this logical sheet
-            if logical_gen in (marca_splits or {}):
-                marcas = marca_splits[logical_gen]
-                # Section order: "sin {marcas}" first, then each marca
-                section_order = [f"{logical_gen} (sin {', '.join(marcas)})"] + list(marcas)
-                # Filter and only keep those actually present
-                section_order = [s for s in section_order if s in df_resultado["Generico"].values]
-            else:
-                section_order = [logical_gen]
+        logical_genericos = [s.logical_generico for s in structs]
 
-            # Build sectioned dataframe: each section's rows ordered + subtotals injected
-            section_dfs = []
-            for syn_gen in section_order:
-                df_section = df_resultado[df_resultado["Generico"] == syn_gen].copy()
-                if df_section.empty:
-                    continue
-                section_dfs.append(_ordenar_e_inyectar_subtotales(df_section))
-
-            if not section_dfs:
-                continue
-
+        for struct in structs:
+            section_dfs = [sec.df for sec in struct.sections]
             df_hoja_ordered = pd.concat(section_dfs, ignore_index=True)
-            sheet_name = logical_gen[:31]  # Excel max 31 caracteres
+            sheet_name = struct.logical_generico[:31]  # Excel max 31 caracteres
             ws = writer.add_sheet(df_hoja_ordered, sheet_name=sheet_name, style=style)
 
             # T-020/T-022/T-023: post-write — resolve SUM formulas, heatmap, subtotal styling
             _post_write_subtotals_and_heatmap(
-                ws, df_hoja_ordered, summary_rows_count, note=None
+                ws, df_hoja_ordered, summary_rows_count, note=struct.note
             )
 
         # T-09: Import Detalle Movimientos sheets from external sources
