@@ -975,6 +975,35 @@ class ResumenMensualService(BaseService):
 
         return structs
 
+    def generar_datos(self, config: ResumenMensualConfig) -> dict:
+        """
+        Generate report data as a JSON-serializable dict (no file written).
+
+        Runs the same extraction + processing pipeline as generar_reporte but
+        returns the structured JSON contract instead of writing an Excel file.
+        Consumed by the POST /resumen-mensual/datos endpoint.
+
+        Args:
+            config: Configuracion del reporte.
+
+        Returns:
+            Dict matching the JSON contract (meta + sheets structure).
+        """
+        from src.services.resumen_mensual.serializer import to_datos_json
+
+        df_resultado, info_dias, col_n1, col_n2, _df_dias = self._preparar_datos(config)
+
+        marca_splits = config.marca_splits or {}
+        sin_prvta_effective = (
+            config.genericos_sin_prvta
+            if config.genericos_sin_prvta is not None
+            else list(_DEFAULT_GENERICOS_SIN_PRVTA)
+        )
+
+        structs = self._build_sheet_structs(df_resultado, marca_splits, sin_prvta_effective)
+
+        return to_datos_json(structs, info_dias, col_n1, col_n2, con_objetivo=config.con_objetivo)
+
     def generar_reporte(self, config: ResumenMensualConfig) -> ResumenMensualResult:
         """
         Genera un reporte de resumen mensual.
