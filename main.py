@@ -76,6 +76,7 @@ REPORT_HANDLERS: dict[str, str] = {
     "historico-cliente": "_run_historico_cliente_report",
     "reporte-general-badie": "_run_reporte_general_badie_report",
     "reporte-rebotes": "_run_rebotes_report",
+    "reporte-incentivo-cobertura": "_run_incentivo_cobertura_report",
     "subdistribuidores": "_run_subdistribuidores_report",
 }
 
@@ -837,6 +838,46 @@ def _run_rebotes_report(report, merged: dict) -> list[tuple[Path, dict]]:
     print(f"  - Vendedores: {result.vendedores}")
     print(f"  - Supervisores: {result.supervisores}")
     print(f"  - Registros procesados: {result.registros_procesados}")
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": fecha_hasta},
+        )
+    ]
+
+
+def _run_incentivo_cobertura_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate reporte-incentivo-cobertura. Returns list of (path, metadata) tuples.
+
+    El incentivo ON PREMISE es puntual y específico (targets hardcoded en
+    constants.py). El alcance de difusión también es fijo: solo el equipo de
+    VCHAPUR, excluyendo a los preventistas que no participan. Por eso el
+    supervisor y las exclusiones van hardcoded acá y no como filtros del config.
+    """
+    from src.services.incentivo_cobertura import (
+        IncentivoCoberturaConfig,
+        IncentivoCoberturaService,
+    )
+
+    fecha_desde = merged.get("fecha_desde")
+    fecha_hasta = merged.get("fecha_hasta")
+    if not fecha_desde or not fecha_hasta:
+        print("Error: reporte-incentivo-cobertura requires fecha_desde y fecha_hasta")
+        return []
+
+    print(f"Generando: {report.nombre}")
+    config = IncentivoCoberturaConfig(
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        nombre_archivo=report.nombre,
+        solo_supervisor="VCHAPUR",
+        vendedores_excluidos=["MARCELA ASTORGA", "JUAN JOSE BARRIOS", "CRUZ IGNACIO"],
+    )
+    service = IncentivoCoberturaService()
+    result = service.generar_reporte(config)
+    print(f"Incentivo cobertura '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Vendedores: {result.vendedores}")
     return [
         (
             Path(result.ruta_archivo),

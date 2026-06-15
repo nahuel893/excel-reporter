@@ -1892,6 +1892,95 @@ class DataLoader:
         params.update({f"gen_{i}": g for i, g in enumerate(genericos)})
         return self.execute_query(query, params)
 
+    def get_vendedores_on_premise_universo(
+        self,
+        id_sucursal: int,
+        id_lista_precio: int,
+    ) -> pd.DataFrame:
+        """Universe of preventistas with at least 1 ON PREMISE client in the sucursal.
+
+        Returns DataFrame with column [vendedor] — sorted, no nulls. Excludes
+        DIRECTA (route-less customers) since they don't represent a preventista.
+        """
+        query = """
+        SELECT DISTINCT des_personal_fv1 AS vendedor
+        FROM gold.dim_cliente
+        WHERE id_sucursal      = :id_sucursal
+          AND id_lista_precio  = :id_lista_precio
+          AND des_personal_fv1 IS NOT NULL
+          AND des_personal_fv1 <> 'DIRECTA'
+        ORDER BY vendedor
+        """
+        return self.execute_query(query, {
+            "id_sucursal": id_sucursal,
+            "id_lista_precio": id_lista_precio,
+        })
+
+    def get_incentivo_cobertura_on_premise(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        id_sucursal: int,
+        id_lista_precio: int,
+        target_specs: list[dict],
+    ) -> pd.DataFrame:
+        """Count distinct clients per (vendedor, marca_label) covered in incentive period.
+
+        Each target_spec is a dict with keys: 'label' (str) and 'sql_where' (str — a
+        predicate on dim_articulo aliased as `da.*`). For each target, counts unique
+        id_cliente that bought at least 1 unit (cantidades_total > 0, anulado=false)
+        of a matching article from ON PREMISE customers (id_lista_precio filter)
+        at the given sucursal during the date range.
+
+        Returns DataFrame with columns: [vendedor, marca_label, clientes_compradores]
+        Only includes (vendedor, marca) pairs that have at least 1 client.
+        """
+        if not target_specs:
+            import pandas as _pd
+            return _pd.DataFrame(columns=["vendedor", "marca_label", "clientes_compradores"])
+
+        target_unions = []
+        params: dict = {
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+            "id_sucursal": id_sucursal,
+            "id_lista_precio": id_lista_precio,
+        }
+        for i, t in enumerate(target_specs):
+            label_param = f"label_{i}"
+            params[label_param] = t["label"]
+            # Lógica oficial (medallion-etl gold.cob_sucursal_lista_marca):
+            # primero agregamos por (vendedor, cliente) sumando cantidades del
+            # período/marca, filtramos los clientes cuyo total neto > 0
+            # (HAVING — NO se filtra a nivel línea), y recién después contamos
+            # DISTINCT id_cliente por vendedor.
+            target_unions.append(f"""
+                SELECT
+                    vendedor,
+                    CAST(:{label_param} AS text) AS marca_label,
+                    COUNT(DISTINCT id_cliente)   AS clientes_compradores
+                FROM (
+                    SELECT
+                        dc.des_personal_fv1 AS vendedor,
+                        fv.id_cliente,
+                        SUM(fv.cantidades_total) AS total_qty
+                    FROM gold.fact_ventas fv
+                    JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
+                    JOIN gold.dim_cliente  dc ON fv.id_cliente   = dc.id_cliente
+                                             AND fv.id_sucursal = dc.id_sucursal
+                    WHERE fv.id_sucursal      = :id_sucursal
+                      AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+                      AND dc.id_lista_precio  = :id_lista_precio
+                      AND ({t['sql_where']})
+                    GROUP BY dc.des_personal_fv1, fv.id_cliente
+                    HAVING SUM(fv.cantidades_total) > 0
+                ) ventas_cliente_neto
+                GROUP BY vendedor
+            """)
+
+        query = " UNION ALL ".join(target_unions) + " ORDER BY vendedor, marca_label"
+        return self.execute_query(query, params)
+
     def get_rebotes_vendedor_por_generico(
         self, fecha_desde: date, fecha_hasta: date, genericos: list[str] | None = None
     ) -> pd.DataFrame:
@@ -1971,6 +2060,79 @@ class DataLoader:
         ORDER BY dc.fantasia, dc.razon_social, da.generico, da.marca, da.des_articulo
         """
         return self.execute_query(query, {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta})
+
+    def get_ventas_subdistribuidores_sheet(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        sucursales_interior: list[str],
+        genericos: list[str],
+        lista_casa_central: int = 11,
+        lista_interior: int = 12,
+    ) -> pd.DataFrame:
+        """Ventas de SUB DISTRIBUIDORES por origen/generico/marca.
+
+        Combina dos grupos de sub-distribuidores en una sola hoja:
+        - lista_casa_central (default 11): sub-distribuidores de CASA CENTRAL
+          (todos en sucursal 1). Se etiquetan con origen 'CASA CENTRAL'.
+        - lista_interior (default 12): sub-distribuidores del interior, pero SOLO
+          los de las `sucursales_interior` indicadas (lista 12 existe en muchas
+          sucursales). Se etiquetan con la descripcion de su sucursal.
+
+        `genericos`: SIEMPRE se filtra a esta lista (directiva del informe: solo
+        genericos CCU). Es obligatorio y no debe venir vacio.
+
+        Suma cantidades del periodo. No filtra anulado (regla del proyecto); el
+        neto sale de la suma. Join con dim_cliente por clave compuesta.
+
+        Returns:
+            DataFrame con columnas [origen, generico, marca, bultos, htls].
+        """
+        suc = sucursales_interior or []
+        suc_placeholders = ", ".join(f":suc_{i}" for i in range(len(suc)))
+        # Si no hay sucursales de interior, el bloque de lista 12 no matchea nada.
+        interior_clause = (
+            f"(dc.id_lista_precio = :lista_int AND ds.descripcion IN ({suc_placeholders}))"
+            if suc else "FALSE"
+        )
+        gen = genericos or []
+        gen_placeholders = ", ".join(f":gen_{i}" for i in range(len(gen)))
+        # Directiva: solo genericos CCU. Si la lista viniera vacia, no devolver nada
+        # (en vez de traer todo) para no romper la directiva por accidente.
+        generico_clause = f"da.generico IN ({gen_placeholders})" if gen else "FALSE"
+        query = f"""
+        SELECT
+            CASE WHEN dc.id_lista_precio = :lista_cc THEN 'CASA CENTRAL'
+                 ELSE ds.descripcion END           AS origen,
+            COALESCE(da.generico, 'SIN GENERICO')   AS generico,
+            da.marca,
+            SUM(fv.cantidades_total)                AS bultos,
+            SUM(fv.cantidad_total_htls)             AS htls
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo  da ON fv.id_articulo = da.id_articulo
+        JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+                                  AND fv.id_sucursal   = dc.id_sucursal
+        JOIN gold.dim_sucursal  ds ON dc.id_sucursal   = ds.id_sucursal
+        WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+          AND {generico_clause}
+          AND (
+                dc.id_lista_precio = :lista_cc
+                OR {interior_clause}
+              )
+        GROUP BY 1, COALESCE(da.generico, 'SIN GENERICO'), da.marca
+        ORDER BY origen, generico, da.marca
+        """
+        params = {
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+            "lista_cc": lista_casa_central,
+            "lista_int": lista_interior,
+        }
+        for i, s in enumerate(suc):
+            params[f"suc_{i}"] = s
+        for i, g in enumerate(gen):
+            params[f"gen_{i}"] = g
+        return self.execute_query(query, params)
 
 
 # Instancia por defecto para compatibilidad

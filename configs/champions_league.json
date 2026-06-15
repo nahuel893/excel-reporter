@@ -17,6 +17,12 @@
                 ],
                 "formula": ">= 0.25"
             },
+            "SCHNEIDER REMIX": {
+                "articulos": [
+                    23382
+                ],
+                "formula": ">= 0.25"
+            },
             "HEINEKEN CERO": {
                 "articulos": [
                     23250,
@@ -333,7 +339,8 @@
         {
             "nombre": "Champions League",
             "capture_images": [
-                {"hoja": "REPORTE", "rango": "auto"}
+                {"hoja": "REPORTE", "rango": "auto"},
+                {"hoja": "REMIX", "rango": "auto"}
             ],
             "enviar_a": {
                 "Gonzalo Farah": {

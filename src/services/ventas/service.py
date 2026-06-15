@@ -370,6 +370,16 @@ def _aplicar_colores_por_generico(ruta: Path, sheet_names: list[str]) -> None:
 _COB_GENERICO_SHEET = "Cobertura Generico"
 _COB_MARCA_SHEET = "Cobertura Marca"
 
+# Hoja extra "SUB DISTRIBUIDORES": solo se agrega al reporte de este supervisor.
+# Combina sub-distribuidores de CASA CENTRAL (id_lista_precio=11, todos suc 1) +
+# sub-distribuidores del interior (id_lista_precio=12) de SUS sucursales.
+# Se abre por Origen (Casa Central / sucursal) + generico/marca.
+_SUBDIST_SUPERVISOR = "Adrian Garcia"
+_SUBDIST_SHEET = "SUB DISTRIBUIDORES"
+# DIRECTIVA: la hoja SUB DISTRIBUIDORES SIEMPRE muestra solo genericos CCU,
+# sin importar lo que pida el config. Fijo aca para que no se filtre de mas.
+_SUBDIST_GENERICOS_CCU = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
+
 _COB_GENERICO_COLUMNS = {
     "sucursal": COLUMN_NAMES["sucursal"],
     "generico": COLUMN_NAMES["generico"],
@@ -575,6 +585,8 @@ class VentasService(BaseService):
         con_slicers: bool,
         output_dir: Path | None = None,
         con_montos: bool = True,
+        supervisor: str | None = None,
+        subdist_sucursales: list[str] | None = None,
     ) -> tuple[Path, int, bool, list[str]]:
         """
         Genera el archivo Excel con hojas de ventas y cobertura.
@@ -631,6 +643,35 @@ class VentasService(BaseService):
         if df_cob_marca_sheet is not None:
             writer.add_sheet(df_cob_marca_sheet, sheet_name=_COB_MARCA_SHEET, style=_COBERTURA_STYLE)
             hojas.append(_COB_MARCA_SHEET)
+
+        # Hoja extra SUB DISTRIBUIDORES — solo para Adrian Garcia.
+        # CASA CENTRAL (lista 11) + sus sucursales del interior (lista 12),
+        # abierto por origen/generico/marca.
+        if supervisor and supervisor.strip().lower() == _SUBDIST_SUPERVISOR.lower():
+            df_subdist = self.data_loader.get_ventas_subdistribuidores_sheet(
+                fecha_desde, fecha_hasta,
+                sucursales_interior=subdist_sucursales or [],
+                genericos=_SUBDIST_GENERICOS_CCU,  # directiva: siempre solo CCU
+            )
+            if df_subdist is not None and not df_subdist.empty:
+                df_subdist = df_subdist.rename(columns={
+                    "origen": "Origen", "generico": "Generico", "marca": "Marca",
+                    "bultos": "Bultos", "htls": "HTLs",
+                })
+                style_subdist = SheetStyle(
+                    numeric_format="#,##0",
+                    column_formats={
+                        "Origen": ColumnFormat(width=24, font_bold=True),
+                        "Generico": ColumnFormat(width=18),
+                        "Marca": ColumnFormat(width=22),
+                        "Bultos": ColumnFormat(number_format="#,##0", width=12),
+                        "HTLs": ColumnFormat(number_format="#,##0.0", width=12),
+                    },
+                    as_table=True,
+                    table_style="TableStyleMedium9",
+                )
+                writer.add_sheet(df_subdist, sheet_name=_SUBDIST_SHEET, style=style_subdist)
+                hojas.append(_SUBDIST_SHEET)
 
         ruta = writer.save()
 
@@ -766,6 +807,8 @@ class VentasService(BaseService):
                 config.con_slicers,
                 output_dir=out,
                 con_montos=config.con_montos,
+                supervisor=supervisor,
+                subdist_sucursales=sucursales_list,
             )
 
             genericos_incluidos = (
