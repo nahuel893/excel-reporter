@@ -26,6 +26,13 @@ type TipoBadgeVariant =
   | "champions-league"
   | "resumen-mensual"
   | "stock-diario"
+  | "historico-fratelli"
+  | "cartesiano"
+  | "graficos-cobertura"
+  | "ventas-articulo"
+  | "historico-cliente"
+  | "reporte-general-badie"
+  | "reporte-rebotes"
   | "zinc";
 
 function tipoToVariant(tipo: string): TipoBadgeVariant {
@@ -35,6 +42,13 @@ function tipoToVariant(tipo: string): TipoBadgeVariant {
     "champions-league": "champions-league",
     "resumen-mensual": "resumen-mensual",
     "stock-diario": "stock-diario",
+    "historico-fratelli": "historico-fratelli",
+    cartesiano: "cartesiano",
+    "graficos-cobertura": "graficos-cobertura",
+    "ventas-articulo": "ventas-articulo",
+    "historico-cliente": "historico-cliente",
+    "reporte-general-badie": "reporte-general-badie",
+    "reporte-rebotes": "reporte-rebotes",
   };
   return map[tipo] ?? "zinc";
 }

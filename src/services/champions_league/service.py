@@ -6,6 +6,7 @@ El usuario agrega formulas y vistas manualmente sobre estos datos.
 """
 
 import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -82,6 +83,21 @@ def _fechas_a_periodos(fecha_desde: str, fecha_hasta: str) -> list[str]:
     hasta = pd.to_datetime(fecha_hasta)
     periodos = pd.date_range(desde, hasta, freq="MS")
     return [p.strftime("%Y-%m-%d") for p in periodos]
+
+
+def _seed_from_previous_month(target_path: Path, fecha_desde: str) -> bool:
+    """Copy the previous month's final workbook into the current period if present."""
+    previous_period = (
+        pd.to_datetime(fecha_desde).replace(day=1) - pd.DateOffset(months=1)
+    ).strftime("%Y-%m")
+    previous_path = target_path.parent.parent / previous_period / target_path.name
+
+    if not previous_path.exists() or "_backup" in previous_path.stem:
+        return False
+
+    logger.info("Sembrando Champions League desde mes anterior: %s", previous_path)
+    shutil.copy2(str(previous_path), str(target_path))
+    return True
 
 
 def _preparar_hoja(
@@ -419,8 +435,12 @@ class ChampionsLeagueService(BaseService):
         output_dir.mkdir(parents=True, exist_ok=True)
         ruta_archivo = output_dir / f"{nombre}.xlsx"
 
-        # Migra desde path viejo (flat o slug anterior) + crea backup
+        # Migra desde path viejo (flat o slug anterior) + crea backup.
+        # Si no existe archivo del mes actual, usa el libro final del mes anterior
+        # como base para preservar hojas manuales entre meses.
         file_exists = prepare_accumulative_file(ruta_archivo, legacy_slugs=self.LEGACY_SLUGS)
+        if not file_exists:
+            file_exists = _seed_from_previous_month(ruta_archivo, config.fecha_desde)
 
         if file_exists:
             wb = load_workbook(str(ruta_archivo))

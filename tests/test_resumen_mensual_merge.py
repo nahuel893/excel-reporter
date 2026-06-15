@@ -235,8 +235,31 @@ class TestResumenMensualDetalleMovimientos:
     def _make_source(self, tmp_path: Path) -> Path:
         """Create a minimal detalle_movimientos.xlsx source."""
         src = tmp_path / "detalle_movimientos.xlsx"
-        _make_xlsx(src, {"Datos": [["Articulo", "Cantidad"], ["BEER", 500]]})
+        _make_xlsx(
+            src,
+            {
+                "Datos": [
+                    ["Artículo", "Fecha Mvto", "Fecha Stock", "Bultos"],
+                    ["BEER", pd.Timestamp("2026-04-10").to_pydatetime(), pd.Timestamp("2026-04-10").to_pydatetime(), 500],
+                ]
+            },
+        )
         return src
+
+    def _make_source_with_dates(self, path: Path, fechas: list[str]) -> Path:
+        rows = [["Artículo", "Fecha Mvto", "Fecha Stock", "Bultos"]]
+        for i, fecha in enumerate(fechas, start=1):
+            dt = pd.Timestamp(fecha).to_pydatetime()
+            rows.append([f"SKU-{i}", dt, dt, 10])
+        return _make_xlsx(path, {"Datos": rows})
+
+    def _make_source_with_dates_split(self, path: Path, fechas_mvto: list[str], fechas_stock: list[str]) -> Path:
+        rows = [["Artículo", "Fecha Mvto", "Fecha Stock", "Bultos"]]
+        for i, (fecha_mvto, fecha_stock) in enumerate(zip(fechas_mvto, fechas_stock), start=1):
+            dt_mvto = pd.Timestamp(fecha_mvto).to_pydatetime()
+            dt_stock = pd.Timestamp(fecha_stock).to_pydatetime()
+            rows.append([f"SKU-{i}", dt_mvto, dt_stock, 10])
+        return _make_xlsx(path, {"Datos": rows})
 
     def test_import_detalle_movimientos_when_path_set_and_exists(self, tmp_path):
         """T-09: detalle_movimientos_path set + file exists → 'Detalle Movimientos' sheet created."""
@@ -257,8 +280,9 @@ class TestResumenMensualDetalleMovimientos:
         wb = load_workbook(str(result.ruta_archivo))
         assert "Detalle Movimientos" in wb.sheetnames
         ws = wb["Detalle Movimientos"]
-        assert ws.cell(1, 1).value == "Articulo"
-        assert ws.cell(2, 2).value == 500
+        assert ws.cell(1, 1).value == "Artículo"
+        assert ws.cell(2, 2).value == pd.Timestamp("2026-04-10").to_pydatetime()
+        assert ws.cell(2, 4).value == 500
 
     def test_skip_detalle_movimientos_when_path_none(self, tmp_path):
         """T-09: detalle_movimientos_path=None → no 'Detalle Movimientos' sheet created."""
@@ -326,3 +350,128 @@ class TestResumenMensualDetalleMovimientos:
         ws = wb["Detalle Movimientos"]
         assert ws.cell(1, 1).value == "ArtiHeader"
         assert ws.cell(2, 1).value == "preserved_row"
+
+    def test_import_detalle_movimientos_accepts_only_expected_periods(self, tmp_path):
+        """Actual, MA y MMAA importan cuando cada archivo contiene solo su mes esperado."""
+        src_dir = tmp_path / "sources"
+        src_dir.mkdir()
+        src_actual = self._make_source_with_dates(
+            src_dir / "detalle_junio.xlsx", ["2026-06-04", "2026-06-18"]
+        )
+        src_ma = self._make_source_with_dates(
+            src_dir / "detalle_mayo.xlsx", ["2026-05-02", "2026-05-30"]
+        )
+        src_mmaa = self._make_source_with_dates(
+            src_dir / "detalle_junio_2025.xlsx", ["2025-06-01", "2025-06-29"]
+        )
+
+        loader = _mock_loader()
+        service = ResumenMensualService(data_loader=loader)
+        service._output_dir = lambda date_str: tmp_path
+
+        config = ResumenMensualConfig(
+            fecha_desde="2026-06-01",
+            fecha_hasta="2026-06-30",
+            genericos=["CERVEZAS"],
+            detalle_movimientos_path=str(src_actual),
+            detalle_movimientos_ma_path=str(src_ma),
+            detalle_movimientos_mmaa_path=str(src_mmaa),
+        )
+        result = service.generar_reporte(config)
+
+        wb = load_workbook(str(result.ruta_archivo))
+        assert "Detalle Movimientos" in wb.sheetnames
+        assert "Detalle Movimientos MA" in wb.sheetnames
+        assert "Detalle Movimientos MMAA" in wb.sheetnames
+
+    def test_import_detalle_movimientos_when_actual_contains_mixed_months(self, tmp_path, caplog):
+        src_actual = self._make_source_with_dates(
+            tmp_path / "detalle_wrong_actual.xlsx", ["2026-05-31", "2026-06-01"]
+        )
+
+        loader = _mock_loader()
+        service = ResumenMensualService(data_loader=loader)
+        service._output_dir = lambda date_str: tmp_path
+
+        config = ResumenMensualConfig(
+            fecha_desde="2026-06-01",
+            fecha_hasta="2026-06-30",
+            genericos=["CERVEZAS"],
+            detalle_movimientos_path=str(src_actual),
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = service.generar_reporte(config)
+
+        wb = load_workbook(str(result.ruta_archivo))
+        assert "Detalle Movimientos" in wb.sheetnames
+        assert any("expected only 2026-06" in msg for msg in caplog.messages)
+
+    def test_import_detalle_movimientos_ma_when_contains_mixed_months(self, tmp_path, caplog):
+        src_ma = self._make_source_with_dates(
+            tmp_path / "detalle_wrong_ma.xlsx", ["2026-04-30", "2026-05-01"]
+        )
+
+        loader = _mock_loader()
+        service = ResumenMensualService(data_loader=loader)
+        service._output_dir = lambda date_str: tmp_path
+
+        config = ResumenMensualConfig(
+            fecha_desde="2026-06-01",
+            fecha_hasta="2026-06-30",
+            genericos=["CERVEZAS"],
+            detalle_movimientos_ma_path=str(src_ma),
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = service.generar_reporte(config)
+
+        wb = load_workbook(str(result.ruta_archivo))
+        assert "Detalle Movimientos MA" in wb.sheetnames
+        assert any("expected only 2026-05" in msg for msg in caplog.messages)
+
+    def test_import_detalle_movimientos_mmaa_when_contains_mixed_months(self, tmp_path, caplog):
+        src_mmaa = self._make_source_with_dates(
+            tmp_path / "detalle_wrong_mmaa.xlsx", ["2025-05-31", "2025-06-01"]
+        )
+
+        loader = _mock_loader()
+        service = ResumenMensualService(data_loader=loader)
+        service._output_dir = lambda date_str: tmp_path
+
+        config = ResumenMensualConfig(
+            fecha_desde="2026-06-01",
+            fecha_hasta="2026-06-30",
+            genericos=["CERVEZAS"],
+            detalle_movimientos_mmaa_path=str(src_mmaa),
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = service.generar_reporte(config)
+
+        wb = load_workbook(str(result.ruta_archivo))
+        assert "Detalle Movimientos MMAA" in wb.sheetnames
+        assert any("expected only 2025-06" in msg for msg in caplog.messages)
+
+    def test_validate_detalle_uses_fecha_mvto_only(self, tmp_path):
+        """Fecha Stock fuera de mes no invalida si Fecha Mvto está en el mes correcto."""
+        src_actual = self._make_source_with_dates_split(
+            tmp_path / "detalle_fecha_mvto_ref.xlsx",
+            ["2026-06-04", "2026-06-18"],
+            ["2026-07-01", "2026-07-02"],
+        )
+
+        loader = _mock_loader()
+        service = ResumenMensualService(data_loader=loader)
+        service._output_dir = lambda date_str: tmp_path
+
+        config = ResumenMensualConfig(
+            fecha_desde="2026-06-01",
+            fecha_hasta="2026-06-30",
+            genericos=["CERVEZAS"],
+            detalle_movimientos_path=str(src_actual),
+        )
+
+        result = service.generar_reporte(config)
+        wb = load_workbook(str(result.ruta_archivo))
+        assert "Detalle Movimientos" in wb.sheetnames
