@@ -2,5 +2,10 @@
     "incentivo-cobertura": {
         "ejecutar": false,
         "razon": "Incentivo ON PREMISE vencido el 13/06/2026. Envio final realizado con datos hasta esa fecha. No volver a enviar para no mandar datos obsoletos."
+    },
+    "avance-badie": {
+        "ejecutar": true,
+        "enviar": false,
+        "razon": "Activacion pendiente — verificar primer output antes de habilitar el envio."
     }
 }

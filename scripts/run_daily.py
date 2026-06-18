@@ -42,7 +42,7 @@ import json
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -51,6 +51,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from main import _run_reportes, _resolve_test_mode  # noqa: E402
+from config.settings import FERIADOS  # noqa: E402
 from src.config.resolver import load_contacts, load_report_config  # noqa: E402
 
 
@@ -59,6 +60,39 @@ CONTACTOS_PATH = CONFIGS_DIR / "contactos.json"
 OVERRIDES_PATH = CONFIGS_DIR / "daily_overrides.json"
 
 FechaModo = Literal["hoy", "mes_a_hoy", "solo_hasta"]
+
+
+def _is_business_day(value: date) -> bool:
+    """Return True when the date is not Sunday nor configured holiday."""
+    feriados = {datetime.strptime(raw, "%Y-%m-%d").date() for raw in FERIADOS}
+    return value.weekday() != 6 and value not in feriados
+
+
+def _is_first_business_day_of_month(value: date) -> bool:
+    """Return True if the given date is the first business day of its month."""
+    if not _is_business_day(value):
+        return False
+
+    cursor = value.replace(day=1)
+    while cursor < value:
+        if _is_business_day(cursor):
+            return False
+        cursor += timedelta(days=1)
+    return True
+
+
+def _resolve_mes_a_hoy_range(hoy: date) -> tuple[str, str]:
+    """Resolve the date range for monthly daily reports.
+
+    Rule: on the first business day of a month, send the previous month closed.
+    Otherwise, keep the current month-to-date behavior.
+    """
+    if _is_first_business_day_of_month(hoy):
+        ultimo_dia_mes_anterior = hoy.replace(day=1) - timedelta(days=1)
+        primer_dia_mes_anterior = ultimo_dia_mes_anterior.replace(day=1)
+        return primer_dia_mes_anterior.isoformat(), ultimo_dia_mes_anterior.isoformat()
+
+    return hoy.replace(day=1).isoformat(), hoy.isoformat()
 
 
 @dataclass(frozen=True)
@@ -78,8 +112,9 @@ class Servicio:
             filtros["fecha_desde"] = hoy_iso
             filtros["fecha_hasta"] = hoy_iso
         elif self.fecha_modo == "mes_a_hoy":
-            filtros["fecha_desde"] = hoy.replace(day=1).isoformat()
-            filtros["fecha_hasta"] = hoy_iso
+            fecha_desde, fecha_hasta = _resolve_mes_a_hoy_range(hoy)
+            filtros["fecha_desde"] = fecha_desde
+            filtros["fecha_hasta"] = fecha_hasta
         elif self.fecha_modo == "solo_hasta":
             filtros["fecha_hasta"] = hoy_iso
         return patched
@@ -110,6 +145,11 @@ SERVICIOS: list[Servicio] = [
     Servicio(
         nombre="avance-branca",
         config_path=CONFIGS_DIR / "avances_branca.json",
+        fecha_modo="mes_a_hoy",
+    ),
+    Servicio(
+        nombre="avance-badie",
+        config_path=CONFIGS_DIR / "avances_badie.json",
         fecha_modo="mes_a_hoy",
     ),
     Servicio(

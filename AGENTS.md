@@ -33,14 +33,17 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 │       ├── ventas/           # Reporte de ventas
 │       │   ├── service.py    # VentasService, _aplicar_zonas_virtuales, _expandir_sucursales
 │       │   └── processor.py  # procesar_ventas_diarias, formatear_nombre_dia
-│       └── graficos_cobertura/   # Graficos cobertura (matplotlib + pptx)
-│           ├── config.py     # GraficosCoberturaConfig (fecha_desde/hasta, con_aguas, etc.)
-│           ├── constants.py  # ZONAS (5), GENERICOS_INCLUIDOS, RUTAS_A_SUC16, COLORES_MARCA
-│           ├── processor.py  # reassign_rutas_suc1, get_zona_data, build_matrix_*, compute_yoy
-│           ├── chart_generator.py  # matplotlib Agg + plot_cobertura_zona + plot_comparacion_marca
-│           ├── excel_builder.py    # build_resumen_xlsx (sheets por generico + mensual + comparativo)
-│           ├── pptx_builder.py     # build_decks -> Marca.pptx + Generico.pptx
-│           └── service.py    # GraficosCoberturaService orquesta todo
+│       ├── graficos_cobertura/   # Graficos cobertura (matplotlib + pptx)
+│       │   ├── config.py     # GraficosCoberturaConfig (fecha_desde/hasta, con_aguas, etc.)
+│       │   ├── constants.py  # ZONAS (5), GENERICOS_INCLUIDOS, RUTAS_A_SUC16, COLORES_MARCA
+│       │   ├── processor.py  # reassign_rutas_suc1, get_zona_data, build_matrix_*, compute_yoy
+│       │   ├── chart_generator.py  # matplotlib Agg + plot_cobertura_zona + plot_comparacion_marca
+│       │   ├── excel_builder.py    # build_resumen_xlsx (sheets por generico + mensual + comparativo)
+│       │   ├── pptx_builder.py     # build_decks -> Marca.pptx + Generico.pptx
+│       │   └── service.py    # GraficosCoberturaService orquesta todo
+│       └── avances/          # Reporte de avances (actualiza xlsx in-place)
+│           └── service.py    # AvancesService — soporta tipo_plantilla: "branca" | "badie"
+│                             # via PLANTILLA_SHEET_CONFIGS registry (ver RF-02)
 ├── tests/
 ├── main.py                   # CLI con subcomandos (soporta --config JSON)
 ├── api.py                    # FastAPI application (v2.0.0)
