@@ -26,6 +26,24 @@
       "sourceType": "autoskills-registry",
       "computedHash": "82fb11a63fb1e35ee2469516ed02d54695f783115b1540c0e783197af4240a3a"
     },
+    "metabase-cli": {
+      "source": "metabase/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/metabase-cli/SKILL.md",
+      "computedHash": "9cf7a79edf096ce34c5208ccd46975d5669fd3b3a04ec4f1383df718c40c6f95"
+    },
+    "metabase-database-metadata": {
+      "source": "metabase/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/metabase-database-metadata/SKILL.md",
+      "computedHash": "dee9473dc8a5f9df92753a1f7db208b79ac228cc9653a8324eac73479d119a1d"
+    },
+    "metabase-representation-format": {
+      "source": "metabase/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/metabase-representation-format/SKILL.md",
+      "computedHash": "9e336ac70e72c0b67b2a5b0a5fd78f6cb8b50c9e5054f1d8213e03a403e31f6f"
+    },
     "pandas-data-analysis": {
       "source": "pluginagentmarketplace/custom-plugin-python",
       "sourceType": "autoskills-registry",
