@@ -127,6 +127,11 @@ SERVICIOS: list[Servicio] = [
         config_path=CONFIGS_DIR / "rebotes.json",
         fecha_modo="mes_a_hoy",
     ),
+    Servicio(
+        nombre="descuentos",
+        config_path=CONFIGS_DIR / "descuentos.json",
+        fecha_modo="mes_a_hoy",
+    ),
     # Incentivo ON PREMISE — vigente HASTA 2026-06-13. Después de esa fecha
     # quitar de esta lista (o poner ejecutar=false en daily_overrides.json):
     # los datos quedarían obsoletos porque el incentivo termina.

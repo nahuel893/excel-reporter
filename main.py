@@ -77,6 +77,7 @@ REPORT_HANDLERS: dict[str, str] = {
     "reporte-general-badie": "_run_reporte_general_badie_report",
     "reporte-rebotes": "_run_rebotes_report",
     "reporte-incentivo-cobertura": "_run_incentivo_cobertura_report",
+    "reporte-descuentos": "_run_descuentos_report",
     "subdistribuidores": "_run_subdistribuidores_report",
 }
 
@@ -878,6 +879,34 @@ def _run_incentivo_cobertura_report(report, merged: dict) -> list[tuple[Path, di
     print(f"Incentivo cobertura '{report.nombre}' generado exitosamente:")
     print(f"  - Archivo: {result.ruta_archivo}")
     print(f"  - Vendedores: {result.vendedores}")
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": fecha_hasta},
+        )
+    ]
+
+
+def _run_descuentos_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate reporte-descuentos (Descuentos CCU). Returns [(path, metadata)]."""
+    from src.services.descuentos import DescuentosConfig, DescuentosService
+
+    fecha_desde = merged.get("fecha_desde")
+    fecha_hasta = merged.get("fecha_hasta")
+    if not fecha_desde or not fecha_hasta:
+        print("Error: reporte-descuentos requires fecha_desde y fecha_hasta")
+        return []
+
+    print(f"Generando: {report.nombre}")
+    config = DescuentosConfig(
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        nombre_archivo=report.nombre,
+    )
+    result = DescuentosService().generar_reporte(config)
+    print(f"Descuentos '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Registros: {result.registros_procesados}")
     return [
         (
             Path(result.ruta_archivo),

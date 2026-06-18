@@ -1,0 +1,19 @@
+{
+    "tipo": "reporte-descuentos",
+    "filtros": {
+        "fecha_desde": "2026-06-01",
+        "fecha_hasta": "2026-06-30",
+        "whatsapp_enviar_como": "archivo"
+    },
+    "reportes": [
+        {
+            "nombre": "Descuentos CCU",
+            "asunto_email": "Descuentos CCU",
+            "enviar_a": {
+                "Sebastian Dellamea": {
+                    "via": ["whatsapp", "email"]
+                }
+            }
+        }
+    ]
+}
