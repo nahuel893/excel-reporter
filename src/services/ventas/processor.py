@@ -47,6 +47,31 @@ def formatear_nombre_dia(fecha: datetime) -> str:
     return f"{fecha.strftime('%d-%m')} {dia_semana}"
 
 
+def _convertir_cupo_a_unidad(
+    cupo_bultos: float | None,
+    vendido_unidad: float | None,
+    vendido_bultos: float | None,
+    col_cantidad: str,
+) -> float | None:
+    """Convierte un cupo cargado en bultos a la unidad actual del reporte.
+
+    En la hoja HTLs no existe objetivo cargado en hectolitros por presentación,
+    así que se usa el mix vendido real:
+    objetivo_htl = objetivo_bultos * htl_vendidos / bultos_vendidos.
+    """
+    if cupo_bultos is None:
+        return None
+    if col_cantidad == "cantidad":
+        return cupo_bultos
+    if col_cantidad != "cantidad_htls":
+        return cupo_bultos
+    if pd.isna(vendido_bultos) or pd.isna(vendido_unidad):
+        return None
+    if not vendido_bultos or vendido_bultos <= 0:
+        return None
+    return cupo_bultos * vendido_unidad / vendido_bultos
+
+
 def procesar_ventas_diarias(
     df: pd.DataFrame,
     fecha_desde: str,
@@ -146,12 +171,36 @@ def procesar_ventas_diarias(
 
         # Rellenar NaN con 0
         df[col_cantidad] = df[col_cantidad].fillna(0)
+        if col_cantidad != "cantidad" and "cantidad" in df.columns:
+            df["cantidad"] = df["cantidad"].fillna(0)
         df["monto"] = df["monto"].fillna(0)
         if "descuentos" in df.columns:
             df["descuentos"] = df["descuentos"].fillna(0)
 
     # Factor de tendencia
     factor_tendencia = calcular_factor_tendencia(fecha_desde, fecha_hasta)
+
+    # Los cupos vienen en bultos. Para la hoja HTLs se convierten con regla de
+    # tres usando la venta real del mismo periodo/grupo.
+    bultos_marca_dict: dict = {}
+    bultos_generico_dict: dict = {}
+    if "cantidad" in df.columns:
+        bultos_marca = (
+            df.groupby(["sucursal", "generico", "marca"], as_index=False)["cantidad"]
+            .sum()
+        )
+        bultos_marca_dict = {
+            (r["sucursal"], r["generico"], r["marca"]): r["cantidad"]
+            for _, r in bultos_marca.iterrows()
+        }
+        bultos_generico = (
+            bultos_marca.groupby(["sucursal", "generico"], as_index=False)["cantidad"]
+            .sum()
+        )
+        bultos_generico_dict = {
+            (r["sucursal"], r["generico"]): r["cantidad"]
+            for _, r in bultos_generico.iterrows()
+        }
 
     # Obtener fechas unicas ordenadas y crear nombres de columnas
     fechas_unicas = sorted(df["fecha"].unique())
@@ -218,7 +267,13 @@ def procesar_ventas_diarias(
 
         for i, (_, fila) in enumerate(grupo.iterrows()):
             # Cupo de generico (solo primera fila del grupo)
-            cupo_gen = cupos_dict.get((sucursal, generico))
+            cupo_gen_bultos = cupos_dict.get((sucursal, generico))
+            cupo_gen = _convertir_cupo_a_unidad(
+                cupo_gen_bultos,
+                vendido_unidad=totales["cant_generico"],
+                vendido_bultos=bultos_generico_dict.get((sucursal, generico)),
+                col_cantidad=col_cantidad,
+            )
             cupo_gen_val = cupo_gen if i == 0 else None
             tend_gen_val = totales["tend_generico"] if i == 0 else None
             cupo_vs_tend_gen = (tend_gen_val / cupo_gen) if (i == 0 and cupo_gen) else None
@@ -252,7 +307,13 @@ def procesar_ventas_diarias(
             row[COLUMN_NAMES["tend_marca"]] = tend_marca_val
 
             # Cupo de marca
-            cupo_marca = cupos_dict.get((sucursal, fila["marca"]))
+            cupo_marca_bultos = cupos_dict.get((sucursal, fila["marca"]))
+            cupo_marca = _convertir_cupo_a_unidad(
+                cupo_marca_bultos,
+                vendido_unidad=fila["total_marca"],
+                vendido_bultos=bultos_marca_dict.get((sucursal, generico, fila["marca"])),
+                col_cantidad=col_cantidad,
+            )
             row[COLUMN_NAMES["cupo_marca"]] = cupo_marca
             row[COLUMN_NAMES["cupo_vs_tend_marca"]] = (tend_marca_val / cupo_marca) if cupo_marca else None
 

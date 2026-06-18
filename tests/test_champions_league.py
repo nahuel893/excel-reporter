@@ -1,6 +1,7 @@
 """Tests para ChampionsLeagueService."""
 import pandas as pd
 import pytest
+import openpyxl
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
@@ -74,6 +75,37 @@ class TestChampionsLeagueConfig:
 
 
 class TestChampionsLeagueService:
+    def _make_loader_with_data(self):
+        mock_loader = MagicMock(spec=DataLoader)
+        mock_loader.get_cobertura_preventista_generico.return_value = (
+            self._make_prev_generico_df()
+        )
+        mock_loader.get_cobertura_preventista_marca.return_value = (
+            self._make_prev_marca_df()
+        )
+        mock_loader.get_cobertura_sucursal_generico.return_value = (
+            self._make_suc_generico_df()
+        )
+        mock_loader.get_cobertura_sucursal_marca.return_value = self._make_suc_marca_df()
+        mock_loader.get_ventas_mision_imposible_categorias.return_value = (
+            _make_ventas_categoria_df()
+        )
+        return mock_loader
+
+    def _save_previous_workbook(self, tmp_path: Path, period: str = "2026-05") -> Path:
+        prev_dir = tmp_path / "champions-league" / period
+        prev_dir.mkdir(parents=True)
+        prev_path = prev_dir / "Champions League.xlsx"
+
+        wb = openpyxl.Workbook()
+        wb.active.title = "cupos"
+        wb["cupos"]["A1"] = "manual value"
+        wb.create_sheet("Cat OLD")
+        wb.create_sheet("Cob Old")
+        wb.create_sheet("INFO")
+        wb.save(prev_path)
+        return prev_path
+
     def _make_prev_generico_df(self):
         return pd.DataFrame({
             "periodo": ["2026-03-01"] * 4,
@@ -226,6 +258,64 @@ class TestChampionsLeagueService:
         assert "CERVEZAS" in result.genericos_incluidos
         assert "AGUAS" in result.genericos_incluidos
         assert result.registros_procesados > 0
+
+    def test_seeds_current_month_from_previous_workbook_preserving_manual_sheet(
+        self, tmp_path
+    ):
+        self._save_previous_workbook(tmp_path)
+        service = ChampionsLeagueService(data_loader=self._make_loader_with_data())
+        config = ChampionsLeagueConfig(
+            fecha_desde="2026-06-01",
+            fecha_hasta="2026-06-30",
+            nombre_archivo="Champions League",
+        )
+
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
+            result = service.generar_reporte(config)
+
+        assert result.ruta_archivo == (
+            tmp_path / "champions-league" / "2026-06" / "Champions League.xlsx"
+        )
+        wb = openpyxl.load_workbook(result.ruta_archivo)
+        assert "cupos" in wb.sheetnames
+        assert wb["cupos"]["A1"].value == "manual value"
+
+    def test_seeded_workbook_removes_old_managed_sheets_and_writes_current_categories(
+        self, tmp_path
+    ):
+        self._save_previous_workbook(tmp_path)
+        service = ChampionsLeagueService(data_loader=self._make_loader_with_data())
+        config = ChampionsLeagueConfig(
+            fecha_desde="2026-06-01",
+            fecha_hasta="2026-06-30",
+            categorias={"NEW": [1001, 1002]},
+            nombre_archivo="Champions League",
+        )
+
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
+            result = service.generar_reporte(config)
+
+        wb = openpyxl.load_workbook(result.ruta_archivo)
+        assert "cupos" in wb.sheetnames
+        assert "Cat OLD" not in wb.sheetnames
+        assert "Cob Old" not in wb.sheetnames
+        assert "INFO" not in wb.sheetnames
+        assert "Cat NEW" in wb.sheetnames
+
+    def test_fresh_generation_still_works_without_previous_month_workbook(self, tmp_path):
+        service = ChampionsLeagueService(data_loader=self._make_loader_with_data())
+        config = ChampionsLeagueConfig(
+            fecha_desde="2026-06-01",
+            fecha_hasta="2026-06-30",
+            nombre_archivo="Champions League",
+        )
+
+        with patch.object(_settings, "DATA_OUTPUT", tmp_path):
+            result = service.generar_reporte(config)
+
+        wb = openpyxl.load_workbook(result.ruta_archivo)
+        assert "cupos" not in wb.sheetnames
+        assert "Cob Preventista Generico" in wb.sheetnames
 
 
 # ---------------------------------------------------------------------------

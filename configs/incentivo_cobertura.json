@@ -1,0 +1,22 @@
+{
+    "tipo": "reporte-incentivo-cobertura",
+    "filtros": {
+        "fecha_desde": "2026-06-01",
+        "fecha_hasta": "2026-06-13",
+        "whatsapp_enviar_como": "imagen"
+    },
+    "reportes": [
+        {
+            "nombre": "Incentivo Cobertura ON PREMISE",
+            "filtros": {},
+            "capture_images": [
+                {"hoja": "Incentivo Cobertura ON PREMISE", "rango": "A1:M11", "renderer": "libreoffice"}
+            ],
+            "enviar_a": {
+                "Preventa Salta": {
+                    "via": ["whatsapp"]
+                }
+            }
+        }
+    ]
+}

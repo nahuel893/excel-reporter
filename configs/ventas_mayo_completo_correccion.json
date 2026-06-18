@@ -1,0 +1,151 @@
+{
+  "tipo": "ventas",
+  "filtros": {
+    "fecha_desde": "2026-05-01",
+    "fecha_hasta": "2026-05-31",
+    "genericos": [
+      "CERVEZAS",
+      "AGUAS DANONE",
+      "VINOS CCU",
+      "SIDRAS Y LICORES"
+    ],
+    "con_slicers": false,
+    "con_cobertura": true,
+    "con_montos": false,
+    "enviar_email": true,
+    "enviar_whatsapp": true,
+    "whatsapp_enviar_como": "archivo"
+  },
+  "reportes": [
+    {
+      "nombre": "Ventas CCU - WV",
+      "filtros": {
+        "supervisores": [
+          "Walter Vilte"
+        ],
+        "sucursales": [
+          "SUCURSAL CAFAYATE",
+          "SUCURSAL ABRA PAMPA",
+          "SUCURSAL SAN PEDRO",
+          "SUCURSAL JOAQUIN V GONZALEZ",
+          "SUCURSAL LA QUIACA",
+          "SUCURSAL METAN",
+          "SUCURSAL HUMAHUACA",
+          "SUCURSAL ORAN",
+          "SUCURSAL TARTAGAL",
+          "SUCURSAL MAIMARA",
+          "SUCURSAL GUEMES",
+          "SUCURSAL LIBERTADOR",
+          "SUCURSAL PERICO",
+          "CASA CENTRAL"
+        ]
+      },
+      "enviar_a": {
+        "Sebastian Dellamea": {
+          "via": [
+            "whatsapp"
+          ]
+        },
+        "Walter Vilte": {
+          "via": [
+            "email"
+          ]
+        },
+        "Nahuel Aguirre": {
+          "via": [
+            "email_cc"
+          ]
+        }
+      },
+      "asunto_email": "Correccion Conversion de cupos a htls."
+    },
+    {
+      "nombre": "Ventas Antonio Cabrerizo",
+      "filtros": {
+        "supervisores": [
+          "Antonio Cabrerizo"
+        ],
+        "sucursales": [
+          "CASA CENTRAL"
+        ]
+      },
+      "enviar_a": {
+        "Gonzalo Farah": {
+          "via": [
+            "whatsapp"
+          ]
+        },
+        "Antonio Cabrerizo": {
+          "via": [
+            "email"
+          ]
+        },
+        "Nahuel Aguirre": {
+          "via": [
+            "email_cc"
+          ]
+        }
+      },
+      "asunto_email": "Correccion Conversion de cupos a htls."
+    },
+    {
+      "nombre": "Ventas Adrian Garcia",
+      "filtros": {
+        "supervisores": [
+          "Adrian Garcia"
+        ],
+        "sucursales": [
+          "SUCURSAL CAFAYATE",
+          "SUCURSAL JOAQUIN V GONZALEZ",
+          "SUCURSAL METAN",
+          "SUCURSAL GUEMES"
+        ]
+      },
+      "enviar_a": {
+        "Adrian Garcia": {
+          "via": [
+            "email"
+          ]
+        },
+        "Nahuel Aguirre": {
+          "via": [
+            "email_cc"
+          ]
+        }
+      },
+      "asunto_email": "Correccion Conversion de cupos a htls."
+    },
+    {
+      "nombre": "Ventas Hernan Yapura",
+      "filtros": {
+        "supervisores": [
+          "Hernan Yapura"
+        ],
+        "sucursales": [
+          "SUCURSAL ABRA PAMPA",
+          "SUCURSAL SAN PEDRO",
+          "SUCURSAL LA QUIACA",
+          "SUCURSAL HUMAHUACA",
+          "SUCURSAL ORAN",
+          "SUCURSAL TARTAGAL",
+          "SUCURSAL MAIMARA",
+          "SUCURSAL LIBERTADOR",
+          "SUCURSAL PERICO"
+        ]
+      },
+      "enviar_a": {
+        "Hernan Yapura": {
+          "via": [
+            "email"
+          ]
+        },
+        "Nahuel Aguirre": {
+          "via": [
+            "email_cc"
+          ]
+        }
+      },
+      "asunto_email": "Correccion Conversion de cupos a htls."
+    }
+  ]
+}

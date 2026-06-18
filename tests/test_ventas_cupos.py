@@ -45,7 +45,7 @@ def _df_cupos_simple():
     })
 
 
-def _run_processor(df_ventas=None, df_cupos=None):
+def _run_processor(df_ventas=None, df_cupos=None, col_cantidad="cantidad"):
     """Wrapper conveniente para llamar al processor."""
     if df_ventas is None:
         df_ventas = _df_ventas_simple()
@@ -53,6 +53,7 @@ def _run_processor(df_ventas=None, df_cupos=None):
         df=df_ventas,
         fecha_desde="2026-04-01",
         fecha_hasta="2026-04-30",
+        col_cantidad=col_cantidad,
         df_cupos=df_cupos,
     )
 
@@ -144,6 +145,54 @@ class TestCupoMarcaEveryRow:
         col = COLUMN_NAMES["cupo_marca"]
         # Todas las filas deben tener None en cupo_marca
         assert df[col].isna().all()
+
+
+class TestCuposHTLsConversion:
+    """Cupos en hoja HTLs se convierten desde bultos con regla de tres."""
+
+    def test_cupo_generico_htls_usa_mix_vendido_del_generico(self):
+        df = _run_processor(df_cupos=_df_cupos_simple(), col_cantidad="cantidad_htls")
+
+        primera_fila = df[df[COLUMN_NAMES["generico"]] == "CERVEZAS"].iloc[0]
+
+        # CERVEZAS: cupo_bultos=1000, htl_vendidos=15, bultos_vendidos=150.
+        assert primera_fila[COLUMN_NAMES["cupo_generico"]] == 100.0
+
+    def test_cupo_marca_htls_usa_mix_vendido_de_la_marca(self):
+        df = _run_processor(df_cupos=_df_cupos_simple(), col_cantidad="cantidad_htls")
+
+        corona = df[df[COLUMN_NAMES["marca"]] == "CORONA"].iloc[0]
+        quilmes = df[df[COLUMN_NAMES["marca"]] == "QUILMES"].iloc[0]
+
+        # CORONA: 200 * 10 HTL / 100 bultos = 20 HTL.
+        assert corona[COLUMN_NAMES["cupo_marca"]] == 20.0
+        # QUILMES: 100 * 5 HTL / 50 bultos = 10 HTL.
+        assert quilmes[COLUMN_NAMES["cupo_marca"]] == 10.0
+
+    def test_cupo_vs_tend_htls_usa_cupo_convertido(self):
+        df = _run_processor(df_cupos=_df_cupos_simple(), col_cantidad="cantidad_htls")
+        primera_fila = df[df[COLUMN_NAMES["generico"]] == "CERVEZAS"].iloc[0]
+
+        ratio = primera_fila[COLUMN_NAMES["cupo_vs_tend_generico"]]
+        tend = primera_fila[COLUMN_NAMES["tend_generico"]]
+        cupo_convertido = primera_fila[COLUMN_NAMES["cupo_generico"]]
+
+        assert ratio == tend / cupo_convertido
+
+    def test_cupo_htls_none_si_bultos_vendidos_es_cero(self):
+        df_ventas = _df_ventas_simple()
+        df_ventas["cantidad"] = 0
+
+        df = _run_processor(
+            df_ventas=df_ventas,
+            df_cupos=_df_cupos_simple(),
+            col_cantidad="cantidad_htls",
+        )
+
+        assert df[COLUMN_NAMES["cupo_generico"]].isna().all()
+        assert df[COLUMN_NAMES["cupo_marca"]].isna().all()
+        assert df[COLUMN_NAMES["cupo_vs_tend_generico"]].isna().all()
+        assert df[COLUMN_NAMES["cupo_vs_tend_marca"]].isna().all()
 
 
 class TestCupoVsTendGenerico:

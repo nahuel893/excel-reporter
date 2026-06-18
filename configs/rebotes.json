@@ -1,14 +1,14 @@
 {
     "tipo": "reporte-rebotes",
     "filtros": {
-        "fecha_desde": "2026-05-01",
-        "fecha_hasta": "2026-05-31",
+        "fecha_desde": "2026-06-01",
+        "fecha_hasta": "2026-06-30",
         "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
         "whatsapp_enviar_como": "ambos"
     },
     "reportes": [
         {
-            "nombre": "Rebotes Mayo 2026",
+            "nombre": "Rebotes Junio 2026",
             "filtros": {},
             "capture_images": [
                 {"hoja": "% Rebotes x Generico", "rango": "A1:K40", "renderer": "libreoffice"}

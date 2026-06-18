@@ -20,20 +20,21 @@ const badgeVariants = cva(
         outline:
           "text-foreground border-border",
         /* Tipo-specific variants */
-        ventas:
-          "border-transparent bg-blue-500/15 text-blue-400",
-        avances:
-          "border-transparent bg-violet-500/15 text-violet-400",
-        "champions-league":
-          "border-transparent bg-amber-500/15 text-amber-400",
-        "resumen-mensual":
-          "border-transparent bg-emerald-500/15 text-emerald-400",
-        "stock-diario":
-          "border-transparent bg-cyan-500/15 text-cyan-400",
-        zinc:
-          "border-transparent bg-zinc-700/50 text-zinc-400",
-        success:
-          "border-transparent bg-emerald-500/15 text-emerald-400",
+        ventas: "border-transparent bg-blue-500/15 text-blue-400",
+        avances: "border-transparent bg-violet-500/15 text-violet-400",
+        "champions-league": "border-transparent bg-amber-500/15 text-amber-400",
+        "resumen-mensual": "border-transparent bg-emerald-500/15 text-emerald-400",
+        "stock-diario": "border-transparent bg-cyan-500/15 text-cyan-400",
+        "historico-fratelli": "border-transparent bg-amber-600/15 text-amber-500",
+        cartesiano: "border-transparent bg-orange-500/15 text-orange-400",
+        "graficos-cobertura": "border-transparent bg-pink-500/15 text-pink-400",
+        "ventas-articulo": "border-transparent bg-sky-500/15 text-sky-400",
+        "historico-cliente": "border-transparent bg-indigo-500/15 text-indigo-400",
+        "reporte-general-badie": "border-transparent bg-emerald-600/15 text-emerald-500",
+        "reporte-rebotes": "border-transparent bg-rose-500/15 text-rose-400",
+        /* Fallback */
+        zinc: "border-transparent bg-zinc-700/50 text-zinc-400",
+        success: "border-transparent bg-emerald-500/15 text-emerald-400",
       },
     },
     defaultVariants: {

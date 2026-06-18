@@ -1,0 +1,113 @@
+{
+  "tipo": "resumen-mensual",
+  "filtros": {
+    "fecha_desde": "2026-06-01",
+    "fecha_hasta": "2026-06-30",
+    "genericos": [
+      "CERVEZAS",
+      "AGUAS DANONE",
+      "VINOS CCU",
+      "VINOS",
+      "VINOS FINOS",
+      "SIDRAS Y LICORES",
+      "FRATELLI B",
+      "TAMBO",
+      "JUGOS"
+    ],
+    "marca_splits": {
+      "VINOS FINOS": [
+        "QUARA"
+      ]
+    },
+    "detalle_movimientos_path": null,
+    "detalle_movimientos_ma_path": null,
+    "detalle_movimientos_mmaa_path": null,
+    "categorias_deposito_path": "configs/categorias_deposito.json",
+    "whatsapp_caption_imagenes": false,
+    "enviar_email": false,
+    "enviar_whatsapp": true
+  },
+  "reportes": [
+    {
+      "nombre": "Resumen Mensual Junio",
+      "capture_images": [
+        {
+          "hoja": "CERVEZAS",
+          "rango": "A1:J30",
+          "renderer": "libreoffice"
+        },
+        {
+          "hoja": "AGUAS DANONE",
+          "rango": "A1:J30",
+          "renderer": "libreoffice"
+        },
+        {
+          "hoja": "VINOS CCU",
+          "rango": "A1:J30",
+          "renderer": "libreoffice"
+        },
+        {
+          "hoja": "VINOS",
+          "rango": "A1:J30",
+          "renderer": "libreoffice"
+        },
+        {
+          "hoja": "VINOS FINOS",
+          "rango": "A1:J50",
+          "renderer": "libreoffice"
+        },
+        {
+          "hoja": "SIDRAS Y LICORES",
+          "rango": "A1:J30",
+          "renderer": "libreoffice"
+        },
+        {
+          "hoja": "FRATELLI B",
+          "rango": "A1:J30",
+          "renderer": "libreoffice"
+        },
+        {
+          "hoja": "TAMBO",
+          "rango": "A1:J30",
+          "renderer": "libreoffice"
+        },
+        {
+          "hoja": "JUGOS",
+          "rango": "A1:J30",
+          "renderer": "libreoffice"
+        }
+      ],
+      "enviar_a": {
+        "Gonzalo Farah": {
+          "via": [
+            "whatsapp",
+            "email"
+          ]
+        },
+        "Sebastian Dellamea": {
+          "via": [
+            "whatsapp",
+            "email"
+          ]
+        },
+        "Daniel Manzur": {
+          "via": [
+            "whatsapp"
+          ]
+        },
+        "Fabian Gallardo": {
+          "via": [
+            "whatsapp",
+            "email"
+          ]
+        },
+        "Nahuel Aguirre": {
+          "via": [
+            "whatsapp",
+            "email_cc"
+          ]
+        }
+      }
+    }
+  ]
+}
