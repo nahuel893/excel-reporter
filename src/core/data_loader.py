@@ -1479,6 +1479,7 @@ class DataLoader:
             LEFT JOIN gold.dim_vendedor dv
               ON fv.id_vendedor = dv.id_vendedor
              AND fv.id_sucursal = dv.id_sucursal
+             AND dv.id_fuerza_ventas = :id_fuerza_ventas
             LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
             LEFT JOIN gold.dim_cliente  dc
               ON fv.id_cliente = dc.id_cliente
@@ -1492,6 +1493,7 @@ class DataLoader:
                 "fecha_desde": fecha_desde,
                 "fecha_hasta": fecha_hasta,
                 "id_sucursal": id_sucursal,
+                "id_fuerza_ventas": id_fuerza_ventas,
             },
         )
 
