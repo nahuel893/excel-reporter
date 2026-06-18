@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from openpyxl import load_workbook
 
@@ -29,16 +30,24 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SheetConfig:
-    """Maps an Excel sheet to its DB query and writable columns."""
+    """Maps an Excel sheet to its DB query and writable columns.
+
+    column_rename: optional mapping {df_column_name: excel_header_name}.
+    Applied before replace_sheet_data when DataFrame column names differ
+    from the Excel header row. Only the renamed columns participate in the
+    write; columns absent from both the rename map and data_columns are not
+    touched.  data_columns must use the Excel header names (post-rename).
+    """
 
     sheet_name: str
     query_method: str  # DataLoader method name
     query_params: list[str] = field(default_factory=list)  # param names from AvancesConfig
     data_columns: list[str] = field(default_factory=list)
     header_row: int = 1
+    column_rename: dict[str, str] = field(default_factory=dict)  # df_col -> excel_header
 
 
-SHEET_CONFIGS = [
+SHEET_CONFIGS_BRANCA: list[SheetConfig] = [
     SheetConfig(
         sheet_name="gold fact_ventas",
         query_method="get_fact_ventas_raw",
@@ -93,6 +102,126 @@ SHEET_CONFIGS = [
     ),
 ]
 
+# SHEET_CONFIGS_BADIE — populated from real .xlsm inspection (2026-06-05) +
+# Excel header sample rows. Uses dedicated DataLoader methods that perform the
+# dim_sucursal / dim_vendedor / dim_articulo / dim_cliente joins in SQL, so the
+# DataFrame columns already match the Excel header row exactly. No
+# column_rename layer is required — data_columns lists headers verbatim.
+#
+# Sample row inspection confirmed (pivot_python):
+#   Sucursal = "1 - CASA CENTRAL", Descripcion Vendedor = "AGUIRRE ETHEL",
+#   Ruta = 6 (integer), Descripcion_Ruta = "AGUIRRE ETHEL LUJU",
+#   Descripcion_Marca = "ARIZU", GENERICO = "VINOS",
+#   Código_Articulo = 821016, Descripcion_Articulo = "ARIZU BLANCO 1000 * 12",
+#   Cantidades Totales = 3
+#
+# Columns NOT written (Excel formulas the user maintains):
+#   pivot_python : CATEGORIA, Columna1  (VLOOKUP formulas)
+#   cober_gen    : Column1 (autoincrement index), Columna1 (VLOOKUP)
+#   cober_marca  : Column1 (autoincrement index)
+SHEET_CONFIGS_BADIE: list[SheetConfig] = [
+    # 1. Ventas — pivot_python sheet (10 data cols of 12; 2 are user formulas)
+    SheetConfig(
+        sheet_name="pivot_python",
+        query_method="get_fact_ventas_pivot_badie",
+        query_params=["fecha_desde", "fecha_hasta", "id_sucursal", "id_fuerza_ventas"],
+        data_columns=[
+            "Sucursal",
+            "Descripcion Período",
+            "Descripcion Vendedor",
+            "Ruta",
+            "Descripcion_Ruta",
+            "Descripcion_Marca",
+            "GENERICO",
+            "Código_Articulo",
+            "Descripcion_Articulo",
+            "Cantidades Totales",
+        ],
+        header_row=1,
+    ),
+    # 2. Cobertura por genérico — cober_gen sheet (5 data cols; Column1 + Columna1 left alone)
+    SheetConfig(
+        sheet_name="cober_gen",
+        query_method="get_cob_preventista_generico_pivot_badie",
+        query_params=["fecha_desde", "fecha_hasta", "id_fuerza_ventas", "id_sucursal"],
+        data_columns=[
+            "Sucursal",
+            "Descripcion Vendedor",
+            "Ruta",
+            "GENERICO",
+            "Numero_Clientes",
+        ],
+        header_row=1,
+    ),
+    # 3. Cobertura por marca — cober_marca sheet (5 data cols; Column1 left alone)
+    SheetConfig(
+        sheet_name="cober_marca",
+        query_method="get_cob_preventista_marca_pivot_badie",
+        query_params=["fecha_desde", "fecha_hasta", "id_fuerza_ventas", "id_sucursal"],
+        data_columns=[
+            "Sucursal",
+            "Descripcion Vendedor",
+            "Ruta",
+            "Descripcion_Marca",
+            "Numero_Clientes",
+        ],
+        header_row=1,
+    ),
+    # 4. Cupos volumen — CuposVolumen sheet (6 data cols of 51; rest are user formulas)
+    #    Source: gold.fact_cupos filtered by periodo + id_sucursal
+    SheetConfig(
+        sheet_name="CuposVolumen",
+        query_method="get_cupos_volumen_badie",
+        query_params=["periodo", "id_sucursal"],
+        data_columns=[
+            "Código",
+            "Descripción",
+            "PREVENTISTA",
+            "GENERICO",
+            "DESAGREGADO",
+            "Cupo ",  # trailing space matches Excel header exactly
+        ],
+        header_row=1,
+    ),
+    # 5. Cupos cobertura por genérico — CuposCoberGen sheet (5 data cols of 6)
+    #    Source: gold.fact_cupos_cobertura WHERE tipo_apertura='generico'
+    #    No id_sucursal filter: includes CASA CENTRAL (split into ZONAs) + GUEMES
+    SheetConfig(
+        sheet_name="CuposCoberGen",
+        query_method="get_cupos_cobertura_generico_badie",
+        query_params=["periodo"],
+        data_columns=[
+            "Ruta",
+            "Preventista",
+            "Generico",
+            "ZONA",
+            "CUPO ",  # trailing space matches Excel header
+        ],
+        header_row=1,
+    ),
+    # 6. Cupos cobertura por marca — CuposCober sheet (5 data cols of 15; supervisor cols user-maintained)
+    #    Source: gold.fact_cupos_cobertura WHERE tipo_apertura='marca'
+    #    No id_sucursal filter: includes CASA CENTRAL (split into ZONAs) + GUEMES
+    SheetConfig(
+        sheet_name="CuposCober",
+        query_method="get_cupos_cobertura_marca_badie",
+        query_params=["periodo"],
+        data_columns=[
+            "Ruta",
+            "Descripción Vendedor",
+            "MARCA",
+            "ZONA",
+            "CUPO ",  # trailing space matches Excel header
+        ],
+        header_row=1,
+    ),
+]
+
+PLANTILLA_SHEET_CONFIGS: dict[str, list[SheetConfig]] = {
+    "branca": SHEET_CONFIGS_BRANCA,
+    "badie": SHEET_CONFIGS_BADIE,
+}
+
 
 @dataclass
 class AvancesConfig:
@@ -113,11 +242,21 @@ class AvancesConfig:
 
     fecha_desde: str
     fecha_hasta: str
+    tipo_plantilla: Literal["branca", "badie"] = "branca"
     archivo_plantilla: str | None = None  # path to BASE template (fallback if no prev output)
     id_sucursal: int = 1
     id_fuerza_ventas: int = 1
     nombre_archivo: str | None = None  # output filename (no extension)
     output_dir: Path | None = None  # override; if None, derived from fecha_desde
+
+    @property
+    def periodo(self) -> str:
+        """Period key derived from fecha_desde for monthly tables (fact_cupos*).
+
+        Returns 'YYYY-MM' — matches the periodo column format in fact_cupos
+        and fact_cupos_cobertura.
+        """
+        return self.fecha_desde[:7]
 
 
 @dataclass
@@ -224,7 +363,7 @@ class AvancesService(BaseService):
 
         registros = {}
 
-        for sc in SHEET_CONFIGS:
+        for sc in PLANTILLA_SHEET_CONFIGS[config.tipo_plantilla]:
             if sc.sheet_name not in wb.sheetnames:
                 logger.info("Sheet '%s' not found, creating", sc.sheet_name)
                 ws = wb.create_sheet(sc.sheet_name)
@@ -238,6 +377,10 @@ class AvancesService(BaseService):
             t1 = time.perf_counter()
             df = method(**params) if params else method()
             logger.info("Query %s: %d filas en %.1fs", sc.query_method, len(df), time.perf_counter() - t1)
+
+            # Apply column rename if the template uses different header names
+            if sc.column_rename:
+                df = df.rename(columns=sc.column_rename)
 
             t2 = time.perf_counter()
             rows = replace_sheet_data(

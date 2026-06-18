@@ -64,6 +64,7 @@ class GlobalFilters(BaseModel):
     enviar_email: bool = True
     enviar_whatsapp: bool = True
     archivo_plantilla: str | None = None
+    tipo_plantilla: Literal["branca", "badie"] = "branca"
     id_sucursal: int | None = None
     id_fuerza_ventas: int | None = None
     id_articulo: int | None = None

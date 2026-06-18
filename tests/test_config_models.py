@@ -486,3 +486,25 @@ class TestResolveDeliveryFlags:
 
         assert result.email is None
         assert result.whatsapp is None
+
+
+# ---------------------------------------------------------------------------
+# tipo_plantilla survives the full load + merge pipeline (regression guard)
+# ---------------------------------------------------------------------------
+
+
+class TestTipoPlantillaPropagation:
+    """End-to-end: tipo_plantilla from the config must survive
+    load_report_config (Pydantic) + merge_filters, not be silently dropped."""
+
+    def test_badie_config_propagates_tipo_plantilla(self):
+        report_config = load_report_config(Path("configs/avances_badie.json"))
+        merged = merge_filters(report_config.filtros, report_config.reportes[0].filtros)
+        assert merged["tipo_plantilla"] == "badie", (
+            "tipo_plantilla debe sobrevivir el merge; si no, avance-badie corre como branca"
+        )
+
+    def test_default_tipo_plantilla_is_branca(self):
+        f = GlobalFilters(fecha_desde="2026-06-01", fecha_hasta="2026-06-30")
+        merged = merge_filters(f, None)
+        assert merged["tipo_plantilla"] == "branca"
