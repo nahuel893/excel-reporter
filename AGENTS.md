@@ -432,3 +432,16 @@ Modelo: `gemini-2.0-flash-lite`
 - Output: $0.30 / 1M tokens
 - Uso tipico por mensaje: ~2.000 tokens in + ~500 tokens out ~= $0.00031 por interaccion
 - 50 mensajes/dia por 30 dias ~= $0.47/mes por usuario activo
+
+## Workflow de ramas y deployment (IMPORTANTE)
+
+- **`main` = produccion.** El timer del daily (`excel-reporter-daily.service`) tiene
+  un drop-in (`pin-main.conf`) que hace `git checkout main` ANTES de correr, asi que
+  produccion siempre ejecuta `main`. NO se corre produccion desde una rama feature.
+- **Features en ramas → merge a `main`** cuando estan listas y revisadas. Nunca
+  dejar el working tree en una rama feature "porque el daily la levanta".
+- **Commitear antes de que algo salga en vivo.** No depender de cambios sin commitear
+  en el working tree (se pierden ante cualquier checkout/reset).
+- `data/` (outputs) y `resumen-web/node_modules,dist` estan gitignored — no commitear.
+- Backups de ramas archivadas: tags `backup/<rama>-<fecha>` (en origin). Para recuperar
+  una rama archivada: `git checkout -b <rama> backup/<rama>-<fecha>`.
