@@ -454,10 +454,12 @@ def _post_write_subtotals_and_heatmap(
     tend_obj_col_letter = col_map.get("Tend vs Obj (%)")
     if tend_obj_col_letter and data_start_row <= data_end_row:
         heatmap_range = f"{tend_obj_col_letter}{data_start_row}:{tend_obj_col_letter}{data_end_row}"
+        # Paleta pastel consistente con el reporte de rebotes (rechazos):
+        # rojo FF6366 / amarillo FFEB9C / verde C6EFCE.
         color_scale = ColorScaleRule(
-            start_type="num",   start_value=0,   start_color="FF0000",  # red
-            mid_type="num",     mid_value=1.0,   mid_color="FFFF00",    # yellow
-            end_type="num",     end_value=1.2,   end_color="00B050",    # green
+            start_type="num",   start_value=0,   start_color="FF6366",  # rojo pastel
+            mid_type="num",     mid_value=1.0,   mid_color="FFEB9C",    # amarillo pastel
+            end_type="num",     end_value=1.2,   end_color="C6EFCE",    # verde pastel
         )
         ws.conditional_formatting.add(heatmap_range, color_scale)
 
