@@ -88,3 +88,9 @@ bd_agent/errors.log.*
 # OS
 .DS_Store
 Thumbs.db
+
+# resumen-web (standalone React app) — build artifacts
+resumen-web/node_modules/
+resumen-web/dist/
+# Skill registry cache (regenerable)
+.atl/.skill-registry.cache.json
