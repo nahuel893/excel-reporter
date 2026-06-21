@@ -12,6 +12,7 @@ Static assertions that validate the SQL script without a live DB:
 8. ALTER DEFAULT PRIVILEGES IN SCHEMA gold GRANT SELECT ON TABLES
 9. No 'superuser' keyword in role definition
 10. sqlglot parses the plain SQL statements without error
+11. Explicit GRANT SELECT on gold.mv_resumen_mensual (materialized view)
 """
 
 import re
@@ -231,3 +232,23 @@ def test_plain_statements_parse_with_sqlglot(sql_content):
         except Exception as exc:
             errors.append(f"sqlglot raised {type(exc).__name__} for: {stmt[:80]} — {exc}")
     assert not errors, "sqlglot parse errors:\n" + "\n".join(errors)
+
+
+# ---------------------------------------------------------------------------
+# Explicit GRANT on materialized view (MV requires explicit grant for SELECT)
+# ---------------------------------------------------------------------------
+
+def test_explicit_grant_on_mv_resumen_mensual(sql_content):
+    """
+    GRANT SELECT ON ALL TABLES covers tables and views but NOT materialized views
+    in older PG versions. An explicit GRANT SELECT on gold.mv_resumen_mensual
+    ensures the MV is accessible regardless of PG version.
+    """
+    pattern = re.compile(
+        r"GRANT\s+SELECT\s+ON\s+gold\.mv_resumen_mensual\s+TO\s+superset_user",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    assert pattern.search(sql_content), (
+        "Expected: GRANT SELECT ON gold.mv_resumen_mensual TO superset_user\n"
+        "Materialized views require an explicit GRANT (not covered by GRANT ON ALL TABLES)"
+    )

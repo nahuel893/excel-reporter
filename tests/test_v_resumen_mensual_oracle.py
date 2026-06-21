@@ -2,7 +2,7 @@
 Oracle cross-check test — T-1.5 (THE CRITICAL CORRECTNESS GATE)
 
 For a closed period (2026-05), run ResumenMensualService.generar_datos() and
-compare its group totals against the SQL view gold.v_resumen_mensual.
+compare its group totals against the materialized view gold.mv_resumen_mensual.
 
 Both pipelines must agree within ±1 unit for:
   - SUBTOTAL CASA CENTRAL  ↔  SUM(total_ventas) WHERE grupo='CASA CENTRAL'
@@ -12,7 +12,7 @@ Both pipelines must agree within ±1 unit for:
 DB is required. Tests are skipped cleanly if DB is unreachable.
 
 NOTE on data equivalence:
-  The Excel pipeline uses config.genericos (specific list). The view exposes
+  The Excel pipeline uses config.genericos (specific list). The MV exposes
   ALL genericos. This test runs the Excel service with genericos=None (all)
   to achieve apples-to-apples comparison. If the service only has some genericos
   configured, totals for matching groups should still align.
@@ -89,6 +89,19 @@ def db_engine():
 
 
 @pytest.fixture(scope="module")
+def refreshed_mv(db_engine):
+    """
+    Ensure mv_resumen_mensual is populated before oracle tests query it.
+    REFRESH CONCURRENTLY is safe to call repeatedly; no lock on reads.
+    """
+    from sqlalchemy import text
+    with db_engine.connect() as conn:
+        conn.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY gold.mv_resumen_mensual"))
+        conn.commit()
+    return True
+
+
+@pytest.fixture(scope="module")
 def excel_totals(db_engine):
     """
     Run ResumenMensualService.generar_datos() for the closed period
@@ -145,9 +158,9 @@ def excel_totals(db_engine):
 
 
 @pytest.fixture(scope="module")
-def view_totals(db_engine):
+def view_totals(db_engine, refreshed_mv):
     """
-    Query gold.v_resumen_mensual for the closed period and return group sums.
+    Query gold.mv_resumen_mensual for the closed period and return group sums.
 
     Returns a dict: {"cc": float, "interior": float, "total": float}
     """
@@ -159,7 +172,7 @@ def view_totals(db_engine):
                 SUM(CASE WHEN grupo = 'CASA CENTRAL' THEN total_ventas ELSE 0 END) AS cc,
                 SUM(CASE WHEN grupo = 'INTERIOR'     THEN total_ventas ELSE 0 END) AS interior,
                 SUM(total_ventas)                                                   AS total
-            FROM gold.v_resumen_mensual
+            FROM gold.mv_resumen_mensual
             WHERE periodo = :p
         """), {"p": CLOSED_PERIOD_YM})
         row = result.fetchone()

@@ -1,7 +1,7 @@
 """
-Tests for gold.v_resumen_mensual — T-1.4
+Tests for gold.mv_resumen_mensual (materialized view) — T-1.4
 
-SQL assertions on the view structure and business logic:
+SQL assertions on the MV structure and business logic:
 - T-VM-01: All 13 RF-01 columns present with correct names
 - T-VM-02: VALLE SALTA routing (CASA CENTRAL + id_ruta in VALLE SALTA set → sucursal='VALLE SALTA', grupo='CASA CENTRAL')
 - T-VM-03: DIRECTA SUCURSALES routing (id_ruta=100, non-CC → sucursal='DIRECTA SUCURSALES', grupo='DIRECTA')
@@ -33,6 +33,9 @@ except ImportError:
     HAS_SQLGLOT = False
 
 SQL_VIEW_FILE = Path(__file__).parent.parent / "scripts" / "sql" / "v_resumen_mensual.sql"
+
+# Relation name used by all integration tests (materialized view)
+MV_RELATION = "gold.mv_resumen_mensual"
 
 # ---------------------------------------------------------------------------
 # DB availability helper
@@ -76,6 +79,20 @@ def db_engine():
     return engine
 
 
+@pytest.fixture(scope="module", autouse=False)
+def refreshed_mv(db_engine):
+    """
+    Ensure the materialized view is populated before integration tests run.
+    Calls REFRESH MATERIALIZED VIEW CONCURRENTLY so the view data is current.
+    This is safe to call repeatedly — it is a no-op if the view is already fresh.
+    """
+    from sqlalchemy import text
+    with db_engine.connect() as conn:
+        conn.execute(text(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {MV_RELATION}"))
+        conn.commit()
+    return True
+
+
 @contextmanager
 def _conn(engine):
     with engine.connect() as conn:
@@ -101,17 +118,35 @@ def test_view_sql_file_non_empty():
     assert len(content.strip()) > 0, "SQL view file should not be empty"
 
 
-def test_view_sql_contains_create_or_replace():
-    """View must be defined with CREATE OR REPLACE (idempotent)."""
+def test_view_sql_contains_create_materialized_view():
+    """SQL file must define a MATERIALIZED VIEW (not a plain VIEW)."""
     content = SQL_VIEW_FILE.read_text(encoding="utf-8")
-    pattern = re.compile(r"CREATE\s+OR\s+REPLACE\s+VIEW", re.IGNORECASE)
-    assert pattern.search(content), "Expected 'CREATE OR REPLACE VIEW' in view SQL"
+    pattern = re.compile(r"CREATE\s+MATERIALIZED\s+VIEW", re.IGNORECASE)
+    assert pattern.search(content), "Expected 'CREATE MATERIALIZED VIEW' in SQL file (not plain VIEW)"
+
+
+def test_view_sql_is_idempotent_via_drop_if_exists():
+    """Idempotent pattern: DROP MATERIALIZED VIEW IF EXISTS ... CASCADE."""
+    content = SQL_VIEW_FILE.read_text(encoding="utf-8")
+    pattern = re.compile(r"DROP\s+MATERIALIZED\s+VIEW\s+IF\s+EXISTS", re.IGNORECASE)
+    assert pattern.search(content), (
+        "Expected 'DROP MATERIALIZED VIEW IF EXISTS' for idempotent re-runs"
+    )
 
 
 def test_view_sql_targets_gold_schema():
     content = SQL_VIEW_FILE.read_text(encoding="utf-8")
-    assert "gold.v_resumen_mensual" in content.lower() or "gold.v_resumen_mensual" in content, (
-        "Expected 'gold.v_resumen_mensual' as the view target"
+    assert "gold.mv_resumen_mensual" in content, (
+        "Expected 'gold.mv_resumen_mensual' as the materialized view target"
+    )
+
+
+def test_view_sql_has_unique_index():
+    """Unique index on natural key required for REFRESH CONCURRENTLY."""
+    content = SQL_VIEW_FILE.read_text(encoding="utf-8")
+    pattern = re.compile(r"CREATE\s+UNIQUE\s+INDEX", re.IGNORECASE)
+    assert pattern.search(content), (
+        "Expected 'CREATE UNIQUE INDEX' — required for REFRESH MATERIALIZED VIEW CONCURRENTLY"
     )
 
 
@@ -182,12 +217,12 @@ EXPECTED_COLUMNS = {
 
 
 @pytest.mark.integration
-def test_view_column_contract(db_engine):
-    """T-VM-01: View exposes exactly the 13 RF-01 columns."""
+def test_view_column_contract(db_engine, refreshed_mv):
+    """T-VM-01: MV exposes exactly the 13 RF-01 columns."""
     from sqlalchemy import text
     with _conn(db_engine) as conn:
         result = conn.execute(
-            text(f"SELECT * FROM gold.v_resumen_mensual WHERE periodo = :p LIMIT 1"),
+            text(f"SELECT * FROM gold.mv_resumen_mensual WHERE periodo = :p LIMIT 1"),
             {"p": CLOSED_PERIOD_YM},
         )
         actual_columns = set(result.keys())
@@ -201,13 +236,13 @@ def test_view_column_contract(db_engine):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_valle_salta_routing(db_engine):
+def test_valle_salta_routing(db_engine, refreshed_mv):
     """T-VM-02: Rows with CASA CENTRAL + VALLE SALTA routes appear as sucursal='VALLE SALTA', grupo='CASA CENTRAL'."""
     from sqlalchemy import text
     with _conn(db_engine) as conn:
         result = conn.execute(text("""
             SELECT sucursal, grupo
-            FROM gold.v_resumen_mensual
+            FROM gold.mv_resumen_mensual
             WHERE periodo = :p
               AND sucursal = 'VALLE SALTA'
             LIMIT 1
@@ -226,13 +261,13 @@ def test_valle_salta_routing(db_engine):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_directa_sucursales_routing(db_engine):
+def test_directa_sucursales_routing(db_engine, refreshed_mv):
     """T-VM-03: Rows with id_ruta=100 (non-CC) appear as sucursal='DIRECTA SUCURSALES', grupo='DIRECTA'."""
     from sqlalchemy import text
     with _conn(db_engine) as conn:
         result = conn.execute(text("""
             SELECT sucursal, grupo
-            FROM gold.v_resumen_mensual
+            FROM gold.mv_resumen_mensual
             WHERE periodo = :p
               AND sucursal = 'DIRECTA SUCURSALES'
             LIMIT 1
@@ -251,7 +286,7 @@ def test_directa_sucursales_routing(db_engine):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_regular_sucursal_grupo_interior(db_engine):
+def test_regular_sucursal_grupo_interior(db_engine, refreshed_mv):
     """T-VM-04: A sucursal outside CC-family and non-DIRECTA gets grupo='INTERIOR'."""
     from sqlalchemy import text
     cc_family = ("CASA CENTRAL", "VALLE SALTA", "SUB DISTRIBUIDORES", "DIRECTA SUCURSALES")
@@ -259,7 +294,7 @@ def test_regular_sucursal_grupo_interior(db_engine):
     with _conn(db_engine) as conn:
         result = conn.execute(text(f"""
             SELECT DISTINCT grupo
-            FROM gold.v_resumen_mensual
+            FROM gold.mv_resumen_mensual
             WHERE periodo = :p
               AND sucursal NOT IN ({placeholders})
             LIMIT 5
@@ -280,7 +315,7 @@ def test_regular_sucursal_grupo_interior(db_engine):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_closed_month_tendencia_equals_total_ventas(db_engine):
+def test_closed_month_tendencia_equals_total_ventas(db_engine, refreshed_mv):
     """T-VM-07: For a closed past month, tendencia must equal total_ventas."""
     from sqlalchemy import text
     with _conn(db_engine) as conn:
@@ -288,7 +323,7 @@ def test_closed_month_tendencia_equals_total_ventas(db_engine):
             SELECT
                 SUM(CASE WHEN ABS(tendencia - total_ventas) > 0.01 THEN 1 ELSE 0 END) AS mismatches,
                 COUNT(*) AS total_rows
-            FROM gold.v_resumen_mensual
+            FROM gold.mv_resumen_mensual
             WHERE periodo = :p
               AND total_ventas > 0
         """), {"p": CLOSED_PERIOD_YM})
@@ -309,14 +344,14 @@ def test_closed_month_tendencia_equals_total_ventas(db_engine):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_objetivo_null_when_no_cupos(db_engine):
+def test_objetivo_null_when_no_cupos(db_engine, refreshed_mv):
     """T-VM-10: sucursales not in fact_cupos must have objetivo=NULL and tend_vs_obj=NULL."""
     from sqlalchemy import text
     with _conn(db_engine) as conn:
         # Find a sucursal+generico combo with no cupos
         result = conn.execute(text("""
             SELECT COUNT(*) AS rows_without_objetivo_but_with_null_tend
-            FROM gold.v_resumen_mensual
+            FROM gold.mv_resumen_mensual
             WHERE periodo = :p
               AND objetivo IS NULL
               AND tend_vs_obj IS NOT NULL
@@ -336,13 +371,13 @@ def test_objetivo_null_when_no_cupos(db_engine):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_tend_vs_obj_null_when_objetivo_zero(db_engine):
+def test_tend_vs_obj_null_when_objetivo_zero(db_engine, refreshed_mv):
     """T-VM-11: When objetivo=0, tend_vs_obj must be NULL (NULLIF guard)."""
     from sqlalchemy import text
     with _conn(db_engine) as conn:
         result = conn.execute(text("""
             SELECT COUNT(*) AS violations
-            FROM gold.v_resumen_mensual
+            FROM gold.mv_resumen_mensual
             WHERE periodo = :p
               AND objetivo = 0
               AND tend_vs_obj IS NOT NULL
@@ -360,7 +395,7 @@ def test_tend_vs_obj_null_when_objetivo_zero(db_engine):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_tend_vs_obj_equals_tendencia_over_objetivo(db_engine):
+def test_tend_vs_obj_equals_tendencia_over_objetivo(db_engine, refreshed_mv):
     """T-VM-12: When objetivo > 0, tend_vs_obj must equal tendencia/objetivo within tolerance."""
     from sqlalchemy import text
     with _conn(db_engine) as conn:
@@ -371,7 +406,7 @@ def test_tend_vs_obj_equals_tendencia_over_objetivo(db_engine):
                     ELSE 0
                 END) AS mismatches,
                 COUNT(*) AS total
-            FROM gold.v_resumen_mensual
+            FROM gold.mv_resumen_mensual
             WHERE periodo = :p
               AND objetivo IS NOT NULL
               AND objetivo > 0
@@ -393,13 +428,13 @@ def test_tend_vs_obj_equals_tendencia_over_objetivo(db_engine):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_historical_period_returns_rows(db_engine):
+def test_historical_period_returns_rows(db_engine, refreshed_mv):
     """T-VM-13: WHERE periodo = '2026-05' returns rows (historical period support)."""
     from sqlalchemy import text
     with _conn(db_engine) as conn:
         result = conn.execute(text("""
             SELECT COUNT(*) AS cnt
-            FROM gold.v_resumen_mensual
+            FROM gold.mv_resumen_mensual
             WHERE periodo = :p
         """), {"p": CLOSED_PERIOD_YM})
         row = result.fetchone()
@@ -414,7 +449,7 @@ def test_historical_period_returns_rows(db_engine):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_prvta_excluded_for_fratelli_b(db_engine):
+def test_prvta_excluded_for_fratelli_b(db_engine, refreshed_mv):
     """T-VM-05: PRVTA documents must not be included in FRATELLI B total_ventas."""
     from sqlalchemy import text
     with _conn(db_engine) as conn:
@@ -440,7 +475,7 @@ def test_prvta_excluded_for_fratelli_b(db_engine):
         result = conn.execute(text("""
             SELECT
                 (SELECT COALESCE(SUM(total_ventas), 0)
-                 FROM gold.v_resumen_mensual
+                 FROM gold.mv_resumen_mensual
                  WHERE periodo = :p AND generico = 'FRATELLI B'
                 ) AS view_total,
                 (SELECT COALESCE(SUM(fv2.cantidades_total), 0)
@@ -473,7 +508,7 @@ def test_prvta_excluded_for_fratelli_b(db_engine):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_prvta_included_for_non_fratelli_b(db_engine):
+def test_prvta_included_for_non_fratelli_b(db_engine, refreshed_mv):
     """T-VM-06: PRVTA documents ARE included in total_ventas for non-FRATELLI B genericos."""
     from sqlalchemy import text
     with _conn(db_engine) as conn:
@@ -503,7 +538,7 @@ def test_prvta_included_for_non_fratelli_b(db_engine):
                       AND fv2.id_documento <> 'PRVTA'
                       AND fv2.fecha_comprobante BETWEEN :desde AND :hasta
                 ) AS raw_no_prvta
-            FROM gold.v_resumen_mensual v
+            FROM gold.mv_resumen_mensual v
             WHERE v.periodo = :p
               AND v.generico = 'CERVEZAS'
         """), {"p": CLOSED_PERIOD_YM, "desde": CLOSED_PERIOD, "hasta": "2026-05-31"})

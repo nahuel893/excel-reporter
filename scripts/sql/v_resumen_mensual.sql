@@ -1,9 +1,18 @@
 -- =============================================================================
 -- v_resumen_mensual.sql
--- CREATE OR REPLACE VIEW gold.v_resumen_mensual
+-- CREATE MATERIALIZED VIEW gold.mv_resumen_mensual
 --
 -- Encodes ALL business rules of the Python/Excel resumen mensual pipeline.
 -- One row per (periodo, sucursal, generico, marca). No subtotal rows.
+--
+-- REFRESH MODEL:
+--   The MV is refreshed once per daily run (scripts/run_daily.py calls
+--   refresh_mv_resumen_mensual() at startup). The daily medallion ETL loads
+--   fact_ventas before 07:00; reports run at 07:00 with fresh data; so the MV
+--   is always current by the time Superset users query it.
+--
+--   Manual refresh:
+--     psql -h <host> -U <superuser> -d <dbname> -f scripts/sql/refresh_resumen_mensual.sql
 --
 -- USAGE (idempotent — safe to re-run):
 --   psql -h <host> -U <superuser> -d <dbname> -f scripts/sql/v_resumen_mensual.sql
@@ -29,7 +38,14 @@
 --   tend_vs_obj  NUMERIC | NULL  tendencia/objetivo; NULL when objetivo NULL or 0
 -- =============================================================================
 
-CREATE OR REPLACE VIEW gold.v_resumen_mensual AS
+-- Step 1: Drop the plain view if it exists (migration: view → materialized view)
+DROP VIEW IF EXISTS gold.v_resumen_mensual CASCADE;
+
+-- Step 2: Drop the materialized view if it already exists (idempotent re-run)
+DROP MATERIALIZED VIEW IF EXISTS gold.mv_resumen_mensual CASCADE;
+
+-- Step 3: Create the materialized view
+CREATE MATERIALIZED VIEW gold.mv_resumen_mensual AS
 
 WITH
 
@@ -348,3 +364,15 @@ LEFT JOIN cupos c
     ON  c.periodo  = a.periodo
     AND c.sucursal = a.sucursal
     AND c.generico = a.generico;
+
+
+-- =============================================================================
+-- Step 4: Unique index on natural key (required for REFRESH ... CONCURRENTLY)
+--
+-- Natural key: (periodo, sucursal, generico, marca).
+-- marca can be NULL (14 nulls verified in 2026-05) — use NULLS NOT DISTINCT
+-- (PostgreSQL 15+) so NULLs compare equal for uniqueness purposes.
+-- =============================================================================
+CREATE UNIQUE INDEX uix_mv_resumen_mensual_pk
+    ON gold.mv_resumen_mensual (periodo, sucursal, generico, marca)
+    NULLS NOT DISTINCT;

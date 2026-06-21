@@ -55,11 +55,21 @@ GRANT USAGE ON SCHEMA gold TO superset_user;
 
 -- ---------------------------------------------------------------------------
 -- Step 4 — Grant SELECT on all current tables and views in schema gold
--- This covers every table/view that exists at the time this script is executed,
--- including gold.v_resumen_mensual.
+-- This covers every table/view that exists at the time this script is executed.
 -- It is idempotent: re-running grants to tables already granted is a no-op.
 -- ---------------------------------------------------------------------------
 GRANT SELECT ON ALL TABLES IN SCHEMA gold TO superset_user;
+
+
+-- ---------------------------------------------------------------------------
+-- Step 4b — Explicit GRANT SELECT on gold.mv_resumen_mensual (materialized view)
+--
+-- GRANT ON ALL TABLES covers regular tables and views. Materialized views are
+-- NOT included in all PostgreSQL versions. An explicit grant ensures the MV
+-- is accessible to superset_user regardless of PG version or execution order.
+-- This is idempotent — safe to re-run.
+-- ---------------------------------------------------------------------------
+GRANT SELECT ON gold.mv_resumen_mensual TO superset_user;
 
 
 -- ---------------------------------------------------------------------------
@@ -85,7 +95,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA gold
 -- FROM information_schema.role_table_grants
 -- WHERE grantee = 'superset_user' AND table_schema = 'gold'
 -- LIMIT 5;
---   Expected: rows with SELECT for each gold.* table
+--   Expected: rows with SELECT for each gold.* table/view/materialized view
 --
 -- Attempt write (must fail with permission error):
 -- SET ROLE superset_user;
