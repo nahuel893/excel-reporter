@@ -155,7 +155,8 @@ base AS (
         da.generico,
         da.marca,
         fv.fecha_comprobante::date                       AS fecha,
-        fv.cantidades_total                              AS q
+        fv.cantidades_total                              AS q,        -- bultos
+        fv.cantidad_total_htls                           AS q_htls    -- hectolitros (precomputed)
     FROM gold.fact_ventas fv
     JOIN  gold.dim_articulo  da ON fv.id_articulo = da.id_articulo
     JOIN  gold.dim_sucursal  ds ON fv.id_sucursal = ds.id_sucursal
@@ -178,7 +179,8 @@ daily_totals AS (
         b.generico,
         b.marca,
         b.fecha,
-        SUM(b.q) AS daily_q
+        SUM(b.q) AS daily_q,
+        SUM(b.q_htls) AS daily_q_htls
     FROM base b
     WHERE b.fecha <= LEAST(
             CURRENT_DATE,
@@ -203,6 +205,7 @@ ranked_days AS (
         marca,
         fecha,
         daily_q,
+        daily_q_htls,
         ROW_NUMBER() OVER (
             PARTITION BY periodo, sucursal, generico, marca
             ORDER BY fecha DESC
@@ -222,7 +225,8 @@ base_agg AS (
         sucursal,
         generico,
         marca,
-        SUM(q) AS total_ventas
+        SUM(q) AS total_ventas,
+        SUM(q_htls) AS total_ventas_htls
     FROM base
     GROUP BY periodo, sucursal, generico, marca
 ),
@@ -234,8 +238,11 @@ agg AS (
         ba.generico,
         ba.marca,
         ba.total_ventas,
-        COALESCE(rd1.daily_q, 0)  AS vtas_n1,
-        COALESCE(rd2.daily_q, 0)  AS vtas_n2
+        ba.total_ventas_htls,
+        COALESCE(rd1.daily_q, 0)       AS vtas_n1,
+        COALESCE(rd1.daily_q_htls, 0)  AS vtas_n1_htls,
+        COALESCE(rd2.daily_q, 0)       AS vtas_n2,
+        COALESCE(rd2.daily_q_htls, 0)  AS vtas_n2_htls
     FROM base_agg ba
     LEFT JOIN ranked_days rd1
         ON  rd1.periodo  = ba.periodo
@@ -293,86 +300,151 @@ cupos AS (
     FROM gold.fact_cupos fc
     WHERE fc.generico IS NOT NULL
     GROUP BY 1, 2, 3
+),
+
+-- ---------------------------------------------------------------------------
+-- final_rows: unpivot to long format by `medida` (BULTOS | HTLS).
+-- Each (periodo,sucursal,generico,marca) row is emitted TWICE — once per medida —
+-- so a Superset "Medida" native filter (default BULTOS) acts as a measure toggle.
+-- The objetivo is only loaded in BULTOS (gold.fact_cupos); the HTLS objetivo is
+-- derived from the real sold mix:
+--   objetivo_htl = objetivo_bultos * (htls_vendidos / bultos_vendidos)
+-- at the sucursal-generico grain (mirrors ventas/processor._convertir_cupo_a_unidad).
+-- ---------------------------------------------------------------------------
+final_rows AS (
+    SELECT
+        a.periodo                                                        AS periodo_date,
+        a.sucursal,
+        -- grupo derivation (RF-02): applied AFTER zona-virtual rename
+        CASE
+            WHEN a.sucursal IN ('CASA CENTRAL', 'VALLE SALTA', 'SUB DISTRIBUIDORES')
+                THEN 'CASA CENTRAL'
+            WHEN a.sucursal = 'DIRECTA SUCURSALES'
+                THEN 'DIRECTA'
+            ELSE 'INTERIOR'
+        END                                                              AS grupo,
+        a.generico,
+        a.marca,
+        m.medida,
+
+        -- measure-specific day slices (0 when no sales on that day)
+        CASE m.medida WHEN 'BULTOS' THEN a.vtas_n1 ELSE a.vtas_n1_htls END AS vtas_n1,
+        CASE m.medida WHEN 'BULTOS' THEN a.vtas_n2 ELSE a.vtas_n2_htls END AS vtas_n2,
+
+        -- measure-specific period total
+        CASE m.medida WHEN 'BULTOS' THEN a.total_ventas ELSE a.total_ventas_htls END AS total_ventas,
+
+        -- tendencia: chosen-measure total * working-day factor
+        -- (factor = 1 for closed months → tendencia = total_ventas)
+        (CASE m.medida WHEN 'BULTOS' THEN a.total_ventas ELSE a.total_ventas_htls END)
+            * d.habiles_mes::numeric / NULLIF(d.habiles_transcurridos, 0)            AS tendencia,
+
+        CASE m.medida WHEN 'BULTOS' THEN mmaa.total_ventas ELSE mmaa.total_ventas_htls END AS mmaa,
+        CASE m.medida WHEN 'BULTOS' THEN ma.total_ventas   ELSE ma.total_ventas_htls   END AS ma,
+
+        -- Objetivo for this measure (repeated per marca here; allocated to one row below).
+        -- BULTOS: the loaded cupo. HTLS: cupo * (sucgen htls/bultos sold mix ratio).
+        CASE m.medida
+            WHEN 'BULTOS' THEN c.objetivo
+            ELSE c.objetivo
+                 * ( SUM(a.total_ventas_htls) OVER (PARTITION BY a.periodo, a.sucursal, a.generico)
+                     / NULLIF(SUM(a.total_ventas) OVER (PARTITION BY a.periodo, a.sucursal, a.generico), 0) )
+        END                                                              AS objetivo_full
+    FROM agg a
+    JOIN dias d
+        ON d.periodo = a.periodo
+
+    -- MMAA: same (sucursal, generico, marca) one year back
+    LEFT JOIN agg mmaa
+        ON  mmaa.periodo  = (a.periodo - interval '1 year')::date
+        AND mmaa.sucursal = a.sucursal
+        AND mmaa.generico = a.generico
+        AND mmaa.marca    = a.marca
+
+    -- MA: same (sucursal, generico, marca) one month back
+    LEFT JOIN agg ma
+        ON  ma.periodo  = (a.periodo - interval '1 month')::date
+        AND ma.sucursal = a.sucursal
+        AND ma.generico = a.generico
+        AND ma.marca    = a.marca
+
+    -- Objetivo: left join so NULL is preserved when absent
+    LEFT JOIN cupos c
+        ON  c.periodo  = a.periodo
+        AND c.sucursal = a.sucursal
+        AND c.generico = a.generico
+
+    -- Measure unpivot: each row becomes BULTOS + HTLS
+    CROSS JOIN (VALUES ('BULTOS'), ('HTLS')) m(medida)
 )
 
 -- ---------------------------------------------------------------------------
--- Final SELECT: join all CTEs and compute derived columns.
+-- Final SELECT: allocate objetivo / tend_vs_obj to a single marca row per
+-- (periodo, sucursal, generico, medida) to avoid the marca fan-out (objetivo
+-- is a sucursal-generico grain measure; repeating it per marca would inflate
+-- SUM(objetivo) by the number of marcas).
 -- ---------------------------------------------------------------------------
 SELECT
-    -- periodo as text 'YYYY-MM' for Superset filter compatibility
-    to_char(a.periodo, 'YYYY-MM')                                       AS periodo,
-    a.sucursal,
-    -- grupo derivation (RF-02): applied AFTER zona-virtual rename
-    CASE
-        WHEN a.sucursal IN ('CASA CENTRAL', 'VALLE SALTA', 'SUB DISTRIBUIDORES')
-            THEN 'CASA CENTRAL'
-        WHEN a.sucursal = 'DIRECTA SUCURSALES'
-            THEN 'DIRECTA'
-        ELSE 'INTERIOR'
-    END                                                                  AS grupo,
-    a.generico,
-    a.marca,
-
-    -- N-1 and N-2 day slices (0 when no sales on that day)
-    a.vtas_n1,
-    a.vtas_n2,
-
-    -- Total sales for the period
-    a.total_ventas,
-
-    -- Tendencia: projection for current month, = total_ventas for closed months.
-    -- LEAST(CURRENT_DATE, end_of_month) ensures habiles_transcurridos = habiles_mes for closed months
-    -- → factor = 1 → tendencia = total_ventas automatically.
-    a.total_ventas * d.habiles_mes::numeric
-        / NULLIF(d.habiles_transcurridos, 0)                            AS tendencia,
-
-    -- MMAA: same month prior year (full calendar month)
-    mmaa.total_ventas                                                    AS mmaa,
-
-    -- MA: prior calendar month (full)
-    ma.total_ventas                                                      AS ma,
-
-    -- Objetivo: from fact_cupos only; NULL when no matching row (RF-05)
-    c.objetivo,
-
-    -- Tend vs Obj: NULL when objetivo is NULL or 0 (NULLIF guard) (RF-05)
-    (
-        a.total_ventas * d.habiles_mes::numeric
-            / NULLIF(d.habiles_transcurridos, 0)
-    ) / NULLIF(c.objetivo, 0)                                           AS tend_vs_obj
-
-FROM agg a
-JOIN dias d
-    ON d.periodo = a.periodo
-
--- MMAA: same (sucursal, generico, marca) one year back
-LEFT JOIN agg mmaa
-    ON  mmaa.periodo  = (a.periodo - interval '1 year')::date
-    AND mmaa.sucursal = a.sucursal
-    AND mmaa.generico = a.generico
-    AND mmaa.marca    = a.marca
-
--- MA: same (sucursal, generico, marca) one month back
-LEFT JOIN agg ma
-    ON  ma.periodo  = (a.periodo - interval '1 month')::date
-    AND ma.sucursal = a.sucursal
-    AND ma.generico = a.generico
-    AND ma.marca    = a.marca
-
--- Objetivo: left join so NULL is preserved when absent
-LEFT JOIN cupos c
-    ON  c.periodo  = a.periodo
-    AND c.sucursal = a.sucursal
-    AND c.generico = a.generico;
+    to_char(periodo_date, 'YYYY-MM')                                     AS periodo,
+    sucursal,
+    grupo,
+    generico,
+    marca,
+    medida,
+    vtas_n1,
+    vtas_n2,
+    total_ventas,
+    tendencia,
+    mmaa,
+    ma,
+    CASE WHEN ROW_NUMBER() OVER (
+        PARTITION BY periodo_date, sucursal, generico, medida ORDER BY marca NULLS LAST
+    ) = 1 THEN objetivo_full END                                        AS objetivo,
+    CASE WHEN ROW_NUMBER() OVER (
+        PARTITION BY periodo_date, sucursal, generico, medida ORDER BY marca NULLS LAST
+    ) = 1 THEN
+        SUM(tendencia) OVER (PARTITION BY periodo_date, sucursal, generico, medida)
+        / NULLIF(objetivo_full, 0)
+    END                                                                 AS tend_vs_obj
+FROM final_rows;
 
 
 -- =============================================================================
 -- Step 4: Unique index on natural key (required for REFRESH ... CONCURRENTLY)
 --
--- Natural key: (periodo, sucursal, generico, marca).
+-- Natural key: (periodo, sucursal, generico, marca, medida).
 -- marca can be NULL (14 nulls verified in 2026-05) — use NULLS NOT DISTINCT
 -- (PostgreSQL 15+) so NULLs compare equal for uniqueness purposes.
+-- medida ∈ {BULTOS, HTLS} doubles the row count (long format for the measure toggle).
 -- =============================================================================
 CREATE UNIQUE INDEX uix_mv_resumen_mensual_pk
-    ON gold.mv_resumen_mensual (periodo, sucursal, generico, marca)
+    ON gold.mv_resumen_mensual (periodo, sucursal, generico, marca, medida)
     NULLS NOT DISTINCT;
+
+
+-- =============================================================================
+-- Step 5: Re-grant read access to Superset roles.
+--
+-- WHY: DROP MATERIALIZED VIEW ... CASCADE resets all privileges on the object.
+-- A daily REFRESH does NOT reset grants, but re-running this DDL script does.
+-- These DO blocks are idempotent: if a role does not exist the EXCEPTION handler
+-- swallows the error so the script never fails in environments where that role
+-- has not been provisioned yet.
+--
+-- Roles:
+--   superset_ro   — live Superset connection ("Medallion (Gold)" database)
+--   superset_user — alternative read-only role from scripts/sql/superset_user.sql
+-- =============================================================================
+DO $$
+BEGIN
+    GRANT USAGE  ON SCHEMA gold                  TO superset_ro;
+    GRANT SELECT ON gold.mv_resumen_mensual      TO superset_ro;
+EXCEPTION WHEN undefined_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+    GRANT USAGE  ON SCHEMA gold                  TO superset_user;
+    GRANT SELECT ON gold.mv_resumen_mensual      TO superset_user;
+EXCEPTION WHEN undefined_object THEN NULL;
+END $$;

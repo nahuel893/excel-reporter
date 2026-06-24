@@ -174,6 +174,7 @@ def view_totals(db_engine, refreshed_mv):
                 SUM(total_ventas)                                                   AS total
             FROM gold.mv_resumen_mensual
             WHERE periodo = :p
+              AND medida = 'BULTOS'
         """), {"p": CLOSED_PERIOD_YM})
         row = result.fetchone()
 
@@ -252,4 +253,97 @@ def test_oracle_grand_total_matches(excel_totals, view_totals):
     assert abs(excel_total - view_total) <= 1.0, (
         f"Grand total mismatch: Excel={excel_total:.2f}, View={view_total:.2f}, "
         f"diff={abs(excel_total - view_total):.2f} (tolerance ±1)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-VM-ORACLE-04: MV objetivo grand total matches fact_cupos for 2026-05
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_oracle_objetivo_matches_fact_cupos(db_engine, refreshed_mv):
+    """
+    T-VM-ORACLE-04: For the closed period 2026-05, for every (sucursal, generico) pair
+    that appears in the MV with a non-NULL objetivo, the MV's SUM(objetivo) per sucgen
+    must equal the cupos CTE value (SUM(cupo) from fact_cupos with the same zona-virtual
+    renaming applied), within ±0.01 per group.
+
+    This catches the fan-out bug at the oracle level: if objetivo were repeated on every
+    marca row, MV's SUM(objetivo) per sucgen would be inflated by #marcas vs. the true
+    single cupo value.
+
+    Why per-sucgen JOIN (not grand totals): the MV only exposes cupos for sucgen pairs
+    that have actual sales rows (LEFT JOIN cupos onto agg). fact_cupos may contain cupos
+    for sucgen combinations with no sales, which would never appear in the MV. The
+    intersection-JOIN correctly compares only the pairs that exist in both — apples-to-apples.
+    """
+    from sqlalchemy import text
+
+    with _conn(db_engine) as conn:
+        result = conn.execute(text(r"""
+            WITH cupos_agg AS (
+                -- Replicate the cupos CTE from v_resumen_mensual.sql:
+                -- strip "NN - " prefix, apply zona-virtual renaming, SUM(cupo) per sucgen.
+                SELECT
+                    CASE
+                        WHEN REGEXP_REPLACE(fc.sucursal, '^\d+ - ', '') = 'CASA CENTRAL'
+                             AND fc.id_ruta IN (81,82,83,84,85,86,87,88,89,90,91,92,118,119,120,122)
+                            THEN 'VALLE SALTA'
+                        WHEN REGEXP_REPLACE(fc.sucursal, '^\d+ - ', '') = 'CASA CENTRAL'
+                             AND fc.id_ruta = 93
+                            THEN 'SUB DISTRIBUIDORES'
+                        WHEN fc.id_ruta = 100
+                             AND REGEXP_REPLACE(fc.sucursal, '^\d+ - ', '') <> 'CASA CENTRAL'
+                            THEN 'DIRECTA SUCURSALES'
+                        ELSE REGEXP_REPLACE(fc.sucursal, '^\d+ - ', '')
+                    END                              AS sucursal,
+                    fc.generico,
+                    SUM(fc.cupo)                     AS cupo_sucgen
+                FROM gold.fact_cupos fc
+                WHERE fc.generico IS NOT NULL
+                  AND fc.periodo = :p
+                GROUP BY 1, 2
+            ),
+            mv_sucgen_objetivo AS (
+                -- Per-sucgen SUM(objetivo) from the MV, BULTOS slice only.
+                -- With the long-format schema (BULTOS+HTLS per row), summing without
+                -- a medida filter would double-count objetivo. BULTOS carries the raw
+                -- fact_cupos value; HTLS derives from the sold mix ratio.
+                -- With the fan-out fix, COUNT(objetivo)=1 per (sucgen,medida) group,
+                -- so SUM == the single allocated value. If the bug returns, SUM > cupo.
+                SELECT sucursal, generico, SUM(objetivo) AS mv_objetivo
+                FROM gold.mv_resumen_mensual
+                WHERE periodo = :p
+                  AND medida = 'BULTOS'
+                GROUP BY sucursal, generico
+            )
+            -- JOIN on the intersection: only sucgen pairs present in BOTH.
+            -- Mismatches mean the allocated objetivo diverges from the cupos CTE value.
+            SELECT
+                COUNT(*) AS matched_sucgen_count,
+                SUM(CASE
+                    WHEN ABS(m.mv_objetivo - c.cupo_sucgen) > 0.01 THEN 1
+                    ELSE 0
+                END) AS mismatches
+            FROM mv_sucgen_objetivo m
+            JOIN cupos_agg c
+                ON c.sucursal = m.sucursal
+               AND c.generico = m.generico
+            WHERE m.mv_objetivo IS NOT NULL
+        """), {"p": CLOSED_PERIOD_YM})
+        row = result.fetchone()
+
+    if row is None or row[0] == 0:
+        pytest.skip(
+            f"No (sucursal,generico) pairs matched between MV and fact_cupos for "
+            f"periodo='{CLOSED_PERIOD_YM}' — cannot verify objetivo"
+        )
+
+    matched_count = row[0]
+    mismatches = row[1]
+
+    assert mismatches == 0, (
+        f"For {CLOSED_PERIOD_YM}: {mismatches}/{matched_count} (sucursal,generico) groups have "
+        f"MV SUM(objetivo) != fact_cupos cupo_sucgen. "
+        f"Fan-out detected or cupos CTE mismatch."
     )

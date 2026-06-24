@@ -40,6 +40,14 @@ Role scripts follow the `agent_user.sql` convention:
 4. `GRANT SELECT ON ALL TABLES IN SCHEMA gold TO <role>` — current tables
 5. `ALTER DEFAULT PRIVILEGES IN SCHEMA gold GRANT SELECT ON TABLES TO <role>` — future tables
 
+## Superset access
+
+The live Superset connection ("Medallion (Gold)") authenticates as the `superset_ro` Postgres role.
+`v_resumen_mensual.sql` re-grants `USAGE ON SCHEMA gold` and `SELECT ON gold.mv_resumen_mensual`
+to both `superset_ro` and `superset_user` at the end of every run, because a `DROP MATERIALIZED VIEW`
+resets all privileges on the object. A daily `REFRESH MATERIALIZED VIEW CONCURRENTLY` does **not**
+reset grants — only a full DDL recreate does.
+
 ## Yearly maintenance
 
 `v_resumen_mensual.sql` contains a hardcoded `DATE[]` array of Argentina public holidays.

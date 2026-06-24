@@ -2,7 +2,7 @@
 Tests for gold.mv_resumen_mensual (materialized view) — T-1.4
 
 SQL assertions on the MV structure and business logic:
-- T-VM-01: All 13 RF-01 columns present with correct names
+- T-VM-01: All 14 RF-01 columns present with correct names (including medida)
 - T-VM-02: VALLE SALTA routing (CASA CENTRAL + id_ruta in VALLE SALTA set → sucursal='VALLE SALTA', grupo='CASA CENTRAL')
 - T-VM-03: DIRECTA SUCURSALES routing (id_ruta=100, non-CC → sucursal='DIRECTA SUCURSALES', grupo='DIRECTA')
 - T-VM-04: Regular sucursal → grupo='INTERIOR'
@@ -12,9 +12,11 @@ SQL assertions on the MV structure and business logic:
 - T-VM-09: Zero habiles_transcurridos guard → tendencia = NULL (edge-case; NULLIF)
 - T-VM-10: objetivo NULL when no fact_cupos row
 - T-VM-11: objetivo = 0 → tend_vs_obj = NULL
-- T-VM-12: objetivo present → tend_vs_obj = tendencia/objetivo
+- T-VM-12: objetivo present → tend_vs_obj = tendencia/objetivo (partition includes medida)
 - T-VM-13: Historical period query returns rows
 - T-VM-14: Static/offline — sqlglot parses the SQL; feriados comment present; no 'cupos_manuales' text
+- T-VM-MEDIDA-01: medida='BULTOS' total_ventas matches SUM(fact_ventas.cantidades_total)
+- T-VM-MEDIDA-02: medida='HTLS' total_ventas matches SUM(fact_ventas.cantidad_total_htls)
 
 DB-required tests are marked @pytest.mark.integration and skipped if DB is unreachable.
 """
@@ -210,7 +212,7 @@ def test_view_sql_parses_with_sqlglot():
 # ---------------------------------------------------------------------------
 
 EXPECTED_COLUMNS = {
-    "periodo", "sucursal", "grupo", "generico", "marca",
+    "periodo", "sucursal", "grupo", "generico", "marca", "medida",
     "vtas_n1", "vtas_n2", "total_ventas", "tendencia",
     "mmaa", "ma", "objetivo", "tend_vs_obj",
 }
@@ -218,7 +220,7 @@ EXPECTED_COLUMNS = {
 
 @pytest.mark.integration
 def test_view_column_contract(db_engine, refreshed_mv):
-    """T-VM-01: MV exposes exactly the 13 RF-01 columns."""
+    """T-VM-01: MV exposes exactly the 14 RF-01 columns (including medida)."""
     from sqlalchemy import text
     with _conn(db_engine) as conn:
         result = conn.execute(
@@ -391,24 +393,54 @@ def test_tend_vs_obj_null_when_objetivo_zero(db_engine, refreshed_mv):
 
 
 # ---------------------------------------------------------------------------
-# T-VM-12: objetivo present → tend_vs_obj = tendencia/objetivo (DB required)
+# T-VM-12: objetivo present → tend_vs_obj = SUM(tendencia over sucgen) / objetivo
+# (DB required)
+#
+# After the fan-out fix, objetivo is emitted on ONE row per (periodo,sucursal,generico)
+# and tend_vs_obj on that same row equals:
+#   SUM(tendencia) OVER (periodo, sucursal, generico) / objetivo
+# NOT the single-row's tendencia / objetivo.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
 def test_tend_vs_obj_equals_tendencia_over_objetivo(db_engine, refreshed_mv):
-    """T-VM-12: When objetivo > 0, tend_vs_obj must equal tendencia/objetivo within tolerance."""
+    """
+    T-VM-12: On rows where tend_vs_obj IS NOT NULL (i.e. the single allocation row
+    per sucgen+medida), tend_vs_obj must equal the sucgen-medida total tendencia divided
+    by objetivo within 0.0001 tolerance.
+
+    The MV now has long format (one BULTOS row + one HTLS row per marca). The view's
+    ROW_NUMBER() and SUM() windows partition by (periodo_date, sucursal, generico, medida),
+    so each medida slice is allocated independently. The test window must also include
+    medida to recompute the correct sucgen-medida tendencia total.
+    """
     from sqlalchemy import text
     with _conn(db_engine) as conn:
         result = conn.execute(text("""
+            WITH sucgen_totals AS (
+                SELECT
+                    periodo,
+                    sucursal,
+                    generico,
+                    marca,
+                    medida,
+                    objetivo,
+                    tend_vs_obj,
+                    -- Recompute sucgen-medida total tendencia (same partition as the view)
+                    SUM(tendencia) OVER (
+                        PARTITION BY periodo, sucursal, generico, medida
+                    ) AS sucgen_medida_tendencia
+                FROM gold.mv_resumen_mensual
+                WHERE periodo = :p
+            )
             SELECT
                 SUM(CASE
-                    WHEN ABS(tend_vs_obj - tendencia / objetivo) > 0.0001 THEN 1
+                    WHEN ABS(tend_vs_obj - sucgen_medida_tendencia / objetivo) > 0.0001 THEN 1
                     ELSE 0
                 END) AS mismatches,
                 COUNT(*) AS total
-            FROM gold.mv_resumen_mensual
-            WHERE periodo = :p
-              AND objetivo IS NOT NULL
+            FROM sucgen_totals
+            WHERE objetivo IS NOT NULL
               AND objetivo > 0
               AND tend_vs_obj IS NOT NULL
         """), {"p": CLOSED_PERIOD_YM})
@@ -419,7 +451,45 @@ def test_tend_vs_obj_equals_tendencia_over_objetivo(db_engine, refreshed_mv):
 
     mismatches = row[0]
     assert mismatches == 0, (
-        f"tend_vs_obj != tendencia/objetivo for {mismatches} rows in {CLOSED_PERIOD_YM}"
+        f"tend_vs_obj != SUM(tendencia_over_sucgen_medida)/objetivo for {mismatches} rows in {CLOSED_PERIOD_YM}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Regression: objetivo fan-out guard (DB required)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_objetivo_no_fanout(db_engine, refreshed_mv):
+    """
+    Regression guard: objetivo must be allocated to AT MOST ONE marca row per
+    (periodo, sucursal, generico, medida) group. COUNT(objetivo) > 1 in any group
+    means the fan-out bug has returned (objetivo would be inflated by #marcas when SUM'd).
+
+    medida is now part of the natural key because the MV emits one BULTOS row and one
+    HTLS row per (periodo, sucursal, generico, marca). The ROW_NUMBER() window in the
+    view partitions by (periodo_date, sucursal, generico, medida), so the guard must
+    also include medida to test the correct allocation boundary.
+    """
+    from sqlalchemy import text
+    with _conn(db_engine) as conn:
+        result = conn.execute(text("""
+            SELECT COUNT(*) AS fanout_groups
+            FROM (
+                SELECT periodo, sucursal, generico, medida
+                FROM gold.mv_resumen_mensual
+                WHERE periodo = :p
+                GROUP BY periodo, sucursal, generico, medida
+                HAVING COUNT(objetivo) > 1
+            ) violations
+        """), {"p": CLOSED_PERIOD_YM})
+        row = result.fetchone()
+
+    fanout_groups = row[0] if row else 0
+    assert fanout_groups == 0, (
+        f"Fan-out detected: {fanout_groups} (periodo,sucursal,generico,medida) groups have "
+        f"objetivo allocated on more than one marca row in {CLOSED_PERIOD_YM}. "
+        f"The ROW_NUMBER()=1 guard in the view is broken."
     )
 
 
@@ -471,12 +541,13 @@ def test_prvta_excluded_for_fratelli_b(db_engine, refreshed_mv):
     # This is the simplest correct check: zona-virtual renaming makes exact sucursal-level
     # joins complex, so we compare the grand totals at generico level.
     # If PRVTA is excluded in the view, view_total < raw_with_prvta.
+    # Filter medida='BULTOS' to avoid double-counting (BULTOS+HTLS are two rows per marca).
     with _conn(db_engine) as conn:
         result = conn.execute(text("""
             SELECT
                 (SELECT COALESCE(SUM(total_ventas), 0)
                  FROM gold.mv_resumen_mensual
-                 WHERE periodo = :p AND generico = 'FRATELLI B'
+                 WHERE periodo = :p AND generico = 'FRATELLI B' AND medida = 'BULTOS'
                 ) AS view_total,
                 (SELECT COALESCE(SUM(fv2.cantidades_total), 0)
                  FROM gold.fact_ventas fv2
@@ -526,6 +597,7 @@ def test_prvta_included_for_non_fratelli_b(db_engine, refreshed_mv):
         pytest.skip("No PRVTA rows for CERVEZAS in test period — cannot verify inclusion")
 
     # PRVTA rows exist for CERVEZAS; view total should be GREATER than total excluding PRVTA.
+    # Filter medida='BULTOS' to avoid double-counting (BULTOS+HTLS are two rows per marca).
     with _conn(db_engine) as conn:
         result = conn.execute(text("""
             SELECT
@@ -541,6 +613,7 @@ def test_prvta_included_for_non_fratelli_b(db_engine, refreshed_mv):
             FROM gold.mv_resumen_mensual v
             WHERE v.periodo = :p
               AND v.generico = 'CERVEZAS'
+              AND v.medida = 'BULTOS'
         """), {"p": CLOSED_PERIOD_YM, "desde": CLOSED_PERIOD, "hasta": "2026-05-31"})
         row = result.fetchone()
 
@@ -552,4 +625,112 @@ def test_prvta_included_for_non_fratelli_b(db_engine, refreshed_mv):
     assert view_total >= raw_no_prvta, (
         f"CERVEZAS view total ({view_total}) should be >= total_excl_prvta ({raw_no_prvta}) "
         "since PRVTA is included for non-FRATELLI-B genericos"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-VM-MEDIDA-01: medida='BULTOS' total_ventas matches SUM(fact_ventas.cantidades_total)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_medida_bultos_matches_cantidades_total(db_engine, refreshed_mv):
+    """
+    T-VM-MEDIDA-01: For the closed period 2026-05 and generico='CERVEZAS',
+    the MV's SUM(total_ventas) WHERE medida='BULTOS' must equal
+    SUM(fact_ventas.cantidades_total) with the same base filters:
+      - generico IS NOT NULL (base filter from the view)
+      - PRVTA excluded for FRATELLI B only (irrelevant for CERVEZAS, but mirrors view logic)
+
+    Tolerance: ±1 unit (rounding from numeric precision).
+    """
+    from sqlalchemy import text
+
+    with _conn(db_engine) as conn:
+        result = conn.execute(text("""
+            SELECT
+                (
+                    SELECT COALESCE(SUM(total_ventas), 0)
+                    FROM gold.mv_resumen_mensual
+                    WHERE periodo = :p
+                      AND generico = 'CERVEZAS'
+                      AND medida = 'BULTOS'
+                ) AS mv_bultos,
+                (
+                    SELECT COALESCE(SUM(fv.cantidades_total), 0)
+                    FROM gold.fact_ventas fv
+                    JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+                    WHERE da.generico = 'CERVEZAS'
+                      AND da.generico IS NOT NULL
+                      AND fv.fecha_comprobante BETWEEN :desde AND :hasta
+                      -- PRVTA only excluded for FRATELLI B; CERVEZAS includes all id_documento
+                ) AS fact_bultos
+        """), {"p": CLOSED_PERIOD_YM, "desde": CLOSED_PERIOD, "hasta": "2026-05-31"})
+        row = result.fetchone()
+
+    if row is None:
+        pytest.skip("Could not retrieve CERVEZAS totals for medida='BULTOS' check")
+
+    mv_bultos = float(row[0] or 0)
+    fact_bultos = float(row[1] or 0)
+
+    if mv_bultos == 0 and fact_bultos == 0:
+        pytest.skip("Both MV and fact_ventas return 0 for CERVEZAS BULTOS — no data to compare")
+
+    assert abs(mv_bultos - fact_bultos) <= 1.0, (
+        f"medida='BULTOS' total mismatch for CERVEZAS {CLOSED_PERIOD_YM}: "
+        f"MV={mv_bultos:.2f}, fact_ventas={fact_bultos:.2f}, "
+        f"diff={abs(mv_bultos - fact_bultos):.2f} (tolerance ±1)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-VM-MEDIDA-02: medida='HTLS' total_ventas matches SUM(fact_ventas.cantidad_total_htls)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_medida_htls_matches_cantidad_total_htls(db_engine, refreshed_mv):
+    """
+    T-VM-MEDIDA-02: For the closed period 2026-05 and generico='CERVEZAS',
+    the MV's SUM(total_ventas) WHERE medida='HTLS' must equal
+    SUM(fact_ventas.cantidad_total_htls) with the same base filters.
+
+    Tolerance: ±1 unit.
+    """
+    from sqlalchemy import text
+
+    with _conn(db_engine) as conn:
+        result = conn.execute(text("""
+            SELECT
+                (
+                    SELECT COALESCE(SUM(total_ventas), 0)
+                    FROM gold.mv_resumen_mensual
+                    WHERE periodo = :p
+                      AND generico = 'CERVEZAS'
+                      AND medida = 'HTLS'
+                ) AS mv_htls,
+                (
+                    SELECT COALESCE(SUM(fv.cantidad_total_htls), 0)
+                    FROM gold.fact_ventas fv
+                    JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+                    WHERE da.generico = 'CERVEZAS'
+                      AND da.generico IS NOT NULL
+                      AND fv.fecha_comprobante BETWEEN :desde AND :hasta
+                      -- PRVTA only excluded for FRATELLI B; CERVEZAS includes all id_documento
+                ) AS fact_htls
+        """), {"p": CLOSED_PERIOD_YM, "desde": CLOSED_PERIOD, "hasta": "2026-05-31"})
+        row = result.fetchone()
+
+    if row is None:
+        pytest.skip("Could not retrieve CERVEZAS totals for medida='HTLS' check")
+
+    mv_htls = float(row[0] or 0)
+    fact_htls = float(row[1] or 0)
+
+    if mv_htls == 0 and fact_htls == 0:
+        pytest.skip("Both MV and fact_ventas return 0 for CERVEZAS HTLS — no data to compare")
+
+    assert abs(mv_htls - fact_htls) <= 1.0, (
+        f"medida='HTLS' total mismatch for CERVEZAS {CLOSED_PERIOD_YM}: "
+        f"MV={mv_htls:.2f}, fact_ventas={fact_htls:.2f}, "
+        f"diff={abs(mv_htls - fact_htls):.2f} (tolerance ±1)"
     )
