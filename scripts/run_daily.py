@@ -55,6 +55,47 @@ from config.settings import FERIADOS  # noqa: E402
 from src.config.resolver import load_contacts, load_report_config  # noqa: E402
 
 
+def _refresh_mv_resumen_mensual() -> None:
+    """Refresh gold.mv_resumen_mensual so the Superset dashboard has current data.
+
+    Called once at the start of every daily run, after the medallion ETL has
+    loaded fact_ventas (ETL finishes before 07:00; this script runs at 07:00).
+    CONCURRENTLY means the dashboard is never locked during the refresh.
+
+    Errors are logged and silenced — a stale MV is acceptable; crashing the
+    entire daily run for a dashboard refresh is not.
+    """
+    try:
+        import os
+        from sqlalchemy import create_engine, text
+        from dotenv import load_dotenv
+
+        env_path = ROOT / ".env"
+        if env_path.exists():
+            load_dotenv(str(env_path), override=False)
+
+        host = os.getenv("DB_HOST", "localhost")
+        port = os.getenv("DB_PORT", "5432")
+        db = os.getenv("DB_NAME")
+        user = os.getenv("DB_USER")
+        password = os.getenv("DB_PASSWORD")
+
+        if not all([db, user, password]):
+            print("  ⚠️  MV refresh skipped — DB credentials not set in environment")
+            return
+
+        url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}"
+        engine = create_engine(url, connect_args={"connect_timeout": 30})
+        with engine.connect() as conn:
+            conn.execute(text(
+                "REFRESH MATERIALIZED VIEW CONCURRENTLY gold.mv_resumen_mensual"
+            ))
+            conn.commit()
+        print("  ✅  gold.mv_resumen_mensual refreshed")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ⚠️  gold.mv_resumen_mensual refresh failed (non-fatal): {exc!r}")
+
+
 CONFIGS_DIR = ROOT / "configs"
 CONTACTOS_PATH = CONFIGS_DIR / "contactos.json"
 OVERRIDES_PATH = CONFIGS_DIR / "daily_overrides.json"
@@ -281,6 +322,13 @@ def main() -> int:
     print(f"Servicios a ejecutar: {[s.nombre for s in servicios]}")
     if overrides:
         print(f"Overrides activos: {list(overrides.keys())}")
+
+    if not args.dry_run:
+        # Refresh Superset MV before any report runs so the dashboard is current.
+        # The medallion ETL has already loaded fact_ventas by the time this runs
+        # (ETL finishes before 07:00; daily timer fires at 07:00).
+        print("\n--- Refreshing gold.mv_resumen_mensual ---")
+        _refresh_mv_resumen_mensual()
 
     if args.dry_run:
         print("\n=== DRY RUN (no se ejecuta nada) ===")
