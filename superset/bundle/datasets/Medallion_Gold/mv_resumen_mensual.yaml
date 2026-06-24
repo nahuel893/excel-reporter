@@ -1,0 +1,243 @@
+table_name: mv_resumen_mensual
+main_dttm_col: null
+description: null
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: medallion_db
+schema: gold
+sql: null
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+uuid: bf938b71-2cce-4dfd-87e6-e4425d8caeb9
+metrics:
+- metric_name: sum_mmaa
+  verbose_name: "MMAA (a\xF1o ant.)"
+  metric_type: null
+  expression: SUM(mmaa)
+  description: null
+  d3format: ',.0f'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: sum_ma
+  verbose_name: MA (mes ant.)
+  metric_type: null
+  expression: SUM(ma)
+  description: null
+  d3format: ',.0f'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: pct_cumplimiento
+  verbose_name: '% Cumplimiento'
+  metric_type: null
+  expression: SUM(tendencia)/NULLIF(SUM(objetivo),0)
+  description: null
+  d3format: .1%
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: sum_objetivo
+  verbose_name: Objetivo
+  metric_type: null
+  expression: SUM(objetivo)
+  description: null
+  d3format: ',.0f'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: sum_tendencia
+  verbose_name: Tendencia
+  metric_type: null
+  expression: SUM(tendencia)
+  description: null
+  d3format: ',.0f'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: sum_total_ventas
+  verbose_name: Ventas
+  metric_type: null
+  expression: SUM(total_ventas)
+  description: null
+  d3format: ',.0f'
+  currency: null
+  extra: null
+  warning_text: null
+columns:
+- column_name: marca
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: VARCHAR(150)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: generico
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: VARCHAR(150)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: vtas_n1
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: vtas_n2
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: sucursal
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: VARCHAR
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: medida
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: VARCHAR
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: tend_vs_obj
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: total_ventas
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: mmaa
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: tendencia
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: ma
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: objetivo
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: periodo
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: grupo
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+version: 1.0.0
+database_uuid: a842c321-6955-4eea-9c30-01824a8d0039

@@ -1,0 +1,375 @@
+dashboard_title: Resumen Mensual
+description: null
+css: ''
+slug: resumen-mensual
+certified_by: ''
+certification_details: ''
+published: true
+uuid: 9b08e7e6-6611-4ee2-8e87-e3baed0aea6a
+position:
+  DASHBOARD_VERSION_KEY: v2
+  ROOT_ID:
+    type: ROOT
+    id: ROOT_ID
+    children:
+    - GRID_ID
+  GRID_ID:
+    type: GRID
+    id: GRID_ID
+    children:
+    - ROW-cards
+    - ROW-table
+    - ROW-bar
+    - ROW-N-0CHNDKDY
+    parents:
+    - ROOT_ID
+  HEADER_ID:
+    type: HEADER
+    id: HEADER_ID
+    meta:
+      text: Resumen Mensual
+  ROW-cards:
+    type: ROW
+    id: ROW-cards
+    children:
+    - CH-total
+    - CH-cc
+    - CH-int
+    - CH-pct
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+  ROW-table:
+    type: ROW
+    id: ROW-table
+    children:
+    - CH-table
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+  ROW-bar:
+    type: ROW
+    id: ROW-bar
+    children:
+    - CH-bar
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+  CH-total:
+    type: CHART
+    id: CH-total
+    children: []
+    meta:
+      chartId: 1
+      width: 3
+      height: 50
+      sliceName: Tendencia TOTAL
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-cards
+  CH-cc:
+    type: CHART
+    id: CH-cc
+    children: []
+    meta:
+      chartId: 2
+      width: 3
+      height: 50
+      sliceName: Casa Central
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-cards
+  CH-int:
+    type: CHART
+    id: CH-int
+    children: []
+    meta:
+      chartId: 3
+      width: 3
+      height: 50
+      sliceName: Interior
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-cards
+  CH-pct:
+    type: CHART
+    id: CH-pct
+    children: []
+    meta:
+      chartId: 4
+      width: 3
+      height: 50
+      sliceName: '% Cumplimiento'
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-cards
+  CH-table:
+    type: CHART
+    id: CH-table
+    children: []
+    meta:
+      chartId: 5
+      width: 12
+      height: 90
+      sliceName: Detalle por sucursal
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-table
+  CH-bar:
+    type: CHART
+    id: CH-bar
+    children: []
+    meta:
+      chartId: 6
+      width: 12
+      height: 60
+      sliceName: Tendencia vs Objetivo
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-bar
+  ROW-N-0CHNDKDY:
+    children:
+    - CHART-FCO1IXAL
+    - CHART-VE8VTPF6
+    - CHART-MSRPJGRT
+    - CHART-L2NH26G1
+    - CHART-DOXMHQO3
+    - CHART-LA8FK9Q3
+    id: ROW-N-0CHNDKDY
+    meta:
+      '0': ROOT_ID
+      background: BACKGROUND_TRANSPARENT
+    type: ROW
+    parents:
+    - ROOT_ID
+    - GRID_ID
+  CHART-FCO1IXAL:
+    children: []
+    id: CHART-FCO1IXAL
+    meta:
+      chartId: 1
+      height: 50
+      sliceName: "Resumen \xB7 Tendencia TOTAL"
+      uuid: a336ca9a-6f2a-4996-9442-548a87a03672
+      width: 4
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-N-0CHNDKDY
+  CHART-VE8VTPF6:
+    children: []
+    id: CHART-VE8VTPF6
+    meta:
+      chartId: 2
+      height: 50
+      sliceName: "Resumen \xB7 Casa Central"
+      uuid: 883c7e3d-afca-4263-8796-1eaeb785dac4
+      width: 4
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-N-0CHNDKDY
+  CHART-MSRPJGRT:
+    children: []
+    id: CHART-MSRPJGRT
+    meta:
+      chartId: 5
+      height: 50
+      sliceName: "Resumen \xB7 Detalle por sucursal"
+      uuid: 9bf0ddc7-36e0-4bc7-959b-4a2e1acc8b9c
+      width: 4
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-N-0CHNDKDY
+  CHART-L2NH26G1:
+    children: []
+    id: CHART-L2NH26G1
+    meta:
+      chartId: 3
+      height: 50
+      sliceName: "Resumen \xB7 Interior"
+      uuid: b2ff5340-9f89-428f-95d1-2e4399591773
+      width: 4
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-N-0CHNDKDY
+  CHART-DOXMHQO3:
+    children: []
+    id: CHART-DOXMHQO3
+    meta:
+      chartId: 6
+      height: 50
+      sliceName: "Resumen \xB7 Tendencia vs Objetivo"
+      uuid: 2c940de0-c5c9-4b2e-bc89-9f01a672d944
+      width: 4
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-N-0CHNDKDY
+  CHART-LA8FK9Q3:
+    children: []
+    id: CHART-LA8FK9Q3
+    meta:
+      chartId: 4
+      height: 50
+      sliceName: "Resumen \xB7 % Cumplimiento"
+      uuid: 74049bf5-dab1-4aed-a5e0-d016e2c8e81c
+      width: 4
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-N-0CHNDKDY
+metadata:
+  native_filter_configuration:
+  - id: NATIVE_FILTER-generico
+    filterType: filter_select
+    name: "Gen\xE9rico"
+    type: NATIVE_FILTER
+    targets:
+    - column:
+        name: generico
+      datasetUuid: bf938b71-2cce-4dfd-87e6-e4425d8caeb9
+    defaultDataMask:
+      filterState:
+        value:
+        - CERVEZAS
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    controlValues:
+      multiSelect: false
+      enableEmptyFilter: false
+      defaultToFirstItem: false
+      searchAllOptions: false
+      inverseSelection: false
+    cascadeParentIds: []
+    chartsInScope:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    tabsInScope: []
+  - id: NATIVE_FILTER-periodo
+    filterType: filter_select
+    name: "Per\xEDodo"
+    type: NATIVE_FILTER
+    targets:
+    - column:
+        name: periodo
+      datasetUuid: bf938b71-2cce-4dfd-87e6-e4425d8caeb9
+    defaultDataMask:
+      filterState:
+        value:
+        - 2026-06
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    controlValues:
+      multiSelect: false
+      enableEmptyFilter: false
+      defaultToFirstItem: false
+      searchAllOptions: false
+      inverseSelection: false
+    cascadeParentIds: []
+    chartsInScope:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    tabsInScope: []
+  - id: NATIVE_FILTER-medida
+    filterType: filter_select
+    name: Medida
+    type: NATIVE_FILTER
+    targets:
+    - column:
+        name: medida
+      datasetUuid: bf938b71-2cce-4dfd-87e6-e4425d8caeb9
+    defaultDataMask:
+      filterState:
+        value:
+        - BULTOS
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    controlValues:
+      multiSelect: false
+      enableEmptyFilter: true
+      defaultToFirstItem: false
+      searchAllOptions: false
+      inverseSelection: false
+    cascadeParentIds: []
+    chartsInScope:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    tabsInScope: []
+  color_scheme: supersetColors
+  refresh_frequency: 0
+  expanded_slices: {}
+  label_colors: {}
+  cross_filters_enabled: true
+  chart_configuration:
+    '5':
+      id: 5
+      crossFilters:
+        scope: global
+        chartsInScope:
+        - 1
+        - 2
+        - 3
+        - 6
+        - 7
+        - 9
+        - 10
+  global_chart_configuration:
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    chartsInScope:
+    - 1
+    - 2
+    - 3
+    - 5
+    - 6
+    - 7
+    - 9
+    - 10
+  shared_label_colors:
+    Tendencia: '#1FA8C9'
+    Objetivo: '#454E7C'
+  timed_refresh_immune_slices: []
+  color_scheme_domain: []
+  default_filters: '{}'
+version: 1.0.0

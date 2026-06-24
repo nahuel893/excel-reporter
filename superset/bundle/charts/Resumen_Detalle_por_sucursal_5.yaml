@@ -1,0 +1,45 @@
+slice_name: "Resumen \xB7 Detalle por sucursal"
+description: null
+certified_by: null
+certification_details: null
+viz_type: table
+params:
+  viz_type: table
+  query_mode: aggregate
+  groupby:
+  - grupo
+  - sucursal
+  metrics:
+  - sum_total_ventas
+  - sum_tendencia
+  - sum_objetivo
+  - pct_cumplimiento
+  - sum_mmaa
+  - sum_ma
+  conditional_formatting:
+  - column: pct_cumplimiento
+    operator: <
+    targetValue: 1.0
+    colorScheme: '#FF6366'
+  - column: pct_cumplimiento
+    operator: between
+    targetValueLeft: 1.0
+    targetValueRight: 1.2
+    colorScheme: '#FFEB9C'
+  - column: pct_cumplimiento
+    operator: '>='
+    targetValue: 1.2
+    colorScheme: '#C6EFCE'
+  order_desc: false
+  row_limit: 1000
+  show_totals: true
+  datasource: 1__table
+  adhoc_filters: []
+  order_by_cols:
+  - '["grupo", true]'
+  - '["sucursal", true]'
+query_context: null
+cache_timeout: null
+uuid: 9bf0ddc7-36e0-4bc7-959b-4a2e1acc8b9c
+version: 1.0.0
+dataset_uuid: bf938b71-2cce-4dfd-87e6-e4425d8caeb9

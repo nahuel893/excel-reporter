@@ -1,0 +1,18 @@
+slice_name: "Resumen \xB7 Tendencia TOTAL"
+description: null
+certified_by: null
+certification_details: null
+viz_type: big_number_total
+params:
+  viz_type: big_number_total
+  metric: sum_tendencia
+  subheader: "Tendencia (proyecci\xF3n)"
+  header_font_size: 0.3
+  subheader_font_size: 0.125
+  datasource: 1__table
+  adhoc_filters: []
+query_context: null
+cache_timeout: null
+uuid: a336ca9a-6f2a-4996-9442-548a87a03672
+version: 1.0.0
+dataset_uuid: bf938b71-2cce-4dfd-87e6-e4425d8caeb9

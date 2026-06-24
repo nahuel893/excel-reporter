@@ -1,0 +1,23 @@
+slice_name: "Resumen \xB7 Tendencia vs Objetivo"
+description: null
+certified_by: null
+certification_details: null
+viz_type: dist_bar
+params:
+  viz_type: dist_bar
+  metrics:
+  - sum_tendencia
+  - sum_objetivo
+  groupby:
+  - sucursal
+  columns: []
+  row_limit: 1000
+  show_legend: true
+  y_axis_format: ',.0f'
+  datasource: 1__table
+  adhoc_filters: []
+query_context: null
+cache_timeout: null
+uuid: 2c940de0-c5c9-4b2e-bc89-9f01a672d944
+version: 1.0.0
+dataset_uuid: bf938b71-2cce-4dfd-87e6-e4425d8caeb9
