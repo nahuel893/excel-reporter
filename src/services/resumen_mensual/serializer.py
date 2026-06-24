@@ -2,12 +2,14 @@
 JSON serializer for the resumen-mensual report.
 
 Pure function — no DB access, no I/O. Converts _SheetStruct list into
-the JSON contract dict consumed by the /resumen-mensual/datos endpoint
-and the React frontend.
+the JSON contract dict. Retained as the structured-data path used by the
+view-vs-Excel oracle cross-check (tests/test_v_resumen_mensual_oracle.py);
+the former /resumen-mensual/datos endpoint and React frontend were removed
+when the report migrated to the Superset dashboard.
 
-Contract (ADR-2): subtotal numeric values are emitted as null; the frontend
-recomputes them via computeSubtotals(). Row numeric values are float (never
-rounded/truncated — project-wide no-rounding rule).
+Contract (ADR-2): subtotal numeric values are emitted as null and recomputed
+by the consumer. Row numeric values are float (never rounded/truncated —
+project-wide no-rounding rule).
 """
 import pandas as pd
 

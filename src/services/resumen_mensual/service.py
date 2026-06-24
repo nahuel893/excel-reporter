@@ -983,7 +983,10 @@ class ResumenMensualService(BaseService):
 
         Runs the same extraction + processing pipeline as generar_reporte but
         returns the structured JSON contract instead of writing an Excel file.
-        Consumed by the POST /resumen-mensual/datos endpoint.
+        Retained as the structured-data path used by the view-vs-Excel oracle
+        cross-check (tests/test_v_resumen_mensual_oracle.py). The former
+        POST /resumen-mensual/datos endpoint and React frontend were removed
+        when the report migrated to the Superset dashboard.
 
         Args:
             config: Configuracion del reporte.
