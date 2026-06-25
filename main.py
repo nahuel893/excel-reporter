@@ -79,6 +79,7 @@ REPORT_HANDLERS: dict[str, str] = {
     "reporte-incentivo-cobertura": "_run_incentivo_cobertura_report",
     "reporte-descuentos": "_run_descuentos_report",
     "subdistribuidores": "_run_subdistribuidores_report",
+    "stock-suria": "_run_stock_suria_report",
 }
 
 
@@ -963,6 +964,48 @@ def _run_subdistribuidores_report(report, merged: dict) -> list[tuple[Path, dict
     ]
 
 
+def cmd_stock_suria(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando de stock SURIA."""
+    if not args.config:
+        print("Error: stock-suria requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    else:
+        print("Error: stock-suria solo soporta el nuevo formato de configuracion JSON.")
+        return 1
+
+
+def _run_stock_suria_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate stock-suria report. Returns list of (path, metadata) tuples."""
+    from src.services.stock_suria import StockSuriaConfig, StockSuriaService
+
+    # stock-suria uses fecha_hasta as the target date for output dir naming
+    fecha = merged.get("fecha_hasta") or merged.get("fecha_desde")
+    if not fecha:
+        print("Error: stock-suria requires fecha_desde or fecha_hasta")
+        return []
+
+    print(f"Generando: {report.nombre}")
+    config = StockSuriaConfig(fecha=fecha, nombre_archivo=report.nombre)
+    service = StockSuriaService()
+    result = service.generar_reporte(config)
+    print(f"Stock SURIA '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Fecha stock: {result.fecha_stock}")
+    print(f"  - Articulos con stock: {result.articulos_con_stock}")
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": fecha},
+        )
+    ]
+
+
 def cmd_cartesiano(args, test_mode: bool = False) -> int:
     """Ejecuta el comando cartesiano."""
     if not args.config:
@@ -1316,6 +1359,19 @@ Ejemplos:
         help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
     )
     subdistribuidores_parser.set_defaults(func=cmd_subdistribuidores)
+
+    stock_suria_parser = subparsers.add_parser(
+        "stock-suria",
+        help="Reporte de stock SURIA (articulos del proveedor pareados contra la base SURIA)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    stock_suria_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    stock_suria_parser.set_defaults(func=cmd_stock_suria)
 
     # check-delivery: mostrar estado de envios del dia
     check_parser = subparsers.add_parser(

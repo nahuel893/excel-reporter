@@ -1,0 +1,1499 @@
+{
+  "generado": "2026-06-25",
+  "archivo_proveedor": "articulos_coca.xlsx",
+  "db": "medallion_db_suria",
+  "metodo": "candidatos 40/400/pelado + validacion por descripcion",
+  "resumen": {
+    "total_activos": 187,
+    "matched": 170,
+    "sin_match": 17,
+    "por_esquema": {
+      "40": 141,
+      "400": 25,
+      "pelado": 4
+    }
+  },
+  "articulos": [
+    {
+      "cod_prov": 101,
+      "id_articulo": 400101,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola 350 ml Ret Vid 24B",
+      "desc_suria": "COCA COLA  350 X 24 VIDRIO",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 103,
+      "id_articulo": 400103,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola 1 Ltro. Ret. Vid. 8B",
+      "desc_suria": "COCA COLA 1000 *8 VR",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 104,
+      "id_articulo": 400104,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola 1.5 Lts. Ret. Vid. 8B",
+      "desc_suria": "COCA COLA 1500 X 8 VR",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 118,
+      "id_articulo": 400118,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola 375 ml NR Pet 6B",
+      "desc_suria": "COCA COLA 375*6 PET",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 120,
+      "id_articulo": 400120,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola 600 ml NR Pet 12B",
+      "desc_suria": "COCA COLA 600*12 PET",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 125,
+      "id_articulo": 400125,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola 2 Lts. Ret Pet 8B",
+      "desc_suria": "COCA COLA 2000 X 8 RPET",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 130,
+      "id_articulo": 400130,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola 2.5 Lts. Ret Pet 8B",
+      "desc_suria": "COCA COLA 2500 X 8 RET",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 173,
+      "id_articulo": 400173,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola 354ml NR 6 Latas",
+      "desc_suria": "COCA COLA  354 X 6 LATAS",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 181,
+      "id_articulo": 400181,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola 220ml NR 6 Latas",
+      "desc_suria": "COCA COLA 220*6 LATAS",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 326,
+      "id_articulo": 400326,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola LS 1.5 Lts. NR Pet 6B",
+      "desc_suria": "COCA COLA LS 1500 * 6",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 327,
+      "id_articulo": 400327,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola LS 2.25 Lts. NR Pet 6B",
+      "desc_suria": "COCA COLA LS 2250 X 6",
+      "marca": "SIN ESPECIFICAR"
+    },
+    {
+      "cod_prov": 331,
+      "id_articulo": 400331,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola LS 3 Lts. NR Pet 6B",
+      "desc_suria": "COCA COLA LS 3000 * 6",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 603,
+      "id_articulo": 400603,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola Zero 1 Ltro. Ret. Vid. 8B",
+      "desc_suria": "COCA COLA ZERO 1000*8 VR",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 608,
+      "id_articulo": 400608,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola Zero 350 ml Ret Vid 24B",
+      "desc_suria": "COCA COLA ZERO 350*24 VR",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 614,
+      "id_articulo": 400614,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola Zero 1.5 Lts. Ret Vid 8B",
+      "desc_suria": "COCA COLA ZERO 1500 *8 VR",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 615,
+      "id_articulo": 400615,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola Zero 2 Lts. Ret Pet 8B",
+      "desc_suria": "COCA COLA ZERO 2000*8 VR",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 623,
+      "id_articulo": 400623,
+      "esquema": "400",
+      "desc_prov": "COCA-COLA ZERO 600 ML NR 6B",
+      "desc_suria": "COCA COLA ZERO 600*6 PET",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 630,
+      "id_articulo": 400630,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola Zero 2.5 Lts. Ret Pet 8B",
+      "desc_suria": "COCA COLA ZERO 2500 * 8 VR",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 631,
+      "id_articulo": 400631,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola Zero 375 ml NR Pet 6B Decorado",
+      "desc_suria": "COCA COLA ZERO 375*6 DECORADO",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 636,
+      "id_articulo": 400636,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola Zero 220ml NR 6 Latas",
+      "desc_suria": "COCA COLA ZERO 220*6 LATAS",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 652,
+      "id_articulo": 400652,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola Zero 1.5 Lts. NR Pet 6B",
+      "desc_suria": "COCA COLA ZERO 1500*6",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 655,
+      "id_articulo": 400655,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola Zero 2.25 Lts NR Pet 6B",
+      "desc_suria": "COCA COLA ZERO 2250*6",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 656,
+      "id_articulo": 400656,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola Zero 2 Lts. NR Pet 6B",
+      "desc_suria": "COCA COLA ZERO 2000*6",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 676,
+      "id_articulo": 400676,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola Zero 354ml NR 6 Latas",
+      "desc_suria": "COCA COLA ZERO 354*6 LATAS",
+      "marca": "COCA COLA"
+    },
+    {
+      "cod_prov": 688,
+      "id_articulo": 400688,
+      "esquema": "400",
+      "desc_prov": "Coca-Cola Zero Fifa Ed. 473ml NR 6 Latas",
+      "desc_suria": "COCA COLA ZERO FIFA 473*6 LATAS",
+      "marca": null
+    },
+    {
+      "cod_prov": 1101,
+      "id_articulo": 401101,
+      "esquema": "40",
+      "desc_prov": "Fanta Naranja 350 ml Ret Vid 24B",
+      "desc_suria": "FANTA NJA  350 X 24 VR",
+      "marca": "FANTA"
+    },
+    {
+      "cod_prov": 1103,
+      "id_articulo": 401103,
+      "esquema": "40",
+      "desc_prov": "Fanta Naranja 1 Ltro. Ret. Vid. 8B",
+      "desc_suria": "FANTA NARANJA 1000*8 VR",
+      "marca": "FANTA"
+    },
+    {
+      "cod_prov": 1104,
+      "id_articulo": 401104,
+      "esquema": "40",
+      "desc_prov": "Fanta Naranja 1.5 Lts. Ret. Vid. 8B",
+      "desc_suria": "FANTA NJA 1500X8 VR",
+      "marca": "FANTA"
+    },
+    {
+      "cod_prov": 1110,
+      "id_articulo": 401110,
+      "esquema": "40",
+      "desc_prov": "FANTA NARANJA 500 ML NR PET 6B",
+      "desc_suria": "FANTA NARANJA 500*6",
+      "marca": "FANTA"
+    },
+    {
+      "cod_prov": 1118,
+      "id_articulo": 401118,
+      "esquema": "40",
+      "desc_prov": "Fanta Naranja 375 ml NR Pet 6B",
+      "desc_suria": "FANTA NARANJA 375*6",
+      "marca": "FANTA"
+    },
+    {
+      "cod_prov": 1121,
+      "id_articulo": 401121,
+      "esquema": "40",
+      "desc_prov": "Fanta Naranja 3 Lts. NR Pet 6B",
+      "desc_suria": "FANTA NJA 3000 X 6",
+      "marca": "FANTA"
+    },
+    {
+      "cod_prov": 1130,
+      "id_articulo": 401130,
+      "esquema": "40",
+      "desc_prov": "Fanta Naranja 2.5 Lts. Ret Pet 8B",
+      "desc_suria": "FANTA NJA 2500 X 8 RPET",
+      "marca": "FANTA"
+    },
+    {
+      "cod_prov": 1174,
+      "id_articulo": 401174,
+      "esquema": "40",
+      "desc_prov": "Fanta Naranja 220ml NR 6 Latas",
+      "desc_suria": "FANTA NARANJA 220*6 LATAS",
+      "marca": "FANTA"
+    },
+    {
+      "cod_prov": 1190,
+      "id_articulo": 401190,
+      "esquema": "40",
+      "desc_prov": "Fanta Naranja 1.5 Lts. NR Pet 6B",
+      "desc_suria": "FANTA NJA 1500 X 6 PMP",
+      "marca": "FANTA"
+    },
+    {
+      "cod_prov": 1268,
+      "id_articulo": 401268,
+      "esquema": "40",
+      "desc_prov": "Fanta Pomelo NF 2.5 Lts. NR Pet 6B",
+      "desc_suria": "FANTA POMELO 2500*6 PET",
+      "marca": "FANTA"
+    },
+    {
+      "cod_prov": 1489,
+      "id_articulo": 401489,
+      "esquema": "40",
+      "desc_prov": "Fanta Limon Dulce 2.5 Lts. NR Pet 6B",
+      "desc_suria": "FANTA LIMON DULCE 2500*6 PET",
+      "marca": "FANTA"
+    },
+    {
+      "cod_prov": 1589,
+      "id_articulo": 401589,
+      "esquema": "40",
+      "desc_prov": "Fanta Manzana 2.5 Lts. NR Pet 6B",
+      "desc_suria": "FANTA MANZANA 2500*6 PMP",
+      "marca": "FANTA"
+    },
+    {
+      "cod_prov": 2301,
+      "id_articulo": 402301,
+      "esquema": "40",
+      "desc_prov": "Sprite F LS 350 ml Ret Vid 24B",
+      "desc_suria": "SPRITE FX LS 350*24 VR",
+      "marca": "SPRITE"
+    },
+    {
+      "cod_prov": 2304,
+      "id_articulo": 402304,
+      "esquema": "40",
+      "desc_prov": "Sprite F LS 1.5 Lts. Ret Vid 8B",
+      "desc_suria": "SPRITE FX LS 1500*8 VR",
+      "marca": "SPRITE"
+    },
+    {
+      "cod_prov": 2403,
+      "id_articulo": 402403,
+      "esquema": "40",
+      "desc_prov": "Sprite F LS 1 Ltro. Ret. Vid. 8B",
+      "desc_suria": "SPRITE FX LS 1000*8 VR",
+      "marca": "SPRITE"
+    },
+    {
+      "cod_prov": 2408,
+      "id_articulo": 402408,
+      "esquema": "40",
+      "desc_prov": "Sprite F LS 500 ml NR Pet 6B",
+      "desc_suria": "SPRITE FX LS 500*6 PET",
+      "marca": "SPRITE"
+    },
+    {
+      "cod_prov": 2418,
+      "id_articulo": 402418,
+      "esquema": "40",
+      "desc_prov": "Sprite F LS 375 ml NR Pet 6B",
+      "desc_suria": "SPRITE FX LS 375*6 PET",
+      "marca": "SPRITE"
+    },
+    {
+      "cod_prov": 2421,
+      "id_articulo": 402421,
+      "esquema": "40",
+      "desc_prov": "Sprite F LS 1.5 Lts. NR Pet 6B",
+      "desc_suria": "SPRITE FX LS 1500*6",
+      "marca": "SPRITE"
+    },
+    {
+      "cod_prov": 2430,
+      "id_articulo": 402430,
+      "esquema": "40",
+      "desc_prov": "Sprite F LS 2.5 Lts. Ret Pet 8B",
+      "desc_suria": "SPRITE FX LS 2500 * 8RP",
+      "marca": "SPRITE"
+    },
+    {
+      "cod_prov": 2431,
+      "id_articulo": 402431,
+      "esquema": "40",
+      "desc_prov": "Sprite F LS 3 Lts. NR Pet 6B",
+      "desc_suria": "SPRITE FX LS 3000 X 6",
+      "marca": "SPRITE"
+    },
+    {
+      "cod_prov": 2475,
+      "id_articulo": 402475,
+      "esquema": "40",
+      "desc_prov": "Sprite F LS 354ml NR 6 Latas",
+      "desc_suria": "SPRITE F LS 354*6 LATAS",
+      "marca": "SPRITE"
+    },
+    {
+      "cod_prov": 2476,
+      "id_articulo": 402476,
+      "esquema": "40",
+      "desc_prov": "Sprite F LS 220ml NR 6 Latas",
+      "desc_suria": "SPRITE FX LS 220 *6 LATAS",
+      "marca": "SPRITE"
+    },
+    {
+      "cod_prov": 2680,
+      "id_articulo": 402680,
+      "esquema": "40",
+      "desc_prov": "Benedictino s/gas 500 ml Ret Vid 15B",
+      "desc_suria": "BENEDICTINO SIN GAS 500*15 VR",
+      "marca": "BENEDICTINO"
+    },
+    {
+      "cod_prov": 2681,
+      "id_articulo": 402681,
+      "esquema": "40",
+      "desc_prov": "Benedictino s/gas 600 ml NR Pet 12B",
+      "desc_suria": "BENEDICTINO SIN GAS 600 * 12",
+      "marca": "BENEDICTINO"
+    },
+    {
+      "cod_prov": 2682,
+      "id_articulo": 402682,
+      "esquema": "40",
+      "desc_prov": "Benedictino s/gas 2 Lts. NR Pet 6B",
+      "desc_suria": "BENEDICTINO SIN GAS 2000*6",
+      "marca": "BENEDICTINO"
+    },
+    {
+      "cod_prov": 2683,
+      "id_articulo": 402683,
+      "esquema": "40",
+      "desc_prov": "Benedictino s/gas 6.25 Lts. NR Pet 1B",
+      "desc_suria": "BENEDICTINO SIN GAS 6.25 LTS",
+      "marca": "BENEDICTINO"
+    },
+    {
+      "cod_prov": 2684,
+      "id_articulo": 402684,
+      "esquema": "40",
+      "desc_prov": "Benedictino s/gas 3 Lts. NR Pet 6B",
+      "desc_suria": "BENEDICTINO SIN GAS 3000*6",
+      "marca": "BENEDICTINO"
+    },
+    {
+      "cod_prov": 2780,
+      "id_articulo": 402780,
+      "esquema": "40",
+      "desc_prov": "Benedictino c/gas 500 ml Ret Vid 15B",
+      "desc_suria": "BENEDICTINO C/GAS 500*15 VR",
+      "marca": "BENEDICTINO"
+    },
+    {
+      "cod_prov": 2781,
+      "id_articulo": 402781,
+      "esquema": "40",
+      "desc_prov": "Benedictino c/gas 600 ml NR Pet 12B",
+      "desc_suria": "BENEDICTINO C/G 600*12",
+      "marca": "BENEDICTINO"
+    },
+    {
+      "cod_prov": 2782,
+      "id_articulo": 402782,
+      "esquema": "40",
+      "desc_prov": "Soda Benedictino Sifón 2.0 Lts NR Pet 6B",
+      "desc_suria": "SIFON BENEDICTINO 2000*6",
+      "marca": "BENEDICTINO"
+    },
+    {
+      "cod_prov": 2783,
+      "id_articulo": 402783,
+      "esquema": "40",
+      "desc_prov": "Soda Benedictino 2 Lts. NR Pet 6B",
+      "desc_suria": "SODA BENEDICTINO 2000*6",
+      "marca": "BENEDICTINO"
+    },
+    {
+      "cod_prov": 3151,
+      "id_articulo": 403151,
+      "esquema": "40",
+      "desc_prov": "Schweppes Tonica 1.5 Lts. NR Pet 6B",
+      "desc_suria": "SCHWEPPES TONICA 1500*6",
+      "marca": null
+    },
+    {
+      "cod_prov": 3297,
+      "id_articulo": 403297,
+      "esquema": "40",
+      "desc_prov": "Crush Naranja 3 Lts. NR Pet 6B",
+      "desc_suria": "CRUSH NARANJA 3000*6",
+      "marca": "CRUSH"
+    },
+    {
+      "cod_prov": 3397,
+      "id_articulo": 403397,
+      "esquema": "40",
+      "desc_prov": "Crush Pomelo 3 Lts. NR Pet 6B",
+      "desc_suria": "CRUSH POMELO 3000*6",
+      "marca": "CRUSH"
+    },
+    {
+      "cod_prov": 3496,
+      "id_articulo": 403496,
+      "esquema": "40",
+      "desc_prov": "Crush Lima-Limon S/Az. 3 Lts. NR Pet 6B",
+      "desc_suria": "CRUSH LIMA - LIMON S/A 3000*6",
+      "marca": "CRUSH"
+    },
+    {
+      "cod_prov": 3596,
+      "id_articulo": 403596,
+      "esquema": "40",
+      "desc_prov": "Crush Manzana S/Az. 3 Lts. NR Pet 6B",
+      "desc_suria": "CRUSH MANZANA SA 3000 * 6",
+      "marca": "CRUSH"
+    },
+    {
+      "cod_prov": 3834,
+      "id_articulo": 403834,
+      "esquema": "40",
+      "desc_prov": "Cepita Fresh Manzana 1.5 Lts. NR Pet 6B",
+      "desc_suria": "CEPITA FRESH MANZANA 1500*6",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3835,
+      "id_articulo": 403835,
+      "esquema": "40",
+      "desc_prov": "Cepita Fresh Naranja 1.5 Lts. NR Pet 6B",
+      "desc_suria": "CEPITA FRESH NARANJA 1500 * 6",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3836,
+      "id_articulo": 403836,
+      "esquema": "40",
+      "desc_prov": "Cepita Fresh Pomelo 1.5 Lts. NR Pet 6B",
+      "desc_suria": "CEPITA FRESH POMELO 1500 * 6",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3838,
+      "id_articulo": 403838,
+      "esquema": "40",
+      "desc_prov": "Cepita Fresh Naranja 3 Lts. NR Pet 6B",
+      "desc_suria": "CEPITA FRESH NARANJA 3000*6",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3839,
+      "id_articulo": 403839,
+      "esquema": "40",
+      "desc_prov": "Cepita Fresh Pomelo 3 Lts. NR Pet 6B",
+      "desc_suria": "CEPITA FRESH POMELO 3000*6",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3840,
+      "id_articulo": 403840,
+      "esquema": "40",
+      "desc_prov": "Cepita Naranja 300ml NR Pet 6B",
+      "desc_suria": "CEPITA NARANJA 300 * 6 PET",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3842,
+      "id_articulo": 403842,
+      "esquema": "40",
+      "desc_prov": "Cepita Durazno 300 ml NR Pet 6B",
+      "desc_suria": "CEPITA DURAZNO 300 * 6 PET",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3845,
+      "id_articulo": 403845,
+      "esquema": "40",
+      "desc_prov": "Cepita Naranja 1.5 Lts. NR Pet 4B",
+      "desc_suria": "CEPITA NARANJA 1500 * 4",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3846,
+      "id_articulo": 403846,
+      "esquema": "40",
+      "desc_prov": "Cepita Anana 1.5 Lts. NR Pet 4B",
+      "desc_suria": "CEPITA ANANA 1500 * 4",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3847,
+      "id_articulo": 403847,
+      "esquema": "40",
+      "desc_prov": "Cepita Durazno 1.5 Lts. NR Pet 4B",
+      "desc_suria": "CEPITA DURAZNO 1500 * 4",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3850,
+      "id_articulo": 403850,
+      "esquema": "40",
+      "desc_prov": "Cepita Naranja 1 Ltro. NR Pet 6B",
+      "desc_suria": "CEPITA NARANJA 1000 * 6 PET",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3852,
+      "id_articulo": 403852,
+      "esquema": "40",
+      "desc_prov": "Cepita Durazno 1 Ltro. NR Pet 6B",
+      "desc_suria": "CEPITA DURAZNO 1000*6",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3860,
+      "id_articulo": 403860,
+      "esquema": "40",
+      "desc_prov": "Monster Energy Green 473ml NR 6 Latas",
+      "desc_suria": "MONSTER ENERGY GREEN 473*6",
+      "marca": "MONSTER ENERGY"
+    },
+    {
+      "cod_prov": 3861,
+      "id_articulo": 403861,
+      "esquema": "40",
+      "desc_prov": "Monster Energy Ultra 473ml NR 6 Latas",
+      "desc_suria": "MONSTER ENERGY ULTRA 473 * 6",
+      "marca": "MONSTER ENERGY"
+    },
+    {
+      "cod_prov": 3862,
+      "id_articulo": 403862,
+      "esquema": "40",
+      "desc_prov": "Monster E. Mango Loco 473ml NR 6 Latas",
+      "desc_suria": "MONSTER ENERGY MANGO 473*6",
+      "marca": "MONSTER ENERGY"
+    },
+    {
+      "cod_prov": 3865,
+      "id_articulo": 403865,
+      "esquema": "40",
+      "desc_prov": "Monster E Ultra Sunrise 473ml NR 6 Latas",
+      "desc_suria": "MONSTER E. ULTRA SUNRI 473*6",
+      "marca": "MONSTER ENERGY"
+    },
+    {
+      "cod_prov": 3866,
+      "id_articulo": 403866,
+      "esquema": "40",
+      "desc_prov": "Monster Energy Rossi 473ml NR 6 Latas",
+      "desc_suria": "MONSTER ENERGY ROSSI 473*6 LATA",
+      "marca": "MONSTER ENERGY"
+    },
+    {
+      "cod_prov": 3867,
+      "id_articulo": 403867,
+      "esquema": "40",
+      "desc_prov": "Monster E U. Watermelon 473ml NR 6 Latas",
+      "desc_suria": "MONSTER ENERGY WATERMEL 473*6",
+      "marca": "MONSTER ENERGY"
+    },
+    {
+      "cod_prov": 3868,
+      "id_articulo": 403868,
+      "esquema": "40",
+      "desc_prov": "Monster R.W. Pineapple 473ml NR 6 Latas",
+      "desc_suria": "MONSTER PINEAPPLE 473*6",
+      "marca": "MONSTER ENERGY"
+    },
+    {
+      "cod_prov": 3869,
+      "id_articulo": 403869,
+      "esquema": "40",
+      "desc_prov": "Monster E. Green Zero 473ml NR 6 Latas",
+      "desc_suria": "MONSTER E. GREEN ZERO 473*6",
+      "marca": "MONSTER ENERGY"
+    },
+    {
+      "cod_prov": 3870,
+      "id_articulo": 403870,
+      "esquema": "40",
+      "desc_prov": "Monster Pipeline Punch 473ml NR 6 Latas",
+      "desc_suria": "MONSTER PIPELINE PUNCH 473*6",
+      "marca": "MONSTER ENERGY"
+    },
+    {
+      "cod_prov": 3872,
+      "id_articulo": 403872,
+      "esquema": "40",
+      "desc_prov": "Monster Peachy Keen 473ml NR 6 Latas",
+      "desc_suria": "MONSTER PEACHY KEEN 473*6 LATA",
+      "marca": "MONSTER ENERGY"
+    },
+    {
+      "cod_prov": 3920,
+      "id_articulo": 403920,
+      "esquema": "40",
+      "desc_prov": "Cepita Manzana 25% 200ml TB 6B",
+      "desc_suria": "CEPITA MANZANA 25% 200*6 TB",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3923,
+      "id_articulo": 403923,
+      "esquema": "40",
+      "desc_prov": "Cepita Multifruta 25% 200ml TB 6B",
+      "desc_suria": "CEPITA MUTIFRUT 25% 200*6",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3924,
+      "id_articulo": 403924,
+      "esquema": "40",
+      "desc_prov": "Cepita Naranja 25% 200ml TB 6B",
+      "desc_suria": "CEPITA NARANJA 25% 200*6 TB",
+      "marca": "CEPITA"
+    },
+    {
+      "cod_prov": 3993,
+      "id_articulo": 403993,
+      "esquema": "40",
+      "desc_prov": "Cepita Manzana 25% 1 Ltro. Tetra 6B",
+      "desc_suria": "CEPITA MANZANA 1000*6",
+      "marca": null
+    },
+    {
+      "cod_prov": 3997,
+      "id_articulo": 403997,
+      "esquema": "40",
+      "desc_prov": "Cepita Naranja 25% 1 Ltro. Tetra 6B",
+      "desc_suria": "CEPITA NARANJA 1000 *6 TB",
+      "marca": "SIN ESPECIFICAR"
+    },
+    {
+      "cod_prov": 4053,
+      "id_articulo": 404053,
+      "esquema": "40",
+      "desc_prov": "Powerade Manzana 500 ml NR Pet 6B",
+      "desc_suria": "POWERADE MANZANA 500*6",
+      "marca": "POWERADE"
+    },
+    {
+      "cod_prov": 4055,
+      "id_articulo": 404055,
+      "esquema": "40",
+      "desc_prov": "Powerade Mountain Blast 500 ml NR Pet 6B",
+      "desc_suria": "POWER. MOUNTAIN BLAST 500*6",
+      "marca": "POWERADE"
+    },
+    {
+      "cod_prov": 4059,
+      "id_articulo": 404059,
+      "esquema": "40",
+      "desc_prov": "Powerade Frutas Trop. 500 ml NR Pet 6B",
+      "desc_suria": "POWERADE FRUTAS TROP. 500 * 6",
+      "marca": "POWERADE"
+    },
+    {
+      "cod_prov": 4067,
+      "id_articulo": 404067,
+      "esquema": "40",
+      "desc_prov": "Powerade Uva 500 ml NR Pet 6B",
+      "desc_suria": "POWERADE UVA 500*6",
+      "marca": "POWERADE"
+    },
+    {
+      "cod_prov": 4071,
+      "id_articulo": 404071,
+      "esquema": "40",
+      "desc_prov": "Powerade Cool Citrus 500 ml NR Pet 6B",
+      "desc_suria": "POWER COOL CITRUS 500*6",
+      "marca": "POWERADE"
+    },
+    {
+      "cod_prov": 4075,
+      "id_articulo": 404075,
+      "esquema": "40",
+      "desc_prov": "Powerade Mountain Blast 995 ml NR Pet 6B",
+      "desc_suria": "POWER. MOUNTAIN BLAST 995 * 6",
+      "marca": "POWERADE"
+    },
+    {
+      "cod_prov": 4076,
+      "id_articulo": 404076,
+      "esquema": "40",
+      "desc_prov": "Powerade Manzana 995 ml NR Pet 6B",
+      "desc_suria": "POWERADE MANZANA 995*6",
+      "marca": "POWERADE"
+    },
+    {
+      "cod_prov": 4079,
+      "id_articulo": 404079,
+      "esquema": "40",
+      "desc_prov": "Powerade Frutas Trop. 995 ml NR Pet 6B",
+      "desc_suria": "POWERADE FRUTAS TROP. 995 * 6",
+      "marca": "POWERADE"
+    },
+    {
+      "cod_prov": 4207,
+      "id_articulo": 404207,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pomelo 500 ml NR Pet 6B",
+      "desc_suria": "AQUARIUS POMELO 500*6 PET",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4209,
+      "id_articulo": 404209,
+      "esquema": "40",
+      "desc_prov": "Aquarius Naranja 500 ml NR Pet 6B",
+      "desc_suria": "AQUARIUS NARANJA 500*6 PET",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4211,
+      "id_articulo": 404211,
+      "esquema": "40",
+      "desc_prov": "Aquarius Manzana 500 ml NR Pet 6B",
+      "desc_suria": "AQUARIUS MANZANA 500*6 PET",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4213,
+      "id_articulo": 404213,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pomelo Rosado 500 ml NR Pet 6B",
+      "desc_suria": "AQUARIUS POMELO ROSADO 500*6 PET",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4215,
+      "id_articulo": 404215,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pera 500 ml NR Pet 6B",
+      "desc_suria": "AQUARIUS PERA 500*6 PET",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4218,
+      "id_articulo": 404218,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pera 500 ml Ret Vid 15B",
+      "desc_suria": "AQUARIUS PERA 500*15 VR",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4219,
+      "id_articulo": 404219,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pom.Rosado 500 ml Ret Vid 15B",
+      "desc_suria": "AQUARIUS POMELO ROSADO 500*15 VR",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4221,
+      "id_articulo": 404221,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pomelo 1.5 Lts. NR Pet 6B",
+      "desc_suria": "AQUARIUS POMELO 1500 X 6  PET",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4223,
+      "id_articulo": 404223,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pera 1.5 Lts. NR Pet 6B",
+      "desc_suria": "AQUARIUS PERA 1500 X 6",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4225,
+      "id_articulo": 404225,
+      "esquema": "40",
+      "desc_prov": "Aquarius Manzana 1.5 Lts. NR Pet 6B",
+      "desc_suria": "AQUARIUS MANZANA 1500 X 6 PET",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4226,
+      "id_articulo": 404226,
+      "esquema": "40",
+      "desc_prov": "Aquarius Limonada 1.5 Lts. NR Pet 6B",
+      "desc_suria": "AQUARIUS LIMONADA 1500 * 6",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4227,
+      "id_articulo": 404227,
+      "esquema": "40",
+      "desc_prov": "Aquarius Naranja 1.5 Lts. NR Pet 6B",
+      "desc_suria": "AQUARIUS NARANJA 1500 * 6",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4230,
+      "id_articulo": 404230,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pom.Rosado 1.5 Lts. NR Pet 6B",
+      "desc_suria": "AQUARIUS POMELO ROSADO 1500 * 6",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4231,
+      "id_articulo": 404231,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pomelo 2.25 Lts. NR Pet 6B",
+      "desc_suria": "AQUARIUS POMELO 2250 * 6",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4233,
+      "id_articulo": 404233,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pera 2.25 Lts. NR Pet 6B",
+      "desc_suria": "AQUARIUS PERA 2250 * 6",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4235,
+      "id_articulo": 404235,
+      "esquema": "40",
+      "desc_prov": "Aquarius Manzana 2.25 Lts. NR Pet 6B",
+      "desc_suria": "AQUARIUS MANZANA 2250 * 6",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4236,
+      "id_articulo": 404236,
+      "esquema": "40",
+      "desc_prov": "Aquarius Limonada 2.25 Lts. NR Pet 6B",
+      "desc_suria": "AQUARIUS LIMONADA 2250 * 6",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4237,
+      "id_articulo": 404237,
+      "esquema": "40",
+      "desc_prov": "Aquarius Naranja 2.25 Lts. NR Pet 6B",
+      "desc_suria": "AQUARIUS NARANJA 2250 * 6",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4240,
+      "id_articulo": 404240,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pom.Rosado 2.25 Lts. NR Pet 6B",
+      "desc_suria": "AQUARIUS POMELO ROSADO 2250 * 6",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4261,
+      "id_articulo": 404261,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pomelo 2.5 Lts. Ret Pet 8B",
+      "desc_suria": "AQUARIUS POMELO 2500*8 VR",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4263,
+      "id_articulo": 404263,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pera 2.5 Lts. Ret Pet 8B",
+      "desc_suria": "AQUARIUS PERA 2500*8 VR",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4269,
+      "id_articulo": 404269,
+      "esquema": "40",
+      "desc_prov": "Aquarius Pom. Rosado 2.5 Lts. Ret Pet 8B",
+      "desc_suria": "AQUARIUS POMELO ROSADO 2500*8 VR",
+      "marca": "AQUARIUS"
+    },
+    {
+      "cod_prov": 4570,
+      "id_articulo": 404570,
+      "esquema": "40",
+      "desc_prov": "Dualpack Coca-Cola+Fanta Nar 2.25L Pet6B",
+      "desc_suria": "DUAL 2250*6 PET 3CC - 3FN",
+      "marca": "SIN ESPECIFICAR"
+    },
+    {
+      "cod_prov": 4571,
+      "id_articulo": 404571,
+      "esquema": "40",
+      "desc_prov": "Dualpack Coca-Cola+Sprite F 2.25L Pet6B",
+      "desc_suria": "DUAL 2250*6 PET 3CC - 3SP",
+      "marca": "SIN ESPECIFICAR"
+    },
+    {
+      "cod_prov": 4572,
+      "id_articulo": 404572,
+      "esquema": "40",
+      "desc_prov": "Dualpack Coca-Cola+Coca Zero 2.25L Pet6B",
+      "desc_suria": "DUAL 2250*6 PET 3CC - 3CCZ",
+      "marca": "SIN ESPECIFICAR"
+    },
+    {
+      "cod_prov": 4574,
+      "id_articulo": 404574,
+      "esquema": "40",
+      "desc_prov": "Dual Bened.+Bened. SG 3 Lts. NR Pet 6B",
+      "desc_suria": "DUAL 3000*6 - 3BENSG + 3 BENSG",
+      "marca": "SIN ESPECIFICAR"
+    },
+    {
+      "cod_prov": 4745,
+      "id_articulo": 404745,
+      "esquema": "40",
+      "desc_prov": "AdeS Manzana F 1 Ltro. Tetra 8B",
+      "desc_suria": "ADES MANZANA F 1000*8",
+      "marca": "ADES"
+    },
+    {
+      "cod_prov": 4746,
+      "id_articulo": 404746,
+      "esquema": "40",
+      "desc_prov": "AdeS Naranja F 1 Ltro. Tetra 8B",
+      "desc_suria": "ADES NARANJA F 1000*8",
+      "marca": "ADES"
+    },
+    {
+      "cod_prov": 4747,
+      "id_articulo": 404747,
+      "esquema": "40",
+      "desc_prov": "AdeS Frutas Trop F 1 Ltro. Tetra 8B",
+      "desc_suria": "ADES FR TROPIC 1000*8 TB",
+      "marca": "ADES"
+    },
+    {
+      "cod_prov": 4748,
+      "id_articulo": 404748,
+      "esquema": "40",
+      "desc_prov": "AdeS Durazno F 1 Ltro. Tetra 8B",
+      "desc_suria": "ADES DURAZNO F 1000*8",
+      "marca": "ADES"
+    },
+    {
+      "cod_prov": 4749,
+      "id_articulo": 404749,
+      "esquema": "40",
+      "desc_prov": "AdeS Ananá F 1 Ltro. Tetra 8B",
+      "desc_suria": "ADES ANANA 1000*8",
+      "marca": "ADES"
+    },
+    {
+      "cod_prov": 4785,
+      "id_articulo": 404785,
+      "esquema": "40",
+      "desc_prov": "AdeS Manzana F 200ml TB 6B",
+      "desc_suria": "ADES MANZANA F 200*6TB",
+      "marca": "ADES"
+    },
+    {
+      "cod_prov": 4787,
+      "id_articulo": 404787,
+      "esquema": "40",
+      "desc_prov": "AdeS Frutas Trop F 200ml TB 6B",
+      "desc_suria": "ADES FRUT. TROPICALES 200*6 TB",
+      "marca": "ADES"
+    },
+    {
+      "cod_prov": 4788,
+      "id_articulo": 404788,
+      "esquema": "40",
+      "desc_prov": "AdeS Durazno F 200ml TB 6B",
+      "desc_suria": "ADES DURAZNO 200*6TB",
+      "marca": "ADES"
+    },
+    {
+      "cod_prov": 5051,
+      "id_articulo": 5051,
+      "esquema": "pelado",
+      "desc_prov": "Las 3 Niñas Chocolatada 1L TB 06B",
+      "desc_suria": "CHOCOLATADA 3 NIÑAS 1000*6",
+      "marca": "LAS TRES NIÑAS"
+    },
+    {
+      "cod_prov": 5100,
+      "id_articulo": 405100,
+      "esquema": "40",
+      "desc_prov": "Las 3 Niñas Leche Descremada 1L TB 12B",
+      "desc_suria": "LECHE 3 NI AS DESCREMADA 1000* 12",
+      "marca": "LAS TRES NIÑAS"
+    },
+    {
+      "cod_prov": 5101,
+      "id_articulo": 405101,
+      "esquema": "40",
+      "desc_prov": "Las 3 Niñas Leche Clasica Liv. 1L TB 12B",
+      "desc_suria": "LECHE 3 NI AS CLASICA 1000 *12",
+      "marca": "LAS TRES NIÑAS"
+    },
+    {
+      "cod_prov": 5102,
+      "id_articulo": 405102,
+      "esquema": "40",
+      "desc_prov": "Las 3 Niñas Leche 0% Lactosa 1L TB 12B",
+      "desc_suria": "LECHE 3 NIÑAS 0% LACTOSA 1000*12",
+      "marca": "LAS TRES NIÑAS"
+    },
+    {
+      "cod_prov": 5103,
+      "id_articulo": 405103,
+      "esquema": "40",
+      "desc_prov": "Las 3 Niñas Leche Con Proteina 1L TB 6B",
+      "desc_suria": "LECHE L3N CON PROTEINAS 1000*6",
+      "marca": "LAS TRES NIÑAS"
+    },
+    {
+      "cod_prov": 5152,
+      "id_articulo": 405152,
+      "esquema": "40",
+      "desc_prov": "Las 3 Niñas Tostada Arroz Clas 150gr 12P",
+      "desc_suria": "TOSTADA ARROZ 150G *12",
+      "marca": "LAS TRES NIÑAS"
+    },
+    {
+      "cod_prov": 5154,
+      "id_articulo": 405154,
+      "esquema": "40",
+      "desc_prov": "Las 3 Niñas & Yo Frutilla 500gr TB 6B",
+      "desc_suria": "YOGURT FRUTILLA L3N 500G*6",
+      "marca": "LAS TRES NIÑAS"
+    },
+    {
+      "cod_prov": 5156,
+      "id_articulo": 405156,
+      "esquema": "40",
+      "desc_prov": "Las 3 Niñas & Yo Vainilla 500gr TB 6B",
+      "desc_suria": "YOGURT VAINILLA L3N 500G*6",
+      "marca": "LAS TRES NIÑAS"
+    },
+    {
+      "cod_prov": 5159,
+      "id_articulo": 405159,
+      "esquema": "40",
+      "desc_prov": "Las 3 Niñas Crema P/Batir 500ml TB 6B",
+      "desc_suria": "CREMA BATIR 3 NIÑAS 500*6 TB",
+      "marca": "LAS TRES NIÑAS"
+    },
+    {
+      "cod_prov": 5165,
+      "id_articulo": 405165,
+      "esquema": "40",
+      "desc_prov": "Las 3 Niñas & Yo Frutilla 190gr TB 6B",
+      "desc_suria": "LAS 3 NIÑAS & YO FRUTILLA 190*6 TB",
+      "marca": "LAS TRES NIÑAS"
+    },
+    {
+      "cod_prov": 5166,
+      "id_articulo": 405166,
+      "esquema": "40",
+      "desc_prov": "Las 3 Niñas & Yo Vainilla 190gr TB 6B",
+      "desc_suria": "LAS 3 NIÑAS & YO VAINILLA 190*6 TB",
+      "marca": "LAS TRES NIÑAS"
+    },
+    {
+      "cod_prov": 5167,
+      "id_articulo": 405167,
+      "esquema": "40",
+      "desc_prov": "Las 3 Niñas Chocolatada 200ml TB 6B",
+      "desc_suria": "CHOCOLATADA L3N 200*6",
+      "marca": "LAS TRES NIÑAS"
+    },
+    {
+      "cod_prov": 5172,
+      "id_articulo": 405172,
+      "esquema": "40",
+      "desc_prov": "Molinos Ala Snacks Queso 80gr 12P",
+      "desc_suria": "SNACKS QUESO *80G",
+      "marca": null
+    },
+    {
+      "cod_prov": 5173,
+      "id_articulo": 405173,
+      "esquema": "40",
+      "desc_prov": "Molinos Ala Snacks Cebolla-Cr. 80gr 12P",
+      "desc_suria": "SNACKS CEBOLLA *80G",
+      "marca": null
+    },
+    {
+      "cod_prov": 6605,
+      "id_articulo": 406605,
+      "esquema": "40",
+      "desc_prov": "Rabieta American IPA 473ml NR 6 Latas",
+      "desc_suria": "RABIETA IPA AMER. 473*6",
+      "marca": "RABIETA"
+    },
+    {
+      "cod_prov": 6606,
+      "id_articulo": 6606,
+      "esquema": "pelado",
+      "desc_prov": "Rabieta Golden Ale 473ml NR 6 Latas",
+      "desc_suria": "RABIETA GOLDEN ALE 473*6",
+      "marca": "RABIETA"
+    },
+    {
+      "cod_prov": 6607,
+      "id_articulo": 6607,
+      "esquema": "pelado",
+      "desc_prov": "Rabieta Red Irish Ale 473ml NR 6 Latas",
+      "desc_suria": "RABIETA RED IRISH A 473*6",
+      "marca": "RABIETA"
+    },
+    {
+      "cod_prov": 6608,
+      "id_articulo": 6608,
+      "esquema": "pelado",
+      "desc_prov": "Rabieta Red Honey 473ml NR 6 Latas",
+      "desc_suria": "RABIETA RED HONEY 473*6",
+      "marca": "RABIETA"
+    },
+    {
+      "cod_prov": 6609,
+      "id_articulo": 406609,
+      "esquema": "40",
+      "desc_prov": "Rabieta Helles Munich 473ml NR 6 Latas",
+      "desc_suria": "RABIETA HEL. MUNICH 473*6",
+      "marca": "RABIETA"
+    },
+    {
+      "cod_prov": 6610,
+      "id_articulo": 406610,
+      "esquema": "40",
+      "desc_prov": "Pampa B. IPA 473ml NR 6 Latas",
+      "desc_suria": "PAMPA IPA FL. 473*6",
+      "marca": "PAMPA"
+    },
+    {
+      "cod_prov": 6612,
+      "id_articulo": 406612,
+      "esquema": "40",
+      "desc_prov": "Pampa B. Amber Ale 473ml NR 6 Latas",
+      "desc_suria": "PAMPA AMBER ALE 473*6",
+      "marca": "PAMPA"
+    },
+    {
+      "cod_prov": 6613,
+      "id_articulo": 406613,
+      "esquema": "40",
+      "desc_prov": "Pampa B. Honey 473ml NR 6 Latas",
+      "desc_suria": "PAMPA HONEY 473*6",
+      "marca": "PAMPA"
+    },
+    {
+      "cod_prov": 6614,
+      "id_articulo": 406614,
+      "esquema": "40",
+      "desc_prov": "Pampa B. N Cream Stout 473ml NR 6 Latas",
+      "desc_suria": "PAMPA N CREAM STOUT 473*6",
+      "marca": "PAMPA"
+    },
+    {
+      "cod_prov": 6615,
+      "id_articulo": 406615,
+      "esquema": "40",
+      "desc_prov": "Guinness Extra Stout 473ml NR 6 Latas",
+      "desc_suria": "GUINNESS EXTRA STOUT 473*6",
+      "marca": "GUINNESS"
+    },
+    {
+      "cod_prov": 6616,
+      "id_articulo": 406616,
+      "esquema": "40",
+      "desc_prov": "Guinness H.H. 13 Lager 473ml NR 6 Latas",
+      "desc_suria": "GUINNESS HOPHUSE 13 473*6 LATA",
+      "marca": "GUINNESS"
+    },
+    {
+      "cod_prov": 6617,
+      "id_articulo": 406617,
+      "esquema": "40",
+      "desc_prov": "Pampa B. Lager 473ml NR 6 Latas",
+      "desc_suria": "PAMPA LAGER 473*6",
+      "marca": "PAMPA"
+    },
+    {
+      "cod_prov": 6690,
+      "id_articulo": 406690,
+      "esquema": "40",
+      "desc_prov": "Estrella Galicia Lager 473ml NR 6 Latas",
+      "desc_suria": "ESTRELLA GALICIA LAGER 473*6 LATA",
+      "marca": "ESTRELLA GALICIA"
+    },
+    {
+      "cod_prov": 6691,
+      "id_articulo": 406691,
+      "esquema": "40",
+      "desc_prov": "Estrella Galicia Lager 355ml NR Vid 6B",
+      "desc_suria": "ESTRELLA GALICIA LAGER 355*6 VNR",
+      "marca": null
+    },
+    {
+      "cod_prov": 6692,
+      "id_articulo": 406692,
+      "esquema": "40",
+      "desc_prov": "Estrella Galicia Sin Gluten 330ml NR 6L",
+      "desc_suria": "ESTRELLA GALICIA S/GLUTEN 330*6 LATA",
+      "marca": null
+    },
+    {
+      "cod_prov": 6693,
+      "id_articulo": 406693,
+      "esquema": "40",
+      "desc_prov": "Estrella Galicia 0% Tostada 330ml NR 6L",
+      "desc_suria": "ESTRELLA GALICIA 0% ALCOHOL 330*6 LATA",
+      "marca": null
+    },
+    {
+      "cod_prov": 6762,
+      "id_articulo": 406762,
+      "esquema": "40",
+      "desc_prov": "Famiglia Malbec 750 ml NR Vid 6B",
+      "desc_suria": "FAMIGLIA MALBEC 750*6 VNR",
+      "marca": null
+    },
+    {
+      "cod_prov": 6765,
+      "id_articulo": 406765,
+      "esquema": "40",
+      "desc_prov": "Don Valentin Red 750 ml NR Vid 6B",
+      "desc_suria": "DON VALENTIN RED 750*6 VN",
+      "marca": "DON VALENTIN"
+    },
+    {
+      "cod_prov": 6766,
+      "id_articulo": 406766,
+      "esquema": "40",
+      "desc_prov": "Don Valentin White 750 ml NR Vid 6B",
+      "desc_suria": "DON VALENTIN WHITE 750*6",
+      "marca": null
+    },
+    {
+      "cod_prov": 6767,
+      "id_articulo": 406767,
+      "esquema": "40",
+      "desc_prov": "Don Valentin Malbec 750 ml NR Vid 6B",
+      "desc_suria": "DON VALENTIN MALBEC 750*6",
+      "marca": "DON VALENTIN"
+    },
+    {
+      "cod_prov": 6768,
+      "id_articulo": 406768,
+      "esquema": "40",
+      "desc_prov": "Don Valentin Cab Sauv 750 ml NR Vid 6B",
+      "desc_suria": "DON VALENTIN CS 750*6",
+      "marca": null
+    },
+    {
+      "cod_prov": 6769,
+      "id_articulo": 406769,
+      "esquema": "40",
+      "desc_prov": "Il Caprone Malbec 750 ml NR Vid 6B",
+      "desc_suria": "IL CAPRONE MALBEC 750*6",
+      "marca": null
+    },
+    {
+      "cod_prov": 6771,
+      "id_articulo": 406771,
+      "esquema": "40",
+      "desc_prov": "New Age White 750 ml NR Vid 6B",
+      "desc_suria": "NEW AGE WHITE 750*6",
+      "marca": "NEW AGE"
+    },
+    {
+      "cod_prov": 6772,
+      "id_articulo": 406772,
+      "esquema": "40",
+      "desc_prov": "Marlo Dulce 750 ml NR Vid 6B",
+      "desc_suria": "MARLO DULCE 750*6",
+      "marca": "MARLO"
+    },
+    {
+      "cod_prov": 6773,
+      "id_articulo": 406773,
+      "esquema": "40",
+      "desc_prov": "Famiglia Xeneizes 750 ml NR Vid 6B",
+      "desc_suria": "FAMIGLIA XENEIZES 750*6",
+      "marca": null
+    },
+    {
+      "cod_prov": 6774,
+      "id_articulo": 406774,
+      "esquema": "40",
+      "desc_prov": "Famiglia La Maquina 750 ml NR Vid 6B",
+      "desc_suria": "FAMIGLIA LA MAQUINA 750*6",
+      "marca": null
+    }
+  ],
+  "sin_match": [
+    {
+      "cod_prov": 3021,
+      "desc_prov": "Schweppes Pomelo Zero 1.5 Lts. NR Pet 6B",
+      "closest_id": 403032,
+      "closest_desc": "SCHWEPPES POMELO ZERO 2250 * 6",
+      "closest_sim": 0.375
+    },
+    {
+      "cod_prov": 3176,
+      "desc_prov": "Schweppes Tonica Lata 354 ml 6B",
+      "closest_id": 403173,
+      "closest_desc": "SCHWEPPES TONICA 354 * 6 LATA",
+      "closest_sim": 0.6667
+    },
+    {
+      "cod_prov": 3177,
+      "desc_prov": "Schweppes Pomelo Zero Lata 354 ml 6B",
+      "closest_id": 403173,
+      "closest_desc": "SCHWEPPES TONICA 354 * 6 LATA",
+      "closest_sim": 0.375
+    },
+    {
+      "cod_prov": 3995,
+      "desc_prov": "Cepita Multifruta 25% 1 Ltro. Tetra 6B",
+      "closest_id": 403923,
+      "closest_desc": "CEPITA MUTIFRUT 25% 200*6",
+      "closest_sim": 0.25
+    },
+    {
+      "cod_prov": 4578,
+      "desc_prov": "Dual Coca-Cola+Fanta Nar 3L NR Pet 6B",
+      "closest_id": 400201,
+      "closest_desc": "COCA COLA 3000 X 6 PET",
+      "closest_sim": 0.3
+    },
+    {
+      "cod_prov": 4579,
+      "desc_prov": "Dual Coca-Cola+Sprite 3L NR Pet 6B",
+      "closest_id": 400201,
+      "closest_desc": "COCA COLA 3000 X 6 PET",
+      "closest_sim": 0.3333
+    },
+    {
+      "cod_prov": 4786,
+      "desc_prov": "AdeS Naranja F 200ml TB 6B",
+      "closest_id": 404490,
+      "closest_desc": "ADES NARANJA RCG 1000*8 TB",
+      "closest_sim": 0.4286
+    },
+    {
+      "cod_prov": 4789,
+      "desc_prov": "AdeS Ananá F 200ml TB 6B",
+      "closest_id": 404760,
+      "closest_desc": "ADES NATURAL 1000*8 TB",
+      "closest_sim": 0.2857
+    },
+    {
+      "cod_prov": 5055,
+      "desc_prov": "Las 3 Niñas Leche Pri. Años 1L TB 6B",
+      "closest_id": 405165,
+      "closest_desc": "LAS 3 NIÑAS & YO FRUTILLA 190*6 TB",
+      "closest_sim": 0.2727
+    },
+    {
+      "cod_prov": 5158,
+      "desc_prov": "Las 3 Niñas Crema P/Cocinar 500ml TB 6B",
+      "closest_id": 405150,
+      "closest_desc": "CREMA COCINAR 3 NIÑAS 200*12 TB",
+      "closest_sim": 0.4444
+    },
+    {
+      "cod_prov": 5163,
+      "desc_prov": "Las 3 Niñas Crema P/Cocinar 200ml TB 6B",
+      "closest_id": 405150,
+      "closest_desc": "CREMA COCINAR 3 NIÑAS 200*12 TB",
+      "closest_sim": 0.4444
+    },
+    {
+      "cod_prov": 5164,
+      "desc_prov": "Las 3 Niñas Crema P/Batir 200ml TB 6B",
+      "closest_id": 405159,
+      "closest_desc": "CREMA BATIR 3 NIÑAS 500*6 TB",
+      "closest_sim": 0.5
+    },
+    {
+      "cod_prov": 5170,
+      "desc_prov": "Las 3 Niñas Crema 4 Quesos 190ml TB 6B",
+      "closest_id": 405159,
+      "closest_desc": "CREMA BATIR 3 NIÑAS 500*6 TB",
+      "closest_sim": 0.3333
+    },
+    {
+      "cod_prov": 5171,
+      "desc_prov": "Las 3 Niñas Crema Hongos 190ml TB 6B",
+      "closest_id": 405159,
+      "closest_desc": "CREMA BATIR 3 NIÑAS 500*6 TB",
+      "closest_sim": 0.3333
+    },
+    {
+      "cod_prov": 5174,
+      "desc_prov": "Molinos Ala Snacks Picante 80gr 12P",
+      "closest_id": 405173,
+      "closest_desc": "SNACKS CEBOLLA *80G",
+      "closest_sim": 0.125
+    },
+    {
+      "cod_prov": 6761,
+      "desc_prov": "Famiglia Cs 750 ml NR Vid 6B",
+      "closest_id": 406773,
+      "closest_desc": "FAMIGLIA XENEIZES 750*6",
+      "closest_sim": 0.25
+    },
+    {
+      "cod_prov": 6770,
+      "desc_prov": "Il Caprone Cs 750 ml NR Vid 6B",
+      "closest_id": 406769,
+      "closest_desc": "IL CAPRONE MALBEC 750*6",
+      "closest_sim": 0.3333
+    }
+  ]
+}

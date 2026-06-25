@@ -221,6 +221,11 @@ SERVICIOS: list[Servicio] = [
         config_path=CONFIGS_DIR / "incentivo_cobertura.json",
         fecha_modo="mes_a_hoy",
     ),
+    Servicio(
+        nombre="stock-suria",
+        config_path=CONFIGS_DIR / "stock_suria.json",
+        fecha_modo="hoy",
+    ),
 ]
 
 

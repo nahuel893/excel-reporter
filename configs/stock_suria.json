@@ -1,0 +1,21 @@
+{
+    "_note": "Stock SURIA — articulos del proveedor (Arca/Coca) apareados contra la base SURIA. Lista congelada en configs/stock_suria_articulos.json (re-match: scripts/rematch_stock_suria.py).",
+    "tipo": "stock-suria",
+    "filtros": {
+        "fecha_desde": "2026-06-25",
+        "fecha_hasta": "2026-06-25"
+    },
+    "reportes": [
+        {
+            "nombre": "Stock SURIA",
+            "asunto_email": "Stock SURIA",
+            "cuerpo_email": "Adjunto el reporte de stock SURIA con los articulos del proveedor apareados contra la base SURIA.",
+            "filtros": {},
+            "enviar_a": {
+                "Juan Quintana": { "via": ["email"] },
+                "Fabian Gallardo": { "via": ["email"] },
+                "Nahuel Aguirre": { "via": ["email_cc"] }
+            }
+        }
+    ]
+}
