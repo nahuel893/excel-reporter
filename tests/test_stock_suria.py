@@ -438,3 +438,45 @@ class TestHtlZeroAsNone:
                 return
 
         pytest.fail("Article 400101 not found in sheet")
+
+
+class TestNormalizeSucursalRegression:
+    """TSS-016: regression for the empty-report bug.
+
+    gold.dim_deposito stores sucursal names with a 'SUCURSAL ' prefix
+    ('SUCURSAL ABRA PAMPA'). The report columns (processor.SUCURSALES) use the
+    short form ('ABRA PAMPA'). Without normalization the per-sucursal stock
+    lookup never matches and every cell renders 0 (report looks empty).
+    """
+
+    def test_strips_leading_sucursal_prefix(self):
+        from src.services.stock_suria.service import _normalize_sucursal
+
+        assert _normalize_sucursal("SUCURSAL ABRA PAMPA") == "ABRA PAMPA"
+        assert _normalize_sucursal("SUCURSAL LA QUIACA") == "LA QUIACA"
+
+    def test_short_name_unchanged(self):
+        from src.services.stock_suria.service import _normalize_sucursal
+
+        assert _normalize_sucursal("JUJUY") == "JUJUY"
+
+    def test_handles_none_and_whitespace(self):
+        from src.services.stock_suria.service import _normalize_sucursal
+
+        assert _normalize_sucursal(None) == ""
+        assert _normalize_sucursal("  SUCURSAL MAIMARA  ") == "MAIMARA"
+
+    def test_normalized_db_names_match_report_columns(self):
+        """The crux: normalized dim_deposito names must equal the report columns."""
+        from src.services.stock_suria.processor import SUCURSALES
+        from src.services.stock_suria.service import _normalize_sucursal
+
+        db_names = [
+            "SUCURSAL ABRA PAMPA",
+            "SUCURSAL HUMAHUACA",
+            "SUCURSAL JUJUY",
+            "SUCURSAL LA QUIACA",
+            "SUCURSAL MAIMARA",
+            "SUCURSAL PERICO",
+        ]
+        assert [_normalize_sucursal(n) for n in db_names] == SUCURSALES

@@ -17,6 +17,22 @@ logger = logging.getLogger(__name__)
 _CONFIG_JSON = Path(__file__).resolve().parents[3] / "configs" / "stock_suria_articulos.json"
 
 
+def _normalize_sucursal(name: str | None) -> str:
+    """Strip a leading 'SUCURSAL ' prefix from a deposit's sucursal name.
+
+    The SURIA ``gold.dim_deposito.des_sucursal`` values are stored as
+    ``"SUCURSAL ABRA PAMPA"``, but the report columns (``processor.SUCURSALES``)
+    use the short form ``"ABRA PAMPA"``. Without this normalization every stock
+    value falls through the lookup and the report renders all zeros.
+    """
+    if not name:
+        return ""
+    name = name.strip()
+    if name.upper().startswith("SUCURSAL "):
+        name = name[len("SUCURSAL "):].strip()
+    return name
+
+
 @dataclass
 class StockSuriaConfig:
     """Configuration for stock-suria report."""
@@ -107,7 +123,7 @@ class StockSuriaService(BaseService):
         stock_data: dict = {}
         for row in stock_rows:
             id_art = row[0]
-            suc = row[1]
+            suc = _normalize_sucursal(row[1])
             bultos = row[2]
             htls = row[3]
             if id_art not in stock_data:
