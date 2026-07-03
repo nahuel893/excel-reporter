@@ -873,6 +873,117 @@ class DataLoader:
         """
         return self.execute_query(query, params)
 
+    def get_ventas_por_marca(
+        self,
+        generico: str,
+        fecha_desde: str,
+        fecha_hasta: str,
+        id_sucursal: int = 1,
+    ) -> pd.DataFrame:
+        """Cantidad vendida (bultos) por marca, dentro de un generico y rango de dias.
+
+        Args:
+            generico: Nombre exacto del generico (ej. 'PERNOD RICARD').
+            fecha_desde / fecha_hasta: rango de dias 'YYYY-MM-DD' (inclusive).
+            id_sucursal: Sucursal a filtrar (default 1 = CASA CENTRAL).
+
+        Returns:
+            DataFrame con columnas [marca, bultos], ordenado por bultos desc.
+        """
+        query = """
+        SELECT
+            da.marca                  AS marca,
+            SUM(f.cantidades_total)   AS bultos
+        FROM gold.fact_ventas f
+        JOIN gold.dim_articulo da ON da.id_articulo = f.id_articulo
+        WHERE da.generico = :generico
+          AND f.id_sucursal = :id_sucursal
+          AND f.fecha_comprobante::date BETWEEN :fecha_desde AND :fecha_hasta
+        GROUP BY da.marca
+        ORDER BY bultos DESC, da.marca
+        """
+        params = {
+            "generico": generico,
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+            "id_sucursal": id_sucursal,
+        }
+        return self.execute_query(query, params)
+
+    def get_cobertura_generico_por_vendedor(
+        self,
+        generico: str,
+        fecha_desde: str,
+        fecha_hasta: str,
+        id_sucursal: int = 1,
+        id_fuerza_ventas: int = 1,
+    ) -> pd.DataFrame:
+        """Cobertura (clientes compradores) de un generico, por vendedor, por dia(s).
+
+        Replica EXACTAMENTE la logica del agregador medallion
+        (``gold.cob_preventista_generico``) pero al grano DIARIO — porque esa tabla
+        es mensual (``DATE_TRUNC('month', ...)``) y no permite filtrar por dia.
+        Reglas medallion respetadas:
+          - El vendedor es el PREVENTISTA ASIGNADO al cliente
+            (``dim_cliente.id_personal_fv1`` para FV1, ``id_personal_fv4`` para FV4),
+            NO ``fact_ventas.id_vendedor`` (quien factura).
+          - Un cliente cuenta si ``SUM(cantidades_total) > 0`` en el rango (no filtra
+            anulado; el neto sale de la suma). No filtra lista de precio.
+          - clientes = COUNT(DISTINCT id_cliente) por vendedor.
+        Validado: reproduce el total mensual de la tabla al cliente exacto.
+
+        Args:
+            generico: Nombre exacto del generico (ej. 'PERNOD RICARD').
+            fecha_desde / fecha_hasta: rango de dias 'YYYY-MM-DD' (inclusive; para un
+                unico dia pasar el mismo valor en ambos).
+            id_sucursal: Sucursal a filtrar (default 1 = CASA CENTRAL).
+            id_fuerza_ventas: 1 (todos los preventistas, id_personal_fv1) o 4 (CCU, fv4).
+
+        Returns:
+            DataFrame con columnas [vendedor, clientes, volumen]. El supervisor NO
+            sale de aca: se mapea en el servicio via SUPERVISOR_VENDOR_MAP
+            (dim_vendedor.supervisor no es confiable).
+        """
+        personal_col = "id_personal_fv4" if id_fuerza_ventas == 4 else "id_personal_fv1"
+        query = f"""
+        WITH cliente_generico AS (
+            SELECT
+                dc.{personal_col}          AS id_vendedor,
+                fv.id_cliente,
+                SUM(fv.cantidades_total)   AS total_qty
+            FROM gold.fact_ventas fv
+            LEFT JOIN gold.dim_cliente dc
+                ON fv.id_cliente = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
+            LEFT JOIN gold.dim_articulo da
+                ON fv.id_articulo = da.id_articulo
+            WHERE fv.fecha_comprobante::date BETWEEN :fecha_desde AND :fecha_hasta
+              AND fv.id_sucursal = :id_sucursal
+              AND da.generico = :generico
+              AND dc.{personal_col} IS NOT NULL
+            GROUP BY dc.{personal_col}, fv.id_cliente
+            HAVING SUM(fv.cantidades_total) > 0
+        )
+        SELECT
+            dv.des_vendedor                 AS vendedor,
+            COUNT(DISTINCT cg.id_cliente)   AS clientes,
+            SUM(cg.total_qty)               AS volumen
+        FROM cliente_generico cg
+        JOIN gold.dim_vendedor dv
+            ON dv.id_vendedor = cg.id_vendedor
+            AND dv.id_fuerza_ventas = :id_fuerza_ventas
+            AND dv.id_sucursal = :id_sucursal
+        GROUP BY dv.des_vendedor
+        ORDER BY clientes DESC, dv.des_vendedor
+        """
+        params = {
+            "generico": generico,
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+            "id_sucursal": id_sucursal,
+            "id_fuerza_ventas": id_fuerza_ventas,
+        }
+        return self.execute_query(query, params)
+
     def get_cobertura_preventista_marca(
         self,
         periodo_desde: str | None = None,
@@ -1869,6 +1980,7 @@ class DataLoader:
         clientes: list[dict],
         articulos: list[int] | None = None,
         marcas: list[str] | None = None,
+        agrupar_por_generico: bool = False,
     ) -> pd.DataFrame:
         """Obtiene ventas agrupadas por cliente, row_key y mes para reporte historico.
 
@@ -1879,10 +1991,13 @@ class DataLoader:
             articulos: Lista de id_articulo a filtrar. Si es None, no filtra por articulo.
             marcas: Lista de marcas a filtrar. Si es None, no filtra por marca.
                     Cuando se provee, row_key es da.marca; de lo contrario es el articulo.
+            agrupar_por_generico: Cuando es True, row_key es da.marca y NO se filtra por
+                    marca/articulo (se traen todas las marcas). Usado por el modo de
+                    reporte agrupado por generico con subtotales.
 
         Returns:
             DataFrame con columnas: id_cliente, id_sucursal, nombre_cliente,
-            row_key, mes, bultos.
+            generico, row_key, mes, bultos.
             Ordenado por id_cliente, row_key, mes.
         """
         # Build composite-key OR clauses for the client list
@@ -1895,28 +2010,31 @@ class DataLoader:
             params[f"c{i}_id"] = c["id_cliente"]
             params[f"c{i}_suc"] = c["id_sucursal"]
 
-        # row_key expression depends on mode
-        if marcas is not None:
+        # row_key expression depends on mode. Marca-grain when marcas are filtered or
+        # when grouping by generico; otherwise articulo-grain.
+        if marcas is not None or agrupar_por_generico:
             row_key_expr = "da.marca"
         else:
             row_key_expr = "CAST(fv.id_articulo AS TEXT) || ' - ' || da.des_articulo"
 
-        # Optional filters
+        # Optional filters (skipped entirely in agrupar_por_generico mode)
         extra_filters = ""
-        if marcas is not None:
-            marca_ph = ", ".join(f":marca_{i}" for i in range(len(marcas)))
-            extra_filters += f"\n              AND da.marca IN ({marca_ph})"
-            params.update({f"marca_{i}": m for i, m in enumerate(marcas)})
-        if articulos is not None:
-            art_ph = ", ".join(f":art_{i}" for i in range(len(articulos)))
-            extra_filters += f"\n              AND fv.id_articulo IN ({art_ph})"
-            params.update({f"art_{i}": a for i, a in enumerate(articulos)})
+        if not agrupar_por_generico:
+            if marcas is not None:
+                marca_ph = ", ".join(f":marca_{i}" for i in range(len(marcas)))
+                extra_filters += f"\n              AND da.marca IN ({marca_ph})"
+                params.update({f"marca_{i}": m for i, m in enumerate(marcas)})
+            if articulos is not None:
+                art_ph = ", ".join(f":art_{i}" for i in range(len(articulos)))
+                extra_filters += f"\n              AND fv.id_articulo IN ({art_ph})"
+                params.update({f"art_{i}": a for i, a in enumerate(articulos)})
 
         query = f"""
         SELECT
             fv.id_cliente,
             fv.id_sucursal,
             COALESCE(dc.fantasia, dc.razon_social, CAST(fv.id_cliente AS TEXT)) AS nombre_cliente,
+            da.generico AS generico,
             {row_key_expr} AS row_key,
             TO_CHAR(fv.fecha_comprobante, 'YYYY-MM') AS mes,
             SUM(fv.cantidades_total) AS bultos
@@ -1927,7 +2045,7 @@ class DataLoader:
         WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
           AND fv.anulado = false
           AND ({cliente_clauses}){extra_filters}
-        GROUP BY fv.id_cliente, fv.id_sucursal, nombre_cliente, row_key, mes
+        GROUP BY fv.id_cliente, fv.id_sucursal, nombre_cliente, generico, row_key, mes
         ORDER BY fv.id_cliente, row_key, mes
         """
         return self.execute_query(query, params)
@@ -2326,7 +2444,10 @@ class DataLoader:
         neto sale de la suma. Join con dim_cliente por clave compuesta.
 
         Returns:
-            DataFrame con columnas [origen, generico, marca, bultos, htls].
+            DataFrame con columnas
+            [origen, razon_social, fantasia, generico, marca, bultos, htls].
+            Se abre por sub-distribuidor (razon_social/fantasia del cliente) para
+            que el informe de Adrian Garcia muestre los nombres, no solo el origen.
         """
         suc = sucursales_interior or []
         suc_placeholders = ", ".join(f":suc_{i}" for i in range(len(suc)))
@@ -2344,6 +2465,8 @@ class DataLoader:
         SELECT
             CASE WHEN dc.id_lista_precio = :lista_cc THEN 'CASA CENTRAL'
                  ELSE ds.descripcion END           AS origen,
+            dc.razon_social                         AS razon_social,
+            dc.fantasia                             AS fantasia,
             COALESCE(da.generico, 'SIN GENERICO')   AS generico,
             da.marca,
             SUM(fv.cantidades_total)                AS bultos,
@@ -2359,8 +2482,9 @@ class DataLoader:
                 dc.id_lista_precio = :lista_cc
                 OR {interior_clause}
               )
-        GROUP BY 1, COALESCE(da.generico, 'SIN GENERICO'), da.marca
-        ORDER BY origen, generico, da.marca
+        GROUP BY 1, dc.razon_social, dc.fantasia,
+                 COALESCE(da.generico, 'SIN GENERICO'), da.marca
+        ORDER BY origen, dc.razon_social, generico, da.marca
         """
         params = {
             "fecha_desde": fecha_desde,
