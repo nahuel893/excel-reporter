@@ -100,6 +100,7 @@ class ReportFilters(BaseModel):
     clientes: list[dict] | None = None      # each dict: {"id_cliente": int, "id_sucursal": int}
     articulos: list[int] | None = None      # list of id_articulo
     marcas: list[str] | None = None         # list of marca names
+    agrupar_por_generico: bool | None = None  # historico-cliente: all marcas grouped by generico
 
 
 class ReportEntry(BaseModel):
@@ -123,7 +124,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "ventas-marca"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 
