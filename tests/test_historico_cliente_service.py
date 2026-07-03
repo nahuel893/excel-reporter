@@ -182,6 +182,113 @@ def test_all_months_covered(tmp_path):
     assert ws.cell(row=data_row, column=feb_col).value == 0
 
 
+def _make_grouped_df():
+    """One client, two genericos (CERVEZAS: SALTA, HEINEKEN; VINOS: TORO), two months.
+
+    Row grain matches loader output in ``agrupar_por_generico`` mode:
+    columns include ``generico`` and ``row_key`` (= marca).
+    """
+    return pd.DataFrame({
+        "id_cliente": [1] * 6,
+        "id_sucursal": [1] * 6,
+        "nombre_cliente": ["Cli A"] * 6,
+        "generico": ["CERVEZAS", "CERVEZAS", "CERVEZAS", "CERVEZAS", "VINOS", "VINOS"],
+        "row_key": ["SALTA", "SALTA", "HEINEKEN", "HEINEKEN", "TORO", "TORO"],
+        "mes": ["2026-01", "2026-02", "2026-01", "2026-02", "2026-01", "2026-02"],
+        "bultos": [100.0, 120.0, 30.0, 40.0, 10.0, 5.0],
+    })
+
+
+def _read_marca_column(ruta):
+    """Return the values of the 'Marca' column (data rows only) of the active sheet."""
+    from openpyxl import load_workbook
+    wb = load_workbook(ruta)
+    ws = wb.active
+    headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+    marca_col = headers.index("Marca") + 1
+    total_col = headers.index("Total") + 1
+    rows = []
+    for r in range(2, ws.max_row + 1):
+        rows.append((ws.cell(row=r, column=marca_col).value, ws.cell(row=r, column=total_col).value))
+    return rows
+
+
+def test_grouped_by_generico_adds_subtotals(tmp_path):
+    """agrupar_por_generico=True → per-generico subtotal rows + grand total row."""
+    loader = MagicMock(spec=DataLoader)
+    loader.get_ventas_historico_cliente.return_value = _make_grouped_df()
+
+    service = HistoricoClienteService(data_loader=loader)
+    config = _base_config(
+        clientes=[{"id_cliente": 1, "id_sucursal": 1}],
+        marcas=None,
+        articulos=None,
+        agrupar_por_generico=True,
+    )
+
+    with patch("src.services.historico_cliente.service.service_output_dir", return_value=tmp_path):
+        result = service.generar_reporte(config)
+
+    assert result.ruta_archivo.exists()
+
+    # Loader must be told to group by generico
+    _, kwargs = loader.get_ventas_historico_cliente.call_args
+    assert kwargs.get("agrupar_por_generico") is True
+
+    rows = _read_marca_column(result.ruta_archivo)
+    labels = {label for label, _ in rows}
+    assert "TOTAL CERVEZAS" in labels
+    assert "TOTAL VINOS" in labels
+    assert "TOTAL GENERAL" in labels
+
+    # Subtotal + grand-total values are correct
+    totals = dict(rows)
+    assert totals["TOTAL CERVEZAS"] == 290
+    assert totals["TOTAL VINOS"] == 15
+    assert totals["TOTAL GENERAL"] == 305
+
+
+def test_grouped_mode_no_filter_required(tmp_path):
+    """In grouped mode, neither marcas nor articulos is required (shows all marcas)."""
+    loader = MagicMock(spec=DataLoader)
+    loader.get_ventas_historico_cliente.return_value = _make_grouped_df()
+
+    service = HistoricoClienteService(data_loader=loader)
+    config = _base_config(
+        clientes=[{"id_cliente": 1, "id_sucursal": 1}],
+        marcas=None,
+        articulos=None,
+        agrupar_por_generico=True,
+    )
+
+    with patch("src.services.historico_cliente.service.service_output_dir", return_value=tmp_path):
+        result = service.generar_reporte(config)  # must NOT raise
+
+    assert len(result.sheets_generated) == 1
+
+
+def test_grouped_mode_generico_ordered_by_total(tmp_path):
+    """Genericos are ordered by descending total; CERVEZAS (290) before VINOS (15)."""
+    loader = MagicMock(spec=DataLoader)
+    loader.get_ventas_historico_cliente.return_value = _make_grouped_df()
+
+    service = HistoricoClienteService(data_loader=loader)
+    config = _base_config(
+        clientes=[{"id_cliente": 1, "id_sucursal": 1}],
+        marcas=None,
+        articulos=None,
+        agrupar_por_generico=True,
+    )
+
+    with patch("src.services.historico_cliente.service.service_output_dir", return_value=tmp_path):
+        result = service.generar_reporte(config)
+
+    labels = [label for label, _ in _read_marca_column(result.ruta_archivo)]
+    assert labels.index("TOTAL CERVEZAS") < labels.index("TOTAL VINOS")
+    # Grand total is the last row
+    assert labels[-1] == "TOTAL GENERAL"
+
+
 def test_long_client_name_truncated(tmp_path):
     """Client with 40-char nombre_cliente → sheet name is exactly 31 chars."""
     long_name = "A" * 40
