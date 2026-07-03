@@ -37,6 +37,11 @@ htmlcov/
 *.swp
 *.swo
 
+# Everything under data/ is generated output (reports, captures, send logs) —
+# never committed. Blanket-ignore the dir; the specific rules below are kept
+# for documentation and stay valid.
+data/
+
 # NO Excel files, images, PDFs anywhere under data/ (templates, outputs,
 # captures — all live locally, never committed)
 data/**/*.xlsx
