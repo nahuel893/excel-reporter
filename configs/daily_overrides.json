@@ -7,5 +7,10 @@
         "ejecutar": true,
         "enviar": false,
         "razon": "Activacion pendiente — verificar primer output antes de habilitar el envio."
+    },
+    "avance-branca": {
+        "ejecutar": true,
+        "enviar": false,
+        "razon": "Envio pausado hasta nuevo aviso — todavia usa los cupos del mes pasado (junio) en lugar de los de julio. Reactivar cuando se carguen los cupos del mes actual."
     }
 }
