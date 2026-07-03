@@ -655,13 +655,18 @@ class VentasService(BaseService):
             )
             if df_subdist is not None and not df_subdist.empty:
                 df_subdist = df_subdist.rename(columns={
-                    "origen": "Origen", "generico": "Generico", "marca": "Marca",
+                    "origen": "Origen",
+                    "razon_social": "Razon Social",
+                    "fantasia": "Fantasia",
+                    "generico": "Generico", "marca": "Marca",
                     "bultos": "Bultos", "htls": "HTLs",
                 })
                 style_subdist = SheetStyle(
                     numeric_format="#,##0",
                     column_formats={
                         "Origen": ColumnFormat(width=24, font_bold=True),
+                        "Razon Social": ColumnFormat(width=32),
+                        "Fantasia": ColumnFormat(width=26),
                         "Generico": ColumnFormat(width=18),
                         "Marca": ColumnFormat(width=22),
                         "Bultos": ColumnFormat(number_format="#,##0", width=12),
