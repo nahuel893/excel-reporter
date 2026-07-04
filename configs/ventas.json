@@ -7,7 +7,8 @@
             "CERVEZAS",
             "AGUAS DANONE",
             "VINOS CCU",
-            "SIDRAS Y LICORES"
+            "SIDRAS Y LICORES",
+            "PERNOD RICARD"
         ],
         "con_slicers": false,
         "con_cobertura": true,

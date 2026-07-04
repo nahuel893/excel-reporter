@@ -64,6 +64,7 @@ _GENERICO_FILL_COLORS: dict[str, str] = {
     "CERVEZAS": "FCE4D6",            # peach claro
     "SIDRAS Y LICORES": "E2EFDA",   # verde menta
     "VINOS CCU": "F4CCCC",           # rojo palido
+    "PERNOD RICARD": "EFD9A0",       # ambar whisky
 }
 
 # Genericos cuyo color de fondo es oscuro y necesitan font blanco.
@@ -378,7 +379,7 @@ _SUBDIST_SUPERVISOR = "Adrian Garcia"
 _SUBDIST_SHEET = "SUB DISTRIBUIDORES"
 # DIRECTIVA: la hoja SUB DISTRIBUIDORES SIEMPRE muestra solo genericos CCU,
 # sin importar lo que pida el config. Fijo aca para que no se filtre de mas.
-_SUBDIST_GENERICOS_CCU = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
+_SUBDIST_GENERICOS_CCU = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES", "PERNOD RICARD"]
 
 _COB_GENERICO_COLUMNS = {
     "sucursal": COLUMN_NAMES["sucursal"],

@@ -23,7 +23,7 @@ from src.services.resumen_mensual.processor import procesar_resumen_mensual
 logger = logging.getLogger(__name__)
 
 # Default genericos when config.genericos is None
-_DEFAULT_GENERICOS = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
+_DEFAULT_GENERICOS = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES", "PERNOD RICARD"]
 
 # Genericos lógicos cuya carga en fact_cupos está partida en sub-marcas.
 # Cuando una hoja pide "VINOS", el cupo se reconstruye sumando ARIZU + CANCILLER.

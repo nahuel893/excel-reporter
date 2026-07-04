@@ -125,7 +125,9 @@ class TestCuposFetch:
         assert periodo_arg == "2026-04"
 
     def test_cupos_fetched_with_default_genericos_when_none(self, tmp_path):
-        """When config.genericos is None, cupos fetch uses 4 default genericos."""
+        """When config.genericos is None, cupos fetch uses the default CCU genericos."""
+        from src.services.resumen_mensual.service import _DEFAULT_GENERICOS
+
         loader = _make_loader()
         config = ResumenMensualConfig(
             fecha_desde=FECHA_DESDE,
@@ -138,7 +140,8 @@ class TestCuposFetch:
         args, kwargs = loader.get_cupos_resumen_mensual.call_args
         genericos_arg = args[1] if len(args) > 1 else kwargs.get("genericos")
         assert isinstance(genericos_arg, list)
-        assert len(genericos_arg) == 4
+        assert genericos_arg == _DEFAULT_GENERICOS
+        assert "PERNOD RICARD" in genericos_arg
 
     def test_cupos_fetched_with_explicit_genericos(self, tmp_path):
         """When config.genericos is provided, cupos fetch uses that list."""

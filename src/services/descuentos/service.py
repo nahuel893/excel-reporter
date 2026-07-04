@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 # Genéricos CCU incluidos (ENVASES CCU se excluye a propósito — suma en la BD
 # pero no debe ir en el reporte).
-GENERICOS_CCU: list[str] = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
+GENERICOS_CCU: list[str] = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES", "PERNOD RICARD"]
 
 # Zona virtual: rutas de CASA CENTRAL (id_sucursal 1) que se renombran a VALLE SALTA.
 # Espeja _ZONAS_VIRTUALES_VENTAS de src/services/ventas/service.py.
