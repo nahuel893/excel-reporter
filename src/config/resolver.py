@@ -241,6 +241,11 @@ def merge_filters(
         "genericos_sin_prvta": global_f.genericos_sin_prvta,
         "marca_splits": global_f.marca_splits,
         "cupos_manuales": global_f.cupos_manuales,
+        # Per-client report filters (only meaningful per-report; no global fallback)
+        "clientes": None,
+        "articulos": None,
+        "marcas": None,
+        "agrupar_por_generico": False,
     }
     if report_f:
         if report_f.genericos is not None:
@@ -265,6 +270,14 @@ def merge_filters(
             merged["id_articulo"] = report_f.id_articulo
         if report_f.id_sucursal is not None:
             merged["id_sucursal"] = report_f.id_sucursal
+        if report_f.clientes is not None:
+            merged["clientes"] = report_f.clientes
+        if report_f.articulos is not None:
+            merged["articulos"] = report_f.articulos
+        if report_f.marcas is not None:
+            merged["marcas"] = report_f.marcas
+        if report_f.agrupar_por_generico is not None:
+            merged["agrupar_por_generico"] = report_f.agrupar_por_generico
 
     # no_delivery overrides everything — forces delivery off
     if no_delivery:

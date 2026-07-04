@@ -80,6 +80,7 @@ REPORT_HANDLERS: dict[str, str] = {
     "reporte-descuentos": "_run_descuentos_report",
     "subdistribuidores": "_run_subdistribuidores_report",
     "stock-suria": "_run_stock_suria_report",
+    "ventas-marca": "_run_ventas_marca_report",
 }
 
 
@@ -697,6 +698,35 @@ def _run_cartesiano_report(report, merged: dict) -> list[tuple[Path, dict]]:
     ]
 
 
+def _run_ventas_marca_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate ventas-marca report (quantity sold by marca for one generico)."""
+    from src.services.ventas_marca import VentasMarcaConfig, VentasMarcaService
+
+    genericos = merged.get("genericos") or []
+    if not genericos:
+        print("Error: ventas-marca requiere un generico en 'genericos' (filtros)")
+        return []
+
+    config = VentasMarcaConfig(
+        generico=genericos[0],
+        fecha=merged["fecha_desde"],
+        fecha_hasta=merged.get("fecha_hasta"),
+        id_sucursal=merged.get("id_sucursal") or 1,
+        nombre_archivo=report.nombre,
+    )
+
+    result = VentasMarcaService().generar_reporte(config)
+    print(f"Venta por Marca '{report.nombre}' generada exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Marcas: {result.marcas} | Total bultos: {result.total_bultos}")
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
 def _run_historico_cliente_report(report, merged: dict) -> list[tuple[Path, dict]]:
     """Generate historico-cliente report. Returns list of (path, metadata) tuples."""
     from src.services.historico_cliente import (
@@ -719,6 +749,7 @@ def _run_historico_cliente_report(report, merged: dict) -> list[tuple[Path, dict
         clientes=clientes,
         articulos=articulos,
         marcas=marcas,
+        agrupar_por_generico=merged.get("agrupar_por_generico", False),
         nombre_archivo=report.nombre,
     )
 

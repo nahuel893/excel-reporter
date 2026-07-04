@@ -23,6 +23,9 @@ class HistoricoClienteConfig:
     clientes: list[dict]                  # {"id_cliente": int, "id_sucursal": int}
     articulos: list[int] | None = None    # mutually exclusive with marcas
     marcas: list[str] | None = None       # mutually exclusive with articulos
+    # When True: show ALL marcas grouped by generico, with a subtotal row per
+    # generico and a grand-total row. No marca/articulo filter required.
+    agrupar_por_generico: bool = False
     nombre_archivo: str | None = None
 
 
@@ -41,6 +44,22 @@ _STYLE = SheetStyle(
     table_style="TableStyleMedium9",
 )
 
+# Grouped mode uses a plain (non-table) sheet so subtotal/grand-total rows can be
+# interleaved. Header styling is applied by ExcelWriter; subtotal/grand rows are
+# post-styled below.
+_GROUPED_STYLE = SheetStyle(
+    numeric_format="#,##0.##",
+    column_formats={},
+    as_table=False,
+)
+
+# Fill colors for interleaved summary rows (readable in a LibreOffice capture).
+_SUBTOTAL_FILL = "D6E0F0"   # light blue — per-generico subtotal
+_GRAND_FILL = "FFE08A"      # amber — grand total
+_GENERICO_COL = "Genérico"
+_MARCA_COL = "Marca"
+_TOTAL_COL = "Total"
+
 
 class HistoricoClienteService(BaseService):
     """Genera Excel con historico de ventas por cliente, mes a mes."""
@@ -49,11 +68,14 @@ class HistoricoClienteService(BaseService):
     GRANULARITY = "month"
 
     def generar_reporte(self, config: HistoricoClienteConfig) -> HistoricoClienteResult:
-        # 1. Validate mutual exclusivity
+        # 1. Validate filter combination
         if config.articulos and config.marcas:
             raise ValueError("Config tiene 'articulos' Y 'marcas'. Especifica solo uno.")
-        if not config.articulos and not config.marcas:
-            raise ValueError("Config debe tener 'articulos' O 'marcas'.")
+        # Grouped mode shows all marcas grouped by generico → no filter required.
+        if not config.agrupar_por_generico and not config.articulos and not config.marcas:
+            raise ValueError(
+                "Config debe tener 'articulos' O 'marcas' (o usar 'agrupar_por_generico')."
+            )
 
         # 2. Fetch data
         df = self.data_loader.get_ventas_historico_cliente(
@@ -62,6 +84,7 @@ class HistoricoClienteService(BaseService):
             clientes=config.clientes,
             articulos=config.articulos,
             marcas=config.marcas,
+            agrupar_por_generico=config.agrupar_por_generico,
         )
 
         # 3. Build full month range from config
@@ -93,23 +116,6 @@ class HistoricoClienteService(BaseService):
                 )
                 continue
 
-            # Pivot: rows = row_key, cols = mes, values = bultos
-            pivot = df_cli.pivot_table(
-                index="row_key",
-                columns="mes",
-                values="bultos",
-                aggfunc="sum",
-                fill_value=0,
-            ).reindex(columns=meses, fill_value=0)
-
-            # Flatten index so row_key becomes a column
-            pivot = pivot.reset_index().rename(
-                columns={"row_key": "Marca" if config.marcas else "Articulo"}
-            )
-
-            # Total column
-            pivot["Total"] = pivot[meses].sum(axis=1)
-
             # Sheet name: nombre_cliente or fallback, truncated to 31 chars
             nombre_cliente = str(df_cli["nombre_cliente"].iloc[0])
             sheet_name = (nombre_cliente or f"{id_cli}-{id_suc}")[:31]
@@ -121,9 +127,32 @@ class HistoricoClienteService(BaseService):
                 sheet_name = base[: 31 - len(suffix)] + suffix
                 counter += 1
 
-            writer.add_sheet(pivot, sheet_name=sheet_name, style=_STYLE)
+            if config.agrupar_por_generico:
+                sheet_df, subtotal_rows, grand_row = _build_grouped_frame(df_cli, meses)
+                writer.add_sheet(sheet_df, sheet_name=sheet_name, style=_GROUPED_STYLE)
+                _style_summary_rows(
+                    writer.workbook[sheet_name], subtotal_rows, grand_row, n_cols=len(sheet_df.columns)
+                )
+                total_registros += len(sheet_df)
+            else:
+                # Pivot: rows = row_key, cols = mes, values = bultos
+                pivot = df_cli.pivot_table(
+                    index="row_key",
+                    columns="mes",
+                    values="bultos",
+                    aggfunc="sum",
+                    fill_value=0,
+                ).reindex(columns=meses, fill_value=0)
+
+                pivot = pivot.reset_index().rename(
+                    columns={"row_key": "Marca" if config.marcas else "Articulo"}
+                )
+                pivot["Total"] = pivot[meses].sum(axis=1)
+
+                writer.add_sheet(pivot, sheet_name=sheet_name, style=_STYLE)
+                total_registros += len(pivot)
+
             sheets_generated.append(sheet_name)
-            total_registros += len(pivot)
 
         ruta = writer.save()
 
@@ -132,3 +161,82 @@ class HistoricoClienteService(BaseService):
             sheets_generated=sheets_generated,
             registros_procesados=total_registros,
         )
+
+
+def _build_grouped_frame(
+    df_cli: pd.DataFrame, meses: list[str]
+) -> tuple[pd.DataFrame, list[int], int]:
+    """Build the grouped-by-generico sheet frame with interleaved summary rows.
+
+    Rows are: for each generico (ordered by descending total) its marcas (also by
+    descending total), followed by a ``TOTAL {generico}`` subtotal row; finally a
+    ``TOTAL GENERAL`` grand-total row.
+
+    Returns:
+        (frame, subtotal_row_indices, grand_row_index) where the row indices are
+        0-based positions within the frame's data rows (excluding the header).
+    """
+    # Pivot marca × mes, then attach each marca's generico.
+    pivot = df_cli.pivot_table(
+        index="row_key",
+        columns="mes",
+        values="bultos",
+        aggfunc="sum",
+        fill_value=0,
+    ).reindex(columns=meses, fill_value=0)
+    pivot["Total"] = pivot[meses].sum(axis=1)
+    marca_generico = df_cli.groupby("row_key")["generico"].first()
+
+    gen_totales = (
+        pivot["Total"].groupby(marca_generico).sum().sort_values(ascending=False)
+    )
+
+    records: list[dict] = []
+    subtotal_rows: list[int] = []
+    for generico in gen_totales.index:
+        marcas_gen = marca_generico[marca_generico == generico].index
+        block = pivot.loc[pivot.index.isin(marcas_gen)].sort_values(
+            "Total", ascending=False
+        )
+        for marca, row in block.iterrows():
+            records.append(
+                {_GENERICO_COL: generico, _MARCA_COL: marca,
+                 **{m: row[m] for m in meses}, _TOTAL_COL: row[_TOTAL_COL]}
+            )
+        # Subtotal row for this generico
+        subtotal_rows.append(len(records))
+        records.append(
+            {_GENERICO_COL: "", _MARCA_COL: f"TOTAL {generico}",
+             **{m: block[m].sum() for m in meses}, _TOTAL_COL: block[_TOTAL_COL].sum()}
+        )
+
+    # Grand total
+    grand_row = len(records)
+    records.append(
+        {_GENERICO_COL: "", _MARCA_COL: "TOTAL GENERAL",
+         **{m: pivot[m].sum() for m in meses}, _TOTAL_COL: pivot[_TOTAL_COL].sum()}
+    )
+
+    frame = pd.DataFrame(records, columns=[_GENERICO_COL, _MARCA_COL, *meses, _TOTAL_COL])
+    return frame, subtotal_rows, grand_row
+
+
+def _style_summary_rows(ws, subtotal_rows: list[int], grand_row: int, n_cols: int) -> None:
+    """Bold + fill the subtotal and grand-total rows of the grouped sheet.
+
+    Row indices are 0-based within the data rows; the worksheet header occupies
+    row 1, so data row ``i`` maps to worksheet row ``i + 2``.
+    """
+    from openpyxl.styles import Font, PatternFill
+
+    def _paint(data_idx: int, color: str) -> None:
+        excel_row = data_idx + 2
+        fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
+        for col in range(1, n_cols + 1):
+            cell = ws.cell(row=excel_row, column=col)
+            cell.fill = fill
+            cell.font = Font(bold=True)
+
+    for idx in subtotal_rows:
+        _paint(idx, _SUBTOTAL_FILL)
+    _paint(grand_row, _GRAND_FILL)
