@@ -199,6 +199,11 @@ SERVICIOS: list[Servicio] = [
         fecha_modo="mes_a_hoy",
     ),
     Servicio(
+        nombre="ventas-marca-pernod",
+        config_path=CONFIGS_DIR / "ventas_marca_pernod_ricard.json",
+        fecha_modo="mes_a_hoy",
+    ),
+    Servicio(
         nombre="resumen-mensual",
         config_path=CONFIGS_DIR / "resumen_mensual.json",
         fecha_modo="mes_a_hoy",

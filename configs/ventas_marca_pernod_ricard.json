@@ -1,8 +1,8 @@
 {
     "tipo": "ventas-marca",
     "filtros": {
-        "fecha_desde": "2026-07-03",
-        "fecha_hasta": "2026-07-03",
+        "fecha_desde": "2026-07-01",
+        "fecha_hasta": "2026-07-31",
         "genericos": ["PERNOD RICARD"],
         "id_sucursal": 1,
         "enviar_email": false,
@@ -11,17 +11,17 @@
     },
     "reportes": [
         {
-            "nombre": "Venta por Marca PERNOD RICARD - 2026-07-03",
+            "nombre": "Venta por Marca PERNOD RICARD",
             "filtros": {},
             "capture_images": [
                 {
                     "hoja": "Venta x Marca",
-                    "rango": "A1:B16",
+                    "rango": "A1:B32",
                     "renderer": "libreoffice"
                 }
             ],
             "enviar_a": {
-                "Nahuel Aguirre": {
+                "Gonzalo Farah": {
                     "via": ["whatsapp"]
                 }
             }
