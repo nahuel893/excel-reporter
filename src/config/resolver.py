@@ -228,6 +228,7 @@ def merge_filters(
         "sucursales": None,
         "archivo_plantilla": global_f.archivo_plantilla,
         "tipo_plantilla": global_f.tipo_plantilla,
+        "notificar_feriados_a": global_f.notificar_feriados_a,
         "id_sucursal": global_f.id_sucursal,
         "id_fuerza_ventas": global_f.id_fuerza_ventas,
         "id_articulo": global_f.id_articulo,

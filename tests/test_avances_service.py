@@ -682,3 +682,388 @@ class TestMainForwardsTipoPlantilla:
 
         assert len(captured_configs) == 1
         assert captured_configs[0].tipo_plantilla == "branca"
+
+
+# ── dias sheet holidays (feriados) ────────────────────────────────────────────
+
+from datetime import date
+
+
+def _make_wb_with_dias_sheet():
+    """In-memory workbook seeded like the real avance-badie 'dias' sheet.
+
+    B2/B3 hold NETWORKDAYS.INTL formulas referencing the hardcoded $H$2:$H$5
+    holiday range. H2..H5 hold four stale June dates (leftovers from a prior
+    month). Seeding rows BELOW the new month's holiday count lets tests prove
+    that _update_dias_feriados actually CLEARS stale rows, not just that it
+    writes the new ones.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "dias"
+    ws["B2"] = "=NETWORKDAYS.INTL(F6,F7,11,$H$2:$H$5)"
+    ws["B3"] = "=NETWORKDAYS.INTL(F6,F8,11,$H$2:$H$5)"
+    ws["H2"] = date(2026, 6, 15)
+    ws["H3"] = date(2026, 6, 20)
+    ws["H4"] = date(2026, 6, 25)
+    ws["H5"] = date(2026, 6, 27)
+    return wb
+
+
+class TestUpdateDiasFeriados:
+    def test_populates_current_month_holidays(self):
+        """For July 2026 the H column holds the two July holidays and the old
+        June dates are gone; formula range is widened to $H$2:$H$10."""
+        service = AvancesService(data_loader=MagicMock(spec=DataLoader))
+        wb = _make_wb_with_dias_sheet()
+
+        feriados = service._update_dias_feriados(wb, "2026-07-01")
+
+        ws = wb["dias"]
+        # First July holiday in H2
+        assert ws["H2"].value == date(2026, 7, 9)
+        assert ws["H3"].value == date(2026, 7, 10)
+        # H4/H5 were seeded with stale June dates; they must be CLEARED because
+        # July has only two holidays. This proves stale rows below the new
+        # holiday count are wiped (not merely that empty rows stay empty).
+        assert ws["H4"].value is None
+        assert ws["H5"].value is None
+        # Formula range widened so any month's holiday count fits
+        assert "$H$2:$H$10" in ws["B2"].value
+        assert "$H$2:$H$10" in ws["B3"].value
+        # Return value carries (date, motivo) for the applied holidays
+        assert any(
+            f == date(2026, 7, 9) and "Independencia" in m for f, m in feriados
+        )
+
+    def test_no_dias_sheet_returns_empty_and_no_raise(self):
+        """A workbook without a 'dias' sheet is a no-op returning []."""
+        service = AvancesService(data_loader=MagicMock(spec=DataLoader))
+        wb = Workbook()
+        wb.active.title = "otra_hoja"
+
+        result = service._update_dias_feriados(wb, "2026-07-01")
+
+        assert result == []
+
+    def test_zero_holiday_month_clears_range_and_returns_empty(self, monkeypatch):
+        """A month with no holidays must clear the whole H2:H10 range and return [].
+
+        Every real 2026 Salta month has >=1 holiday, so we monkeypatch
+        feriados_del_mes to return [] and confirm the pre-seeded stale dates
+        (H2..H5) are wiped and nothing is written back.
+        """
+        import src.services.avances.service as avances_service
+
+        monkeypatch.setattr(
+            avances_service, "feriados_del_mes", lambda anio, mes: []
+        )
+
+        service = AvancesService(data_loader=MagicMock(spec=DataLoader))
+        wb = _make_wb_with_dias_sheet()  # H2..H5 pre-seeded with stale June dates
+
+        result = service._update_dias_feriados(wb, "2026-07-01")
+
+        ws = wb["dias"]
+        # Entire holiday range H2..H10 must be empty.
+        for row in range(2, 11):
+            assert ws.cell(row=row, column=8).value is None, f"H{row} not cleared"
+        assert result == []
+
+
+class TestAvancesResultFeriadosField:
+    def test_result_has_feriados_aplicados_default_empty(self):
+        """AvancesResult must expose feriados_aplicados defaulting to []."""
+        from src.services.avances.service import AvancesResult
+
+        result = AvancesResult(ruta_archivo=Path("x.xlsx"), registros_por_hoja={})
+        assert result.feriados_aplicados == []
+
+
+class TestNotificarFeriadosConfig:
+    """notificar_feriados_a threads from GlobalFilters through merge_filters."""
+
+    def test_global_filters_accepts_notificar_feriados_a(self):
+        from src.config.models import GlobalFilters
+
+        gf = GlobalFilters(
+            fecha_desde="2026-07-01",
+            fecha_hasta="2026-07-31",
+            notificar_feriados_a="Nahuel Aguirre",
+        )
+        assert gf.notificar_feriados_a == "Nahuel Aguirre"
+
+    def test_global_filters_notificar_feriados_a_defaults_none(self):
+        from src.config.models import GlobalFilters
+
+        gf = GlobalFilters(fecha_desde="2026-07-01", fecha_hasta="2026-07-31")
+        assert gf.notificar_feriados_a is None
+
+    def test_merge_filters_threads_notificar_feriados_a(self):
+        from src.config.models import GlobalFilters
+        from src.config.resolver import merge_filters
+
+        gf = GlobalFilters(
+            fecha_desde="2026-07-01",
+            fecha_hasta="2026-07-31",
+            notificar_feriados_a="Nahuel Aguirre",
+        )
+        merged = merge_filters(gf, None)
+        assert merged["notificar_feriados_a"] == "Nahuel Aguirre"
+
+
+class TestNotificaFeriadosWiring:
+    """main._run_avances_report sends the holidays notification, guarded."""
+
+    def test_resolve_target_raw_phone_used_directly(self):
+        import main as main_module
+
+        assert main_module._resolve_feriados_target("5493875000000") == "5493875000000"
+
+    def test_resolve_target_contact_name_resolves_to_telefono(self, monkeypatch):
+        """A contact NAME resolves to that contact's telefono via load_contacts."""
+        import main as main_module
+        from types import SimpleNamespace
+
+        fake_contacts = {"Walter Vilte": SimpleNamespace(telefono="5493875111222")}
+        monkeypatch.setattr(
+            "src.config.resolver.load_contacts", lambda path: fake_contacts
+        )
+
+        assert main_module._resolve_feriados_target("Walter Vilte") == "5493875111222"
+
+    def test_resolve_target_unresolvable_name_returns_none(self, monkeypatch):
+        """A name absent from the catalog resolves to None (best-effort)."""
+        import main as main_module
+
+        monkeypatch.setattr(
+            "src.config.resolver.load_contacts", lambda path: {}
+        )
+
+        assert main_module._resolve_feriados_target("Ghost Contact") is None
+
+    def _fake_result(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        result = MagicMock()
+        result.ruta_archivo = tmp_path / "output.xlsx"
+        result.registros_por_hoja = {}
+        result.feriados_aplicados = [(date(2026, 7, 9), "Día de la Independencia")]
+        return result
+
+    def test_notifica_via_whatsapp_cuando_configurado(self, tmp_path):
+        import main as main_module
+        from src.config.models import ReportEntry
+        from unittest.mock import patch
+
+        report = ReportEntry(nombre="AVANCE BADIE - JULIO 2026")
+        merged = {
+            "tipo_plantilla": "badie",
+            "fecha_desde": "2026-07-01",
+            "fecha_hasta": "2026-07-31",
+            "id_sucursal": 1,
+            "id_fuerza_ventas": 1,
+            "notificar_feriados_a": "5493875000000",
+        }
+
+        sent: dict = {}
+
+        class FakeClient:
+            def __init__(self, url):
+                sent["url"] = url
+
+            def send_text(self, target="", text="", group_name=None):
+                sent["target"] = target
+                sent["text"] = text
+                return {"success": True}
+
+        fake_result = self._fake_result(tmp_path)
+
+        with patch(
+            "src.services.avances.service.AvancesService.generar_reporte",
+            lambda self_svc, config: fake_result,
+        ), patch("src.core.whatsapp_client.WhatsAppClient", FakeClient):
+            main_module._run_avances_report(report, merged)
+
+        assert sent.get("target") == "5493875000000"
+        assert "Independencia" in sent.get("text", "")
+
+    def test_notificacion_fallida_no_rompe_generacion(self, tmp_path):
+        import main as main_module
+        from src.config.models import ReportEntry
+        from unittest.mock import patch
+
+        report = ReportEntry(nombre="AVANCE BADIE - JULIO 2026")
+        merged = {
+            "fecha_desde": "2026-07-01",
+            "fecha_hasta": "2026-07-31",
+            "notificar_feriados_a": "5493875000000",
+        }
+
+        class BoomClient:
+            def __init__(self, url):
+                pass
+
+            def send_text(self, *a, **k):
+                raise ConnectionError("no service")
+
+        fake_result = self._fake_result(tmp_path)
+
+        with patch(
+            "src.services.avances.service.AvancesService.generar_reporte",
+            lambda self_svc, config: fake_result,
+        ), patch("src.core.whatsapp_client.WhatsAppClient", BoomClient):
+            artifacts = main_module._run_avances_report(report, merged)
+
+        # Generation still returns the artifact despite the notification failure.
+        assert len(artifacts) == 1
+
+    def test_no_notifica_cuando_no_configurado(self, tmp_path):
+        import main as main_module
+        from src.config.models import ReportEntry
+        from unittest.mock import patch
+
+        report = ReportEntry(nombre="AVANCE BADIE - JULIO 2026")
+        merged = {
+            "fecha_desde": "2026-07-01",
+            "fecha_hasta": "2026-07-31",
+        }
+
+        fake_result = self._fake_result(tmp_path)
+        called = {"n": 0}
+
+        class FakeClient:
+            def __init__(self, url):
+                called["n"] += 1
+
+            def send_text(self, *a, **k):
+                called["n"] += 1
+
+        with patch(
+            "src.services.avances.service.AvancesService.generar_reporte",
+            lambda self_svc, config: fake_result,
+        ), patch("src.core.whatsapp_client.WhatsAppClient", FakeClient):
+            main_module._run_avances_report(report, merged)
+
+        assert called["n"] == 0
+
+    # ── Fix 1: notification honors --test-mode and --no-delivery ──────────────
+
+    def test_test_mode_redirects_to_test_contact(self, tmp_path):
+        """In test mode the notification goes to the TEST_CONTACT (Nahuel),
+        never to the configured real supervisor."""
+        import main as main_module
+        from src.config.resolver import TEST_CONTACT_NAME
+        from src.config.models import ReportEntry
+        from unittest.mock import patch
+        from types import SimpleNamespace
+
+        report = ReportEntry(nombre="AVANCE BADIE - JULIO 2026")
+        merged = {
+            "fecha_desde": "2026-07-01",
+            "fecha_hasta": "2026-07-31",
+            "notificar_feriados_a": "Real Supervisor Name",
+            "test_mode": True,
+        }
+
+        # Test contact and real contact resolve to DISTINCT phones so we can
+        # assert the redirect actually happened.
+        fake_contacts = {
+            TEST_CONTACT_NAME: SimpleNamespace(telefono="5493875000001"),
+            "Real Supervisor Name": SimpleNamespace(telefono="5493875999999"),
+        }
+
+        sent: dict = {}
+
+        class FakeClient:
+            def __init__(self, url):
+                pass
+
+            def send_text(self, target="", text="", group_name=None):
+                sent["target"] = target
+                return {"success": True}
+
+        fake_result = self._fake_result(tmp_path)
+
+        with patch(
+            "src.services.avances.service.AvancesService.generar_reporte",
+            lambda self_svc, config: fake_result,
+        ), patch("src.core.whatsapp_client.WhatsAppClient", FakeClient), patch(
+            "src.config.resolver.load_contacts", lambda path: fake_contacts
+        ):
+            main_module._run_avances_report(report, merged)
+
+        assert sent.get("target") == "5493875000001"  # test contact (Nahuel)
+        assert sent.get("target") != "5493875999999"  # NOT the real supervisor
+
+    def test_no_delivery_suppresses_notification(self, tmp_path):
+        """A --no-delivery run never calls send_text."""
+        import main as main_module
+        from src.config.models import ReportEntry
+        from unittest.mock import patch
+
+        report = ReportEntry(nombre="AVANCE BADIE - JULIO 2026")
+        merged = {
+            "fecha_desde": "2026-07-01",
+            "fecha_hasta": "2026-07-31",
+            "notificar_feriados_a": "X",
+            "no_delivery": True,
+        }
+
+        called = {"n": 0}
+
+        class FakeClient:
+            def __init__(self, url):
+                pass
+
+            def send_text(self, *a, **k):
+                called["n"] += 1
+
+        fake_result = self._fake_result(tmp_path)
+
+        with patch(
+            "src.services.avances.service.AvancesService.generar_reporte",
+            lambda self_svc, config: fake_result,
+        ), patch("src.core.whatsapp_client.WhatsAppClient", FakeClient):
+            main_module._run_avances_report(report, merged)
+
+        assert called["n"] == 0
+
+    def test_normal_run_sends_to_resolved_contact_phone(self, tmp_path):
+        """Without test_mode/no_delivery the notification sends to the
+        configured contact's resolved phone."""
+        import main as main_module
+        from src.config.models import ReportEntry
+        from unittest.mock import patch
+        from types import SimpleNamespace
+
+        report = ReportEntry(nombre="AVANCE BADIE - JULIO 2026")
+        merged = {
+            "fecha_desde": "2026-07-01",
+            "fecha_hasta": "2026-07-31",
+            "notificar_feriados_a": "X",
+        }
+
+        fake_contacts = {"X": SimpleNamespace(telefono="5493875123456")}
+
+        sent: dict = {}
+
+        class FakeClient:
+            def __init__(self, url):
+                pass
+
+            def send_text(self, target="", text="", group_name=None):
+                sent["target"] = target
+                return {"success": True}
+
+        fake_result = self._fake_result(tmp_path)
+
+        with patch(
+            "src.services.avances.service.AvancesService.generar_reporte",
+            lambda self_svc, config: fake_result,
+        ), patch("src.core.whatsapp_client.WhatsAppClient", FakeClient), patch(
+            "src.config.resolver.load_contacts", lambda path: fake_contacts
+        ):
+            main_module._run_avances_report(report, merged)
+
+        assert sent.get("target") == "5493875123456"

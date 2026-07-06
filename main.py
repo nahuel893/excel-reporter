@@ -158,6 +158,10 @@ def _run_reportes(report_config, contactos, test_mode: bool = False, no_delivery
 
     for report in report_config.reportes:
         merged = merge_filters(report_config.filtros, report.filtros, no_delivery=no_delivery)
+        # Expose the run context so per-report handlers (e.g. the holidays
+        # notification) can honor the test-mode redirect and no-delivery switch.
+        merged["test_mode"] = test_mode
+        merged["no_delivery"] = no_delivery
 
         print(f"\nGenerando: {report.nombre}")
 
@@ -804,6 +808,77 @@ def _run_reporte_general_badie_report(report, merged: dict) -> list[tuple[Path, 
     return [(result.ruta_archivo, {}), (result.ruta_archivo_extendido, {})]
 
 
+def _resolve_feriados_target(nombre_o_telefono: str) -> str | None:
+    """Resolve a holidays-notification target to a WhatsApp destination.
+
+    A raw phone number (only digits, optional leading '+', spaces or dashes) is
+    used directly. Otherwise the value is treated as a contact name and looked
+    up in the contactos catalog to get its ``telefono``.
+
+    Returns None when the contact cannot be resolved.
+    """
+    candidato = nombre_o_telefono.strip()
+    solo_digitos = candidato.lstrip("+").replace(" ", "").replace("-", "")
+    if solo_digitos.isdigit():
+        return candidato
+
+    try:
+        from src.config.resolver import load_contacts
+
+        contactos = load_contacts(Path("configs/contactos.json"))
+        contacto = contactos.get(nombre_o_telefono)
+        if contacto and contacto.telefono:
+            return contacto.telefono
+    except Exception as exc:  # noqa: BLE001 — resolution is best-effort
+        logger.warning("No se pudo resolver contacto '%s': %s", nombre_o_telefono, exc)
+    return None
+
+
+def _notificar_feriados_avances(report, merged: dict, result) -> None:
+    """Send the applied-holidays WhatsApp notification for an avances run.
+
+    Guarded end to end: a missing target, an unresolved contact, or a transport
+    failure only logs a warning — it MUST NOT break report generation.
+
+    Honors the run context: a --no-delivery run sends nothing, and a --test-mode
+    run redirects the notification to the test contact (never a real supervisor).
+    """
+    # A --no-delivery run must not send anything.
+    if merged.get("no_delivery"):
+        return
+
+    destino = merged.get("notificar_feriados_a")
+    if not destino:
+        return
+
+    # In test mode, redirect to the safe test contact so a real supervisor is
+    # never notified. This mirrors resolve_delivery's test-mode chokepoint.
+    if merged.get("test_mode"):
+        from src.config.resolver import TEST_CONTACT_NAME
+
+        destino = TEST_CONTACT_NAME
+
+    try:
+        from config.settings import WHATSAPP_SERVICE_URL
+
+        from src.core.feriados import formatear_notificacion_feriados
+        from src.core.whatsapp_client import WhatsAppClient
+
+        target = _resolve_feriados_target(destino)
+        if not target:
+            logger.warning(
+                "notificar_feriados_a='%s' no se pudo resolver a un destino", destino
+            )
+            return
+
+        feriados = getattr(result, "feriados_aplicados", None) or []
+        texto = formatear_notificacion_feriados(feriados, report.nombre)
+        WhatsAppClient(WHATSAPP_SERVICE_URL).send_text(target=target, text=texto)
+        logger.info("Notificacion de feriados enviada a %s", target)
+    except Exception as exc:  # noqa: BLE001 — notification must never break generation
+        logger.warning("No se pudo enviar la notificacion de feriados: %s", exc)
+
+
 def _run_avances_report(report, merged: dict) -> list[tuple[Path, dict]]:
     """Generate avances report. Returns list of (path, metadata) tuples."""
     import logging
@@ -840,6 +915,11 @@ def _run_avances_report(report, merged: dict) -> list[tuple[Path, dict]]:
     for hoja, registros in result.registros_por_hoja.items():
         print(f"  - {hoja}: {registros} registros")
     print(f"  - Archivo: {result.ruta_archivo}")
+
+    # Notify the applied month holidays (own operational channel — independent
+    # of enviar_email / enviar_whatsapp / no_delivery). Never breaks generation.
+    _notificar_feriados_avances(report, merged, result)
+
     return [
         (
             Path(result.ruta_archivo),

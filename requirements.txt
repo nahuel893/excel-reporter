@@ -18,3 +18,4 @@ sse-starlette>=1.8  # Management UI: SSE log streaming
 sqlglot>=25.0.0,<31.0.0  # SQL AST parser for safety validation (bd_agent)
 pyarrow>=15.0,<20.0  # Parquet I/O for sandbox staging (bd_agent)
 google-genai>=0.7,<2.0  # Gemini API SDK for bd_agent LLM provider
+holidays>=0.40  # Argentina/Salta public holidays for avances 'dias' sheet

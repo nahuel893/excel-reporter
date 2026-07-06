@@ -15,13 +15,14 @@ import logging
 import shutil
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
 
 from openpyxl import load_workbook
 
 from src.core.excel_updater import replace_sheet_data
+from src.core.feriados import feriados_del_mes
 from src.core.output_paths import service_output_dir
 from src.services.base_service import BaseService
 
@@ -265,6 +266,7 @@ class AvancesResult:
 
     ruta_archivo: Path
     registros_por_hoja: dict[str, int]
+    feriados_aplicados: list[tuple[date, str]] = field(default_factory=list)
 
 
 class AvancesService(BaseService):
@@ -325,6 +327,64 @@ class AvancesService(BaseService):
                 return base_path
 
         return None
+
+    # Holiday range in the 'dias' sheet, column H. Rows 2..10 give room for any
+    # month's holiday count (originally the template only wired H2:H5).
+    _DIAS_HOLIDAY_COL = 8  # column H
+    _DIAS_HOLIDAY_FIRST_ROW = 2
+    _DIAS_HOLIDAY_LAST_ROW = 10
+
+    def _update_dias_feriados(
+        self, wb, fecha_desde: str
+    ) -> list[tuple[date, str]]:
+        """Populate the 'dias' sheet holiday cells with the current month's
+        Argentina/Salta holidays.
+
+        The 'dias' sheet computes working days via NETWORKDAYS.INTL formulas
+        that reference a hardcoded holiday range in column H. Here we refresh
+        that range for the report's month so the working-day counts are correct.
+
+        Args:
+            wb: The openpyxl workbook being written.
+            fecha_desde: Report start date, "YYYY-MM-DD" — its year/month select
+                the holiday set.
+
+        Returns:
+            The applied holidays as ``(date, motivo)`` tuples (empty when the
+            workbook has no 'dias' sheet — e.g. branca templates).
+        """
+        if "dias" not in wb.sheetnames:
+            return []
+
+        ws = wb["dias"]
+        desde = datetime.strptime(fecha_desde, "%Y-%m-%d")
+        feriados = feriados_del_mes(desde.year, desde.month)
+
+        # Widen the NETWORKDAYS.INTL holiday range so any month's count fits.
+        # Targeted replace only when the original narrow range is present.
+        for coord in ("B2", "B3"):
+            formula = ws[coord].value
+            if isinstance(formula, str) and "$H$2:$H$5" in formula:
+                ws[coord].value = formula.replace("$H$2:$H$5", "$H$2:$H$10")
+
+        # Clear the whole holiday range, then write the dates in order.
+        # Note: openpyxl's ws.cell(row, col, value=None) is a NO-OP (it only
+        # assigns when value is not None), so we must clear via .value = None to
+        # actually wipe stale rows.
+        for row in range(self._DIAS_HOLIDAY_FIRST_ROW, self._DIAS_HOLIDAY_LAST_ROW + 1):
+            ws.cell(row=row, column=self._DIAS_HOLIDAY_COL).value = None
+
+        for offset, (fecha, _motivo) in enumerate(feriados):
+            row = self._DIAS_HOLIDAY_FIRST_ROW + offset
+            if row > self._DIAS_HOLIDAY_LAST_ROW:
+                logger.warning(
+                    "dias sheet: more holidays (%d) than range rows; extra ones dropped",
+                    len(feriados),
+                )
+                break
+            ws.cell(row=row, column=self._DIAS_HOLIDAY_COL, value=fecha)
+
+        return feriados
 
     def generar_reporte(self, config: AvancesConfig) -> AvancesResult:
         if not config.nombre_archivo:
@@ -389,10 +449,16 @@ class AvancesService(BaseService):
             logger.info("Sheet '%s': %d filas escritas en %.1fs", sc.sheet_name, rows, time.perf_counter() - t2)
             registros[sc.sheet_name] = rows
 
+        feriados_aplicados = self._update_dias_feriados(wb, config.fecha_desde)
+
         logger.info("Guardando workbook ...")
         t3 = time.perf_counter()
         wb.save(str(output_path))
         wb.close()
         logger.info("Guardado en %.1fs -> %s", time.perf_counter() - t3, output_path)
 
-        return AvancesResult(ruta_archivo=output_path, registros_por_hoja=registros)
+        return AvancesResult(
+            ruta_archivo=output_path,
+            registros_por_hoja=registros,
+            feriados_aplicados=feriados_aplicados,
+        )

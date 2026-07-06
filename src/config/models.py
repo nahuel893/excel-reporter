@@ -65,6 +65,9 @@ class GlobalFilters(BaseModel):
     enviar_whatsapp: bool = True
     archivo_plantilla: str | None = None
     tipo_plantilla: Literal["branca", "badie"] = "branca"
+    # avances: contact name (from contactos catalog) or raw phone to notify with
+    # the month's applied holidays. None disables the notification.
+    notificar_feriados_a: str | None = None
     id_sucursal: int | None = None
     id_fuerza_ventas: int | None = None
     id_articulo: int | None = None
