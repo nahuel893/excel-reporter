@@ -2,8 +2,8 @@
     "tipo": "avances",
     "filtros": {
         "tipo_plantilla": "badie",
-        "fecha_desde": "2026-06-01",
-        "fecha_hasta": "2026-06-30",
+        "fecha_desde": "2026-07-01",
+        "fecha_hasta": "2026-07-31",
         "archivo_plantilla": "data/input/avances/AVANCE BADIE.xlsx",
         "id_sucursal": 1,
         "id_fuerza_ventas": 1,
@@ -12,7 +12,7 @@
     },
     "reportes": [
         {
-            "nombre": "AVANCE BADIE - JUNIO 2026"
+            "nombre": "AVANCE BADIE - JULIO 2026"
         }
     ]
 }
