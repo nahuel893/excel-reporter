@@ -44,7 +44,8 @@
             "enviar_a": {
                 "Sebastian Dellamea": {
                     "via": [
-                        "whatsapp"
+                        "whatsapp",
+                        "email_cc"
                     ]
                 },
                 "Walter Vilte": {
@@ -53,6 +54,11 @@
                     ]
                 },
                 "Nahuel Aguirre": {
+                    "via": [
+                        "email_cc"
+                    ]
+                },
+                "Fabian Gallardo": {
                     "via": [
                         "email_cc"
                     ]
@@ -84,6 +90,16 @@
                     "via": [
                         "email_cc"
                     ]
+                },
+                "Fabian Gallardo": {
+                    "via": [
+                        "email_cc"
+                    ]
+                },
+                "Sebastian Dellamea": {
+                    "via": [
+                        "email_cc"
+                    ]
                 }
             }
         },
@@ -107,6 +123,16 @@
                     ]
                 },
                 "Nahuel Aguirre": {
+                    "via": [
+                        "email_cc"
+                    ]
+                },
+                "Fabian Gallardo": {
+                    "via": [
+                        "email_cc"
+                    ]
+                },
+                "Sebastian Dellamea": {
                     "via": [
                         "email_cc"
                     ]
@@ -138,6 +164,16 @@
                     ]
                 },
                 "Nahuel Aguirre": {
+                    "via": [
+                        "email_cc"
+                    ]
+                },
+                "Fabian Gallardo": {
+                    "via": [
+                        "email_cc"
+                    ]
+                },
+                "Sebastian Dellamea": {
                     "via": [
                         "email_cc"
                     ]
