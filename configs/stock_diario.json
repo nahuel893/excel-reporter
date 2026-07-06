@@ -3,7 +3,7 @@
     "filtros": {
         "fecha_desde": "2026-05-01",
         "fecha_hasta": "2026-05-14",
-        "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
+        "genericos": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES", "PERNOD RICARD"]
     },
     "reportes": [
         {
