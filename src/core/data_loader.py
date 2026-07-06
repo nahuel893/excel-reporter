@@ -1027,6 +1027,68 @@ class DataLoader:
         """
         return self.execute_query(query, params)
 
+    def _get_cob_cupos(
+        self,
+        table: str,
+        value_col: str,
+        periodo_desde: str,
+        periodo_hasta: str,
+        sucursales: list[str],
+        id_fuerza_ventas: int,
+    ) -> pd.DataFrame:
+        """Raw cob_preventista_* dump for the cupos-cobertura engine.
+
+        Returns the 10 original table columns (no dim joins), filtered by a
+        period range, a single sales force and a list of branch descriptions.
+        Ordered by (periodo, id) to mirror a natural table dump.
+
+        ``table`` and ``value_col`` are internal constants (never user input),
+        so interpolating them into the SQL is safe.
+        """
+        placeholders = ", ".join(f":suc_{i}" for i in range(len(sucursales)))
+        params: dict = {
+            "desde": periodo_desde,
+            "hasta": periodo_hasta,
+            "fv": id_fuerza_ventas,
+        }
+        params.update({f"suc_{i}": s for i, s in enumerate(sucursales)})
+        query = f"""
+        SELECT id, periodo, id_fuerza_ventas, id_vendedor, id_ruta, id_sucursal,
+               ds_sucursal, {value_col}, clientes_compradores, volumen_total
+        FROM gold.{table}
+        WHERE periodo BETWEEN :desde AND :hasta
+          AND id_fuerza_ventas = :fv
+          AND ds_sucursal IN ({placeholders})
+        ORDER BY periodo, id
+        """
+        return self.execute_query(query, params)
+
+    def get_cob_generico_cupos(
+        self,
+        periodo_desde: str,
+        periodo_hasta: str,
+        sucursales: list[str],
+        id_fuerza_ventas: int = 1,
+    ) -> pd.DataFrame:
+        """Raw cob_preventista_generico dump for the cupos-cobertura reload."""
+        return self._get_cob_cupos(
+            "cob_preventista_generico", "generico",
+            periodo_desde, periodo_hasta, sucursales, id_fuerza_ventas,
+        )
+
+    def get_cob_marca_cupos(
+        self,
+        periodo_desde: str,
+        periodo_hasta: str,
+        sucursales: list[str],
+        id_fuerza_ventas: int = 1,
+    ) -> pd.DataFrame:
+        """Raw cob_preventista_marca dump for the cupos-cobertura reload."""
+        return self._get_cob_cupos(
+            "cob_preventista_marca", "marca",
+            periodo_desde, periodo_hasta, sucursales, id_fuerza_ventas,
+        )
+
     def get_cobertura_custom(
         self,
         periodo: str,
