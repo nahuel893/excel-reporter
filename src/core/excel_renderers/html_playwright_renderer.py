@@ -46,7 +46,10 @@ class HtmlPlaywrightRenderer:
         range_addr: str,
         output_dir: Path,
         dpi: int = 300,
+        crop: bool = False,
     ) -> Path:
+        # `crop` is accepted for Protocol consistency but ignored: xlsx2html
+        # renders the whole sheet and cannot restrict to a range/print_area.
         xlsx_path = Path(xlsx_path)
         output_dir = Path(output_dir)
 

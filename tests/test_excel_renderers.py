@@ -81,8 +81,35 @@ class TestLibreOfficeRenderer:
             range_addr="A1:B2",
             output_dir=tmp_path,
             dpi=200,
+            crop=False,
         )
         assert result == expected_png
+
+    def test_forwards_crop_flag(self, tmp_path):
+        """crop must be threaded through to ExcelManager.capture_range."""
+        from src.core.excel_renderers.libreoffice_renderer import LibreOfficeRenderer
+
+        xlsx = tmp_path / "x.xlsx"
+        xlsx.write_bytes(b"")
+        expected_png = tmp_path / "result.png"
+
+        with patch(
+            "src.core.excel_renderers.libreoffice_renderer.ExcelManager"
+        ) as MockManager:
+            instance = MockManager.return_value
+            instance.capture_range.return_value = expected_png
+
+            LibreOfficeRenderer().render(
+                xlsx, "Sheet1", "A1:B2", tmp_path, dpi=200, crop=True
+            )
+
+        instance.capture_range.assert_called_once_with(
+            sheet_name="Sheet1",
+            range_addr="A1:B2",
+            output_dir=tmp_path,
+            dpi=200,
+            crop=True,
+        )
 
 
 class TestHtmlPlaywrightRenderer:

@@ -31,6 +31,7 @@ class ImageRenderer(Protocol):
         range_addr: str,
         output_dir: Path,
         dpi: int = 300,
+        crop: bool = False,
     ) -> Path:
         ...
 
