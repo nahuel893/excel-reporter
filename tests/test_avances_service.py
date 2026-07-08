@@ -8,11 +8,13 @@ from openpyxl.worksheet.table import Table
 from openpyxl.utils import get_column_letter
 
 from src.core.data_loader import DataLoader
+from src.core.excel_updater import replace_sheet_data
 from src.services.avances.service import (
     AvancesService,
     AvancesConfig,
     SHEET_CONFIGS_BRANCA,
     SHEET_CONFIGS_BADIE,
+    SHEET_CONFIGS_GUEMES,
     PLANTILLA_SHEET_CONFIGS,
 )
 
@@ -601,6 +603,8 @@ class TestBadieRoundTrip:
                     "gold cob_preventista_generico", "gold cob_preventista_marca"}),
         ("badie", {"pivot_python", "cober_gen", "cober_marca",
                     "CuposVolumen", "CuposCoberGen", "CuposCober"}),
+        ("guemes", {"pivot_python", "cober_gen", "cober_marca",
+                    "CuposVolumen", "CuposCoberGen", "CuposCober"}),
     ])
     def test_registry_dispatch_correct_sheets(self, tmp_path, tipo_plantilla, expected_sheets):
         """Registry dispatch must route to the correct sheet set per tipo_plantilla."""
@@ -628,6 +632,216 @@ class TestBadieRoundTrip:
 
         result = service.generar_reporte(config)
         assert set(result.registros_por_hoja.keys()) == expected_sheets
+
+
+# ── Guemes SHEET_CONFIGS tests (Phase 4, PR2) ─────────────────────────────────
+
+
+class TestGuemesSheetConfigs:
+    """Pure config tests for SHEET_CONFIGS_GUEMES (tasks 4.1-4.4, 4.8)."""
+
+    def test_guemes_has_6_sheets_in_order_and_is_distinct_object(self):
+        expected_order = [
+            "pivot_python", "cober_gen", "cober_marca",
+            "CuposVolumen", "CuposCoberGen", "CuposCober",
+        ]
+        assert [sc.sheet_name for sc in SHEET_CONFIGS_GUEMES] == expected_order
+        assert SHEET_CONFIGS_GUEMES is not SHEET_CONFIGS_BADIE
+
+    def test_cupos_volumen_data_columns_excludes_preventista(self):
+        cupos_volumen = next(sc for sc in SHEET_CONFIGS_GUEMES if sc.sheet_name == "CuposVolumen")
+        assert len(cupos_volumen.data_columns) == 5
+        assert "PREVENTISTA" not in cupos_volumen.data_columns
+        assert cupos_volumen.data_columns[-1] == "Cupo "
+
+    def test_cupos_cober_gen_data_columns_exact(self):
+        cupos_cober_gen = next(sc for sc in SHEET_CONFIGS_GUEMES if sc.sheet_name == "CuposCoberGen")
+        assert cupos_cober_gen.data_columns == ["Ruta", "Preventista", "Generico", "ZONA", "CUPO "]
+
+    def test_shared_column_constants_identical_across_badie_and_guemes(self):
+        """pivot_python/cober_gen/cober_marca data_columns must be the SAME
+        object in both plantilla configs — proves intentional sharing, and
+        guards against silent drift between badie and guemes."""
+        by_name_badie = {sc.sheet_name: sc for sc in SHEET_CONFIGS_BADIE}
+        by_name_guemes = {sc.sheet_name: sc for sc in SHEET_CONFIGS_GUEMES}
+        for name in ("pivot_python", "cober_gen", "cober_marca"):
+            assert by_name_badie[name].data_columns is by_name_guemes[name].data_columns, (
+                f"{name}: data_columns must be the identical shared object"
+            )
+
+    def test_cupos_sheets_carry_id_sucursal_query_param(self):
+        by_name = {sc.sheet_name: sc for sc in SHEET_CONFIGS_GUEMES}
+        for name in ("CuposVolumen", "CuposCoberGen", "CuposCober"):
+            assert "id_sucursal" in by_name[name].query_params, (
+                f"{name}: query_params must include id_sucursal for GUEMES scoping"
+            )
+
+    def test_guemes_registered_in_plantilla_registry(self):
+        assert PLANTILLA_SHEET_CONFIGS["guemes"] is SHEET_CONFIGS_GUEMES
+
+
+class TestBadieSheetConfigsLockAfterRefactor:
+    """Lock test: guards the shared-constant extraction — badie's
+    pivot_python/cober_gen/cober_marca data_columns must remain byte-identical
+    to their pre-refactor values (pure refactor, no behavior change)."""
+
+    def test_badie_pivot_cober_data_columns_unchanged(self):
+        by_name = {sc.sheet_name: sc for sc in SHEET_CONFIGS_BADIE}
+        assert by_name["pivot_python"].data_columns == [
+            "Sucursal",
+            "Descripcion Período",
+            "Descripcion Vendedor",
+            "Ruta",
+            "Descripcion_Ruta",
+            "Descripcion_Marca",
+            "GENERICO",
+            "Código_Articulo",
+            "Descripcion_Articulo",
+            "Cantidades Totales",
+        ]
+        assert by_name["cober_gen"].data_columns == [
+            "Sucursal",
+            "Descripcion Vendedor",
+            "Ruta",
+            "GENERICO",
+            "Numero_Clientes",
+        ]
+        assert by_name["cober_marca"].data_columns == [
+            "Sucursal",
+            "Descripcion Vendedor",
+            "Ruta",
+            "Descripcion_Marca",
+            "Numero_Clientes",
+        ]
+
+
+class TestGuemesRoundTripBehaviors:
+    """Round-trip tests exercising replace_sheet_data directly — proves the
+    design decisions behind the GUEMES cupos sheets without needing the real
+    binary template (tasks 4.5-4.7)."""
+
+    def test_cupos_cober_gen_empty_dataframe_keeps_header_no_raise(self):
+        """RF-04: CuposCoberGen fed a 0-row (but column-bearing) DataFrame must
+        keep its header row and must NOT raise ValueError. A 0-row SQL result
+        still carries its declared columns — this is the realistic shape when
+        GUEMES has no tipo_apertura='generico' rows yet."""
+        headers = ["Ruta", "Preventista", "Generico", "ZONA", "CUPO "]
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "CuposCoberGen"
+        for col_idx, h in enumerate(headers, 1):
+            ws.cell(row=1, column=col_idx, value=h)
+
+        empty_df = pd.DataFrame({h: pd.Series([], dtype=object) for h in headers})
+
+        rows_written = replace_sheet_data(wb, "CuposCoberGen", empty_df, headers)
+
+        assert rows_written == 0
+        assert ws.cell(row=1, column=1).value == "Ruta"  # header intact
+
+    def test_cupos_volumen_generico_rename_is_required_for_correct_write(self):
+        """RF-02 behavioral: the real GUEMES CuposVolumen has "GENERICO" at BOTH
+        the data col C and a static legend col P. Because replace_sheet_data's
+        col_map is last-wins, the GENERICO write lands in the LEGEND (col P) and
+        leaves the data col C empty — UNLESS the template-prep step renames col P
+        to GENERICO_LEGEND. This exercises both states, proving the rename (PR4)
+        is what makes the write land in the data column."""
+        def _wb_with(legend_header):
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "CuposVolumen"
+            for col_idx, h in enumerate(
+                ["Código", "Descripción", "GENERICO", "DESAGREGADO", "Cupo "], 1
+            ):
+                ws.cell(row=1, column=col_idx, value=h)
+            ws.cell(row=1, column=16, value=legend_header)  # col P
+            return wb, ws
+
+        df = pd.DataFrame({
+            "Código": [1],
+            "Descripción": ["desc"],
+            "GENERICO": ["CERVEZAS"],
+            "DESAGREGADO": ["CERVEZAS"],
+            "Cupo ": [100.0],
+        })
+
+        # Pre-rename HAZARD: duplicate "GENERICO" -> last-wins writes to legend
+        # col P and leaves the real data col C empty (silent corruption).
+        wb_bad, ws_bad = _wb_with("GENERICO")
+        replace_sheet_data(wb_bad, "CuposVolumen", df, list(df.columns))
+        assert ws_bad.cell(row=2, column=16).value == "CERVEZAS"  # leaked to col P
+        assert ws_bad.cell(row=2, column=3).value is None         # data col C empty
+
+        # Post-rename FIX: legend renamed -> the write lands in the data col C.
+        wb_ok, ws_ok = _wb_with("GENERICO_LEGEND")
+        replace_sheet_data(wb_ok, "CuposVolumen", df, list(df.columns))
+        assert ws_ok.cell(row=2, column=3).value == "CERVEZAS"          # data col C
+        assert ws_ok.cell(row=1, column=16).value == "GENERICO_LEGEND"  # legend header (row 1) intact
+        assert ws_ok.cell(row=2, column=16).value is None              # legend data col not written
+
+    def test_cupos_cober_duplicate_cupo_header_writes_col_h_leaves_col_f(self):
+        """RF-05: CuposCober has 'CUPO ' duplicated at col F and col H (spacer
+        col G between). replace_sheet_data's last-wins header map must write
+        into col H (read by the 108 downstream SUMIFS in Cober Nueva); col F
+        must retain its prior (stale) value."""
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "CuposCober"
+        ws.cell(row=1, column=6, value="CUPO ")   # col F (duplicate #1)
+        ws.cell(row=1, column=7, value="SPACER")  # col G
+        ws.cell(row=1, column=8, value="CUPO ")   # col H (duplicate #2, last-wins target)
+        ws.cell(row=2, column=6, value="STALE_COL_F_VALUE")
+
+        df = pd.DataFrame({"CUPO ": [42.5]})
+
+        replace_sheet_data(wb, "CuposCober", df, ["CUPO "])
+
+        assert ws.cell(row=2, column=8).value == 42.5  # col H got the write
+        assert ws.cell(row=2, column=6).value == "STALE_COL_F_VALUE"  # col F untouched
+
+
+class TestGuemesQueryScoping:
+    """Guards the branch-topology class of bug: the GUEMES cupos SheetConfigs
+    pass id_sucursal, which only exists on the cobertura DataLoader signatures
+    after PR1. Uses create_autospec (validates call SIGNATURES, unlike
+    MagicMock(spec=...)) and asserts id_sucursal reaches the cupos queries."""
+
+    def _autospec_loader(self):
+        from unittest.mock import create_autospec
+
+        loader = create_autospec(DataLoader, instance=True)
+        loader.get_fact_ventas_pivot_badie.return_value = _make_badie_ventas_df()
+        loader.get_cob_preventista_generico_pivot_badie.return_value = _make_badie_cob_gen_df()
+        loader.get_cob_preventista_marca_pivot_badie.return_value = _make_badie_cob_marca_df()
+        loader.get_cupos_volumen_badie.return_value = _make_badie_cupos_volumen_df()
+        loader.get_cupos_cobertura_generico_badie.return_value = _make_badie_cupos_cob_gen_df()
+        loader.get_cupos_cobertura_marca_badie.return_value = _make_badie_cupos_cob_marca_df()
+        return loader
+
+    def test_guemes_scopes_all_cupos_queries_to_id_sucursal(self, tmp_path):
+        """Under create_autospec, passing a kwarg the real method does not accept
+        raises TypeError inside generar_reporte — the exact failure the topology
+        bug produced (id_sucursal missing from the cobertura signatures). On the
+        correct chain it must pass AND forward id_sucursal=16 to all 3 cupos
+        queries."""
+        loader = self._autospec_loader()
+        service = AvancesService(data_loader=loader)
+        config = AvancesConfig(
+            archivo_plantilla=str(BADIE_FIXTURE),
+            fecha_desde="2019-05-01",
+            fecha_hasta="2019-05-31",
+            tipo_plantilla="guemes",
+            id_sucursal=16,
+            id_fuerza_ventas=1,
+            nombre_archivo="AVANCE GUEMES - MAYO 2019",
+            output_dir=tmp_path / "out_guemes",
+        )
+
+        service.generar_reporte(config)
+
+        assert loader.get_cupos_volumen_badie.call_args.kwargs.get("id_sucursal") == 16
+        assert loader.get_cupos_cobertura_generico_badie.call_args.kwargs.get("id_sucursal") == 16
+        assert loader.get_cupos_cobertura_marca_badie.call_args.kwargs.get("id_sucursal") == 16
 
 
 class TestMainForwardsTipoPlantilla:

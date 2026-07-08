@@ -116,6 +116,39 @@ SHEET_CONFIGS_BRANCA: list[SheetConfig] = [
     ),
 ]
 
+# Shared header-string tuples for the 3 sales/coverage sheets whose
+# data_columns are byte-identical between badie and guemes (same query
+# methods, same Excel header text — only the id_sucursal scoping VALUE at
+# runtime differs, via AvancesConfig.id_sucursal). Extracted so both plantilla
+# configs reference the exact same list object, guarding against accidental
+# drift between them. Pure refactor — badie behavior unchanged.
+_PIVOT_PYTHON_COLS: list[str] = [
+    "Sucursal",
+    "Descripcion Período",
+    "Descripcion Vendedor",
+    "Ruta",
+    "Descripcion_Ruta",
+    "Descripcion_Marca",
+    "GENERICO",
+    "Código_Articulo",
+    "Descripcion_Articulo",
+    "Cantidades Totales",
+]
+_COBER_GEN_COLS: list[str] = [
+    "Sucursal",
+    "Descripcion Vendedor",
+    "Ruta",
+    "GENERICO",
+    "Numero_Clientes",
+]
+_COBER_MARCA_COLS: list[str] = [
+    "Sucursal",
+    "Descripcion Vendedor",
+    "Ruta",
+    "Descripcion_Marca",
+    "Numero_Clientes",
+]
+
 # SHEET_CONFIGS_BADIE — populated from real .xlsm inspection (2026-06-05) +
 # Excel header sample rows. Uses dedicated DataLoader methods that perform the
 # dim_sucursal / dim_vendedor / dim_articulo / dim_cliente joins in SQL, so the
@@ -139,18 +172,7 @@ SHEET_CONFIGS_BADIE: list[SheetConfig] = [
         sheet_name="pivot_python",
         query_method="get_fact_ventas_pivot_badie",
         query_params=["fecha_desde", "fecha_hasta", "id_sucursal", "id_fuerza_ventas"],
-        data_columns=[
-            "Sucursal",
-            "Descripcion Período",
-            "Descripcion Vendedor",
-            "Ruta",
-            "Descripcion_Ruta",
-            "Descripcion_Marca",
-            "GENERICO",
-            "Código_Articulo",
-            "Descripcion_Articulo",
-            "Cantidades Totales",
-        ],
+        data_columns=_PIVOT_PYTHON_COLS,
         header_row=1,
     ),
     # 2. Cobertura por genérico — cober_gen sheet (5 data cols; Column1 + Columna1 left alone)
@@ -158,13 +180,7 @@ SHEET_CONFIGS_BADIE: list[SheetConfig] = [
         sheet_name="cober_gen",
         query_method="get_cob_preventista_generico_pivot_badie",
         query_params=["fecha_desde", "fecha_hasta", "id_fuerza_ventas", "id_sucursal"],
-        data_columns=[
-            "Sucursal",
-            "Descripcion Vendedor",
-            "Ruta",
-            "GENERICO",
-            "Numero_Clientes",
-        ],
+        data_columns=_COBER_GEN_COLS,
         header_row=1,
     ),
     # 3. Cobertura por marca — cober_marca sheet (5 data cols; Column1 left alone)
@@ -172,13 +188,7 @@ SHEET_CONFIGS_BADIE: list[SheetConfig] = [
         sheet_name="cober_marca",
         query_method="get_cob_preventista_marca_pivot_badie",
         query_params=["fecha_desde", "fecha_hasta", "id_fuerza_ventas", "id_sucursal"],
-        data_columns=[
-            "Sucursal",
-            "Descripcion Vendedor",
-            "Ruta",
-            "Descripcion_Marca",
-            "Numero_Clientes",
-        ],
+        data_columns=_COBER_MARCA_COLS,
         header_row=1,
     ),
     # 4. Cupos volumen — CuposVolumen sheet (6 data cols of 51; rest are user formulas)
@@ -231,9 +241,94 @@ SHEET_CONFIGS_BADIE: list[SheetConfig] = [
     ),
 ]
 
+# SHEET_CONFIGS_GUEMES — dedicated list, NOT an alias of SHEET_CONFIGS_BADIE.
+# Reuses badie's in-place loading mechanism and DataLoader methods, but scoped
+# to id_sucursal=16 (SUCURSAL GUEMES) via the id_sucursal query_param on the
+# CuposVolumen/CuposCoberGen/CuposCober entries — those 3 pass id_sucursal
+# through to get_cupos_*_badie so no CASA CENTRAL rows leak in. Diverges from
+# badie on 3 of 6 sheets:
+#   - CuposVolumen drops "PREVENTISTA" (5 cols instead of 6)
+#   - CuposCoberGen / CuposCober add "id_sucursal" to query_params
+# See DECISION 1 in design (sdd/avance-guemes/design) for the rationale.
+SHEET_CONFIGS_GUEMES: list[SheetConfig] = [
+    # 1. Ventas — pivot_python sheet (shared columns with badie)
+    SheetConfig(
+        sheet_name="pivot_python",
+        query_method="get_fact_ventas_pivot_badie",
+        query_params=["fecha_desde", "fecha_hasta", "id_sucursal", "id_fuerza_ventas"],
+        data_columns=_PIVOT_PYTHON_COLS,
+        header_row=1,
+    ),
+    # 2. Cobertura por genérico — cober_gen sheet (shared columns with badie)
+    SheetConfig(
+        sheet_name="cober_gen",
+        query_method="get_cob_preventista_generico_pivot_badie",
+        query_params=["fecha_desde", "fecha_hasta", "id_fuerza_ventas", "id_sucursal"],
+        data_columns=_COBER_GEN_COLS,
+        header_row=1,
+    ),
+    # 3. Cobertura por marca — cober_marca sheet (shared columns with badie)
+    SheetConfig(
+        sheet_name="cober_marca",
+        query_method="get_cob_preventista_marca_pivot_badie",
+        query_params=["fecha_desde", "fecha_hasta", "id_fuerza_ventas", "id_sucursal"],
+        data_columns=_COBER_MARCA_COLS,
+        header_row=1,
+    ),
+    # 4. Cupos volumen — CuposVolumen sheet (5 data cols, NO "PREVENTISTA")
+    #    Source: gold.fact_cupos filtered by periodo + id_sucursal=16
+    SheetConfig(
+        sheet_name="CuposVolumen",
+        query_method="get_cupos_volumen_badie",
+        query_params=["periodo", "id_sucursal"],
+        data_columns=[
+            "Código",
+            "Descripción",
+            "GENERICO",
+            "DESAGREGADO",
+            "Cupo ",  # trailing space matches Excel header exactly
+        ],
+        header_row=1,
+    ),
+    # 5. Cupos cobertura por genérico — CuposCoberGen sheet
+    #    Source: gold.fact_cupos_cobertura WHERE tipo_apertura='generico'
+    #    Scoped to id_sucursal=16: 0 rows today (sheet present but empty),
+    #    auto-fills if GUEMES ever gets 'generico' data — see RF-04.
+    SheetConfig(
+        sheet_name="CuposCoberGen",
+        query_method="get_cupos_cobertura_generico_badie",
+        query_params=["periodo", "id_sucursal"],
+        data_columns=[
+            "Ruta",
+            "Preventista",
+            "Generico",
+            "ZONA",
+            "CUPO ",  # trailing space matches Excel header
+        ],
+        header_row=1,
+    ),
+    # 6. Cupos cobertura por marca — CuposCober sheet
+    #    Source: gold.fact_cupos_cobertura WHERE tipo_apertura='marca'
+    #    Scoped to id_sucursal=16 — no CASA CENTRAL rows leak in.
+    SheetConfig(
+        sheet_name="CuposCober",
+        query_method="get_cupos_cobertura_marca_badie",
+        query_params=["periodo", "id_sucursal"],
+        data_columns=[
+            "Ruta",
+            "Descripción Vendedor",
+            "MARCA",
+            "ZONA",
+            "CUPO ",  # trailing space matches Excel header
+        ],
+        header_row=1,
+    ),
+]
+
 PLANTILLA_SHEET_CONFIGS: dict[str, list[SheetConfig]] = {
     "branca": SHEET_CONFIGS_BRANCA,
     "badie": SHEET_CONFIGS_BADIE,
+    "guemes": SHEET_CONFIGS_GUEMES,
 }
 
 
