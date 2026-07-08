@@ -76,3 +76,75 @@ def test_run_reportes_unknown_tipo_returns_error(capsys):
     assert result == 1
     captured = capsys.readouterr()
     assert "desconocido" in captured.out.lower()
+
+
+class TestResolverNombrePeriodo:
+    """Unit tests for the {MES}/{AÑO} period-token resolver."""
+
+    def test_resolves_mes_and_anio_uppercase_spanish(self):
+        from main import _resolver_nombre_periodo
+
+        assert (
+            _resolver_nombre_periodo("AVANCE BRANCA - {MES} {AÑO}", "2026-07-01")
+            == "AVANCE BRANCA - JULIO 2026"
+        )
+
+    def test_january_and_year(self):
+        from main import _resolver_nombre_periodo
+
+        assert (
+            _resolver_nombre_periodo("X {MES} {AÑO}", "2027-01-15")
+            == "X ENERO 2027"
+        )
+
+    def test_ascii_anio_alias(self):
+        from main import _resolver_nombre_periodo
+
+        assert (
+            _resolver_nombre_periodo("X - {MES} {ANIO}", "2026-12-01")
+            == "X - DICIEMBRE 2026"
+        )
+
+    def test_name_without_tokens_is_unchanged(self):
+        from main import _resolver_nombre_periodo
+
+        assert (
+            _resolver_nombre_periodo("AVANCE BRANCA - JUNIO 2026", "2026-07-01")
+            == "AVANCE BRANCA - JUNIO 2026"
+        )
+
+    def test_invalid_date_returns_name_unchanged(self):
+        from main import _resolver_nombre_periodo
+
+        assert _resolver_nombre_periodo("X {MES}", "") == "X {MES}"
+
+
+def test_run_reportes_resolves_period_tokens_before_handler():
+    """`_run_reportes` substitutes {MES}/{AÑO} in report.nombre using the
+    merged fecha_desde, so the resolved name reaches the handler (and thus
+    the output filename)."""
+    import main as main_module
+    import src.config.resolver as resolver_module
+    from src.config.models import ReportEntry
+
+    captured = {}
+
+    def fake_handler(report, merged):
+        captured["nombre"] = report.nombre
+        return [(MagicMock(), {})]
+
+    report_config = MagicMock()
+    report_config.tipo = "avances"
+    report_config.filtros = GlobalFilters(
+        fecha_desde="2026-07-01",
+        fecha_hasta="2026-07-08",
+    )
+    report_config.reportes = [ReportEntry(nombre="AVANCE BRANCA - {MES} {AÑO}")]
+
+    with patch.object(main_module, "_run_avances_report", side_effect=fake_handler), \
+         patch.object(resolver_module, "resolve_delivery", return_value=None):
+        from main import _run_reportes
+        result = _run_reportes(report_config, contactos={})
+
+    assert result == 0
+    assert captured["nombre"] == "AVANCE BRANCA - JULIO 2026"

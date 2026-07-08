@@ -1,8 +1,8 @@
 {
     "tipo": "avances",
     "filtros": {
-        "fecha_desde": "2026-06-01",
-        "fecha_hasta": "2026-06-30",
+        "fecha_desde": "2026-07-01",
+        "fecha_hasta": "2026-07-31",
         "archivo_plantilla": "data/input/avances/AVANCE BRANCA.xlsx",
         "id_sucursal": 1,
         "id_fuerza_ventas": 4,
@@ -11,7 +11,7 @@
     },
     "reportes": [
         {
-            "nombre": "AVANCE BRANCA - JUNIO 2026",
+            "nombre": "AVANCE BRANCA - {MES} {AÑO}",
             "capture_images": [
                 {
                     "hoja": "AVANCE",

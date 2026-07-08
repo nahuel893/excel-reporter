@@ -25,7 +25,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from src.services import VentasService, ResumenMensualService, ResumenMensualConfig
@@ -152,6 +152,40 @@ def _run_config_dir(config_dir: Path, test_mode: bool = False) -> int:
     return exit_code
 
 
+# Uppercase Spanish month names, 1-indexed (index 0 unused) — used to resolve
+# {MES} period tokens in report names.
+_MESES_ES = [
+    "", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+    "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE",
+]
+
+
+def _resolver_nombre_periodo(nombre: str, fecha_desde: str) -> str:
+    """Resolve ``{MES}``/``{AÑO}`` tokens in a report name from the period start.
+
+    A report's ``nombre`` may carry a period placeholder
+    (e.g. ``"AVANCE BRANCA - {MES} {AÑO}"``) so the output filename always
+    tracks the resolved period. Because the output folder is also derived from
+    ``fecha_desde``, name and folder can never desync across months. ``{ANIO}``
+    is accepted as an ASCII-safe alias of ``{AÑO}``. Names without tokens (or an
+    unparseable date) are returned unchanged.
+    """
+    if not nombre or "{" not in nombre:
+        return nombre
+    try:
+        d = date.fromisoformat(fecha_desde)
+    except (ValueError, TypeError):
+        return nombre
+    reemplazos = {
+        "{MES}": _MESES_ES[d.month],
+        "{AÑO}": str(d.year),
+        "{ANIO}": str(d.year),
+    }
+    for token, valor in reemplazos.items():
+        nombre = nombre.replace(token, valor)
+    return nombre
+
+
 def _run_reportes(report_config, contactos, test_mode: bool = False, no_delivery: bool = False) -> int:
     """Iterate over reportes[], generate each file, run delivery pipeline."""
     from src.config.resolver import merge_filters, resolve_delivery
@@ -162,6 +196,11 @@ def _run_reportes(report_config, contactos, test_mode: bool = False, no_delivery
         # notification) can honor the test-mode redirect and no-delivery switch.
         merged["test_mode"] = test_mode
         merged["no_delivery"] = no_delivery
+
+        # Resolve {MES}/{AÑO} period tokens so the output filename tracks the
+        # run's period (covers both the daily and manual runs — both dispatch
+        # through here). Names without tokens pass through untouched.
+        report.nombre = _resolver_nombre_periodo(report.nombre, merged.get("fecha_desde", ""))
 
         print(f"\nGenerando: {report.nombre}")
 
