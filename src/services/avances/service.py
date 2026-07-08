@@ -328,8 +328,6 @@ class AvancesService(BaseService):
             # dir with badie/branca siblings), fall through to
             # archivo_plantilla below instead of seeding from a sibling.
             pool = [c for c in candidates if c.stem.startswith(name_prefix)] if name_prefix else candidates
-            if not pool and not name_prefix:
-                pool = candidates
             if pool:
                 # Pick the most recently modified — the latest close of the
                 # previous month — never an older sibling or a stale backup that
