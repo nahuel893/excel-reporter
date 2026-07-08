@@ -178,7 +178,13 @@ def resolve_delivery(
     capture_list: list[CaptureConfig] = []
     if report.capture_images:
         capture_list = [
-            CaptureConfig(hoja=c.hoja, rango=c.rango, renderer=c.renderer)
+            CaptureConfig(
+                hoja=c.hoja,
+                rango=c.rango,
+                renderer=c.renderer,
+                caption=c.caption,
+                caption_anchor=c.caption_anchor,
+            )
             for c in report.capture_images
         ]
     elif report.capture_image:
@@ -187,6 +193,8 @@ def resolve_delivery(
                 hoja=report.capture_image.hoja,
                 rango=report.capture_image.rango,
                 renderer=report.capture_image.renderer,
+                caption=report.capture_image.caption,
+                caption_anchor=report.capture_image.caption_anchor,
             )
         ]
 

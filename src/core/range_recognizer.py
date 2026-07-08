@@ -48,10 +48,14 @@ documented edge case, not silently swallowed.
 Requires a NON read-only ``openpyxl`` load — ``read_only=True`` does not
 reliably expose ``cell.border``.
 """
+import logging
 from pathlib import Path
 
 import openpyxl
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.cell import coordinate_to_tuple
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_BORDER_STYLES = ("medium", "thick", "double")
 
@@ -135,17 +139,30 @@ class RangeRecognizer:
         self._workbook = None  # lazily loaded and cached — non-read_only loads
         # of large multi-sheet workbooks are expensive; reuse it across calls
         # on the same instance instead of reloading per detect_ranges() call.
+        self._workbook_data_only = None  # lazily loaded — separate read_only
+        # + data_only=True workbook used ONLY for caption value reads (cell
+        # borders aren't needed here, so read_only mode is used for speed).
 
     def _get_workbook(self):
         if self._workbook is None:
             self._workbook = openpyxl.load_workbook(self.xlsx_path, read_only=False, data_only=False)
         return self._workbook
 
+    def _get_data_only_workbook(self):
+        if self._workbook_data_only is None:
+            self._workbook_data_only = openpyxl.load_workbook(
+                self.xlsx_path, read_only=True, data_only=True
+            )
+        return self._workbook_data_only
+
     def close(self) -> None:
-        """Releases the cached workbook, if one was loaded."""
+        """Releases the cached workbook(s), if any were loaded."""
         if self._workbook is not None:
             self._workbook.close()
             self._workbook = None
+        if self._workbook_data_only is not None:
+            self._workbook_data_only.close()
+            self._workbook_data_only = None
 
     def __enter__(self) -> "RangeRecognizer":
         return self
@@ -165,6 +182,124 @@ class RangeRecognizer:
         """Returns detected regions for every sheet in the workbook."""
         wb = self._get_workbook()
         return {name: self._detect_ranges_in_sheet(wb[name]) for name in wb.sheetnames}
+
+    def detect_ranges_with_captions(
+        self, sheet: str, caption_anchor: str | None = None,
+    ) -> list[tuple[str, str | None]]:
+        """Returns ``(a1_range, caption)`` pairs for every maximal bordered
+        region of ``sheet``, in the same reading order as ``detect_ranges``.
+
+        The caption defaults to the first non-empty STRING cell found
+        scanning the region top-to-bottom, then left-to-right (read from a
+        ``data_only`` view, so formula cells resolve to their cached value).
+        A region with no text cell at all falls back to its own A1 address
+        (never ``None`` on the default-scan path), so two text-less regions
+        still get DISTINCT captions instead of both collapsing to ``None``.
+
+        Real report templates sometimes reuse the exact same leading label
+        across MULTIPLE sibling regions (e.g. a generic band header like
+        "Cobertura Cervezas 1" repeated over several brand columns/groups).
+        To satisfy "every region has a DISTINCT caption", any caption that
+        collides with an already-assigned caption (earlier region, same
+        call) is progressively extended with the next non-empty string
+        cell(s) found in the same region (still top-to-bottom/left-to-right)
+        until it becomes unique. Only the colliding regions pay this cost —
+        regions with an already-unique first cell keep the short caption.
+
+        If ``caption_anchor`` is given (an A1 coordinate, e.g. ``"B2"``), it
+        is treated as an offset RELATIVE to each region's top-left corner
+        (``"A1"`` == the region's own top-left cell) and read directly
+        instead of scanning/disambiguating — the same anchor offset applies
+        to every region of the sheet, so it only makes sense when the
+        template places the label at a consistent relative position across
+        all cards.
+        """
+        wb = self._get_workbook()
+        if sheet not in wb.sheetnames:
+            raise ValueError(f"Sheet '{sheet}' not found in {self.xlsx_path.name}")
+        ranges = self._detect_ranges_in_sheet(wb[sheet])
+
+        wb_data = self._get_data_only_workbook()
+        ws_data = wb_data[sheet]
+
+        anchor_offset = None
+        if caption_anchor:
+            anchor_row, anchor_col = coordinate_to_tuple(caption_anchor)
+            anchor_offset = (anchor_row - 1, anchor_col - 1)
+
+        pairs: list[tuple[str, str | None]] = []
+        seen_captions: set[str] = set()
+        for a1_range in ranges:
+            r1, c1, r2, c2 = self._parse_a1_range(a1_range)
+            if anchor_offset is not None:
+                caption = self._extract_caption_at_anchor(
+                    ws_data, r1, c1, r2, c2, anchor_offset, a1_range,
+                )
+            else:
+                caption = self._extract_unique_caption(
+                    ws_data, r1, c1, r2, c2, seen_captions, a1_range,
+                )
+                if caption is not None:
+                    seen_captions.add(caption)
+            pairs.append((a1_range, caption))
+        return pairs
+
+    @staticmethod
+    def _parse_a1_range(a1_range: str) -> tuple[int, int, int, int]:
+        """Parses ``"B2:D5"`` into ``(row_start, col_start, row_end, col_end)``."""
+        start, end = a1_range.split(":")
+        r1, c1 = coordinate_to_tuple(start)
+        r2, c2 = coordinate_to_tuple(end)
+        return r1, c1, r2, c2
+
+    @staticmethod
+    def _extract_caption_at_anchor(
+        ws_data, r1: int, c1: int, r2: int, c2: int,
+        anchor_offset: tuple[int, int], a1_range: str,
+    ) -> str | None:
+        row_offset, col_offset = anchor_offset
+        target_row = r1 + row_offset
+        target_col = c1 + col_offset
+        # Clamp/validate the anchor to the region bounds. A read_only cell read
+        # outside [r1..r2, c1..c2] returns None with no error, silently grabbing
+        # a foreign cell from an adjacent region — return None instead.
+        if not (r1 <= target_row <= r2 and c1 <= target_col <= c2):
+            logger.warning(
+                "caption_anchor offset %s falls outside region %s — ignoring",
+                anchor_offset, a1_range,
+            )
+            return None
+        value = ws_data.cell(row=target_row, column=target_col).value
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    @staticmethod
+    def _extract_unique_caption(
+        ws_data, r1: int, c1: int, r2: int, c2: int,
+        seen_captions: set[str], a1_range: str,
+    ) -> str | None:
+        texts: list[str] = []
+        for r in range(r1, r2 + 1):
+            for c in range(c1, c2 + 1):
+                value = ws_data.cell(row=r, column=c).value
+                if isinstance(value, str) and value.strip():
+                    texts.append(value.strip())
+        if not texts:
+            # Text-less region: fall back to its A1 address so it still gets a
+            # unique, non-None caption. Two text-less regions would otherwise
+            # both return None and collide downstream — the A1 address is
+            # always unique, preserving the distinctness guarantee.
+            return a1_range
+
+        caption = texts[0]
+        idx = 1
+        while caption in seen_captions and idx < len(texts):
+            caption = f"{caption} — {texts[idx]}"
+            idx += 1
+        if caption in seen_captions:
+            # Degenerate case: even the full region text collides with a
+            # prior region's caption. The A1 address is always unique.
+            caption = f"{caption} ({a1_range})"
+        return caption
 
     # ── Core algorithm ────────────────────────────────────────────────────
 

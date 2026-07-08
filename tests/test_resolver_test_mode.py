@@ -225,6 +225,40 @@ class TestContactResolutionErrors:
 # ---------------------------------------------------------------------------
 
 
+class TestCaptureCaptionThreading:
+    """resolve_delivery must propagate caption/caption_anchor from
+    CaptureImageConfig into the concrete pipeline.CaptureConfig."""
+
+    def test_capture_images_threads_caption_and_caption_anchor(self):
+        report = _report(
+            capture_images=[
+                CaptureImageConfig(
+                    hoja="Avance",
+                    rango="auto:bordes",
+                    caption="GFLORES",
+                    caption_anchor="B2",
+                )
+            ],
+        )
+        result = resolve_delivery(report, CONTACTOS_WITH_NAHUEL)
+
+        assert result is not None
+        assert len(result.capture_images) == 1
+        assert result.capture_images[0].caption == "GFLORES"
+        assert result.capture_images[0].caption_anchor == "B2"
+
+    def test_capture_image_legacy_singular_threads_caption(self):
+        report = _report(
+            capture_image=CaptureImageConfig(
+                hoja="Ventas Bultos", rango="A1:H20", caption="Zona Norte"
+            ),
+        )
+        result = resolve_delivery(report, CONTACTOS_WITH_NAHUEL)
+
+        assert result is not None
+        assert result.capture_image.caption == "Zona Norte"
+
+
 class TestEdgeCases:
     def test_empty_enviar_a_returns_none(self):
         """enviar_a={} + test_mode=True -> still returns None (no captures)."""

@@ -21,8 +21,10 @@ from pydantic import BaseModel, field_validator
 class CaptureConfig(BaseModel):
     """Configuracion para captura de rango Excel como imagen."""
     hoja: str
-    rango: str  # Ej: "A1:H20"
+    rango: str  # Ej: "A1:H20" o el sentinel "auto:bordes"
     renderer: str = "libreoffice"  # backend key, resolved by excel_renderers.get_renderer
+    caption: str | None = None  # etiqueta de la imagen (nombres_hojas / WhatsApp caption)
+    caption_anchor: str | None = None  # override A1 (relativo a la region) de donde leer el caption
 
 
 class EmailConfig(BaseModel):
