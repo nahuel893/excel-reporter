@@ -29,6 +29,19 @@ from src.services.base_service import BaseService
 logger = logging.getLogger(__name__)
 
 
+def _is_backup_name(stem: str) -> bool:
+    """True if a filename stem looks like a backup/derived copy that must never
+    seed a new month.
+
+    Catches manual and automatic backups alike, e.g.
+    ``AVANCE BRANCA - JUNIO 2026_backup-20260708``,
+    ``AVANCE BRANCA - JUNIO 2026.bak.20260606-1423``,
+    ``AVANCE BADIE - JUNIO 2026_misnamed-backup-20260706``. Case-insensitive.
+    """
+    low = stem.lower()
+    return "backup" in low or ".bak" in low
+
+
 @dataclass
 class SheetConfig:
     """Maps an Excel sheet to its DB query and writable columns.
@@ -304,20 +317,22 @@ class AvancesService(BaseService):
         prev_dir = service_output_dir(self.SERVICE_SLUG, f"{prev_period}-01", "month")
 
         if prev_dir.is_dir():
-            candidates = sorted(
+            candidates = [
                 p for p in prev_dir.glob("*.xlsx")
-                if "_backup" not in p.stem
-            )
-            # Filter by name prefix to avoid picking wrong report's output
-            if name_prefix and candidates:
-                matching = [c for c in candidates if c.stem.startswith(name_prefix)]
-                if matching:
-                    logger.info("Usando output del mes anterior como base: %s", matching[0])
-                    return matching[0]
-            # Fallback: if no name match or no prefix, use first candidate
-            if candidates:
-                logger.info("Usando output del mes anterior como base: %s", candidates[0])
-                return candidates[0]
+                if not _is_backup_name(p.stem)
+            ]
+            # Prefer this report's own outputs (by name prefix) to avoid picking
+            # a sibling report's file; fall back to any non-backup output.
+            pool = [c for c in candidates if c.stem.startswith(name_prefix)] if name_prefix else candidates
+            if not pool:
+                pool = candidates
+            if pool:
+                # Pick the most recently modified — the latest close of the
+                # previous month — never an older sibling or a stale backup that
+                # merely sorts first alphabetically ('.bak' < '.xlsx').
+                chosen = max(pool, key=lambda p: p.stat().st_mtime)
+                logger.info("Usando output del mes anterior como base: %s", chosen)
+                return chosen
 
         # 2. Fall back to archivo_plantilla from config
         if config.archivo_plantilla:

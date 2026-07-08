@@ -1067,3 +1067,55 @@ class TestNotificaFeriadosWiring:
             main_module._run_avances_report(report, merged)
 
         assert sent.get("target") == "5493875123456"
+
+
+class TestResolveBasePicksLatestNonBackup:
+    """_resolve_base must seed from the previous month's REAL latest output,
+    never a stale '.bak'/'_backup' copy — even when the backup sorts first
+    alphabetically ('.bak' < '.xlsx')."""
+
+    def _config(self):
+        return AvancesConfig(
+            fecha_desde="2026-07-01",
+            fecha_hasta="2026-07-08",
+            nombre_archivo="AVANCE BRANCA - JULIO 2026",
+        )
+
+    def test_ignores_bak_and_picks_most_recent_real_file(self, tmp_path, monkeypatch):
+        import os
+        import time
+        import src.services.avances.service as svc_mod
+
+        prev_dir = tmp_path / "2026-06"
+        prev_dir.mkdir()
+        bak = prev_dir / "AVANCE BRANCA - JUNIO 2026.bak.20260606-1423.xlsx"
+        real = prev_dir / "AVANCE BRANCA - JUNIO 2026.xlsx"
+        mayo = prev_dir / "AVANCE BRANCA - MAYO 2026.xlsx"
+        for p in (bak, real, mayo):
+            p.write_bytes(b"x")
+        old = time.time() - 100_000
+        os.utime(bak, (old, old))
+        os.utime(mayo, (old, old))  # `real` is the newest
+
+        monkeypatch.setattr(svc_mod, "service_output_dir", lambda *a, **k: prev_dir)
+
+        service = AvancesService(data_loader=MagicMock())
+        base = service._resolve_base(self._config(), tmp_path / "2026-07")
+        assert base == real, f"picked {base.name!r}, expected the real non-backup June file"
+
+    def test_excludes_underscore_backup_and_misnamed_backup(self, tmp_path, monkeypatch):
+        import src.services.avances.service as svc_mod
+
+        prev_dir = tmp_path / "2026-06"
+        prev_dir.mkdir()
+        real = prev_dir / "AVANCE BRANCA - JUNIO 2026.xlsx"
+        bkp = prev_dir / "AVANCE BRANCA - JUNIO 2026_backup-20260704.xlsx"
+        mis = prev_dir / "AVANCE BRANCA - JUNIO 2026_misnamed-backup-20260706.xlsx"
+        for p in (real, bkp, mis):
+            p.write_bytes(b"x")
+
+        monkeypatch.setattr(svc_mod, "service_output_dir", lambda *a, **k: prev_dir)
+
+        service = AvancesService(data_loader=MagicMock())
+        base = service._resolve_base(self._config(), tmp_path / "2026-07")
+        assert base == real
