@@ -256,7 +256,7 @@ class AvancesConfig:
 
     fecha_desde: str
     fecha_hasta: str
-    tipo_plantilla: Literal["branca", "badie"] = "branca"
+    tipo_plantilla: Literal["branca", "badie", "guemes"] = "branca"
     archivo_plantilla: str | None = None  # path to BASE template (fallback if no prev output)
     id_sucursal: int = 1
     id_fuerza_ventas: int = 1

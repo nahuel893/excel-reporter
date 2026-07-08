@@ -64,7 +64,7 @@ class GlobalFilters(BaseModel):
     enviar_email: bool = True
     enviar_whatsapp: bool = True
     archivo_plantilla: str | None = None
-    tipo_plantilla: Literal["branca", "badie"] = "branca"
+    tipo_plantilla: Literal["branca", "badie", "guemes"] = "branca"
     # avances: contact name (from contactos catalog) or raw phone to notify with
     # the month's applied holidays. None disables the notification.
     notificar_feriados_a: str | None = None

@@ -367,6 +367,16 @@ class TestPlantillaRegistry:
         )
         assert config.tipo_plantilla == "badie"
 
+    def test_avances_config_tipo_plantilla_literal_includes_guemes(self):
+        """RF-07: AvancesConfig.tipo_plantilla Literal must include 'guemes'
+        (dataclass Literal — static type-hint consistency, not runtime-enforced;
+        the runtime gate is GlobalFilters in src/config/models.py)."""
+        import typing
+        from dataclasses import fields
+
+        tipo_field = next(f for f in fields(AvancesConfig) if f.name == "tipo_plantilla")
+        assert "guemes" in typing.get_args(tipo_field.type)
+
 
 # ── Badie integration tests (tasks 2.5–2.6) ───────────────────────────────────
 

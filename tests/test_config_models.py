@@ -508,3 +508,15 @@ class TestTipoPlantillaPropagation:
         f = GlobalFilters(fecha_desde="2026-06-01", fecha_hasta="2026-06-30")
         merged = merge_filters(f, None)
         assert merged["tipo_plantilla"] == "branca"
+
+    def test_guemes_config_propagates_tipo_plantilla(self):
+        """RF-07: tipo_plantilla='guemes' must be accepted by the pydantic
+        Literal and survive merge_filters. Constructed inline (not via a
+        config JSON file — configs/avances_guemes.json ships in a later PR)."""
+        f = GlobalFilters(
+            fecha_desde="2026-06-01",
+            fecha_hasta="2026-06-30",
+            tipo_plantilla="guemes",
+        )
+        merged = merge_filters(f, None)
+        assert merged["tipo_plantilla"] == "guemes"
