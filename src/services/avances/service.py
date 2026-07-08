@@ -322,9 +322,13 @@ class AvancesService(BaseService):
                 if not _is_backup_name(p.stem)
             ]
             # Prefer this report's own outputs (by name prefix) to avoid picking
-            # a sibling report's file; fall back to any non-backup output.
+            # a sibling report's file. Only widen to ALL candidates when there
+            # is no prefix to discriminate on — when name_prefix is set and
+            # nothing matches (e.g. a brand-new report's first run sharing the
+            # dir with badie/branca siblings), fall through to
+            # archivo_plantilla below instead of seeding from a sibling.
             pool = [c for c in candidates if c.stem.startswith(name_prefix)] if name_prefix else candidates
-            if not pool:
+            if not pool and not name_prefix:
                 pool = candidates
             if pool:
                 # Pick the most recently modified — the latest close of the

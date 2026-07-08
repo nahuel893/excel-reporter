@@ -1129,3 +1129,63 @@ class TestResolveBasePicksLatestNonBackup:
         service = AvancesService(data_loader=MagicMock())
         base = service._resolve_base(self._config(), tmp_path / "2026-07")
         assert base == real
+
+
+class TestResolveBaseFirstRunNoSiblingFallback:
+    """RF-06: when name_prefix has no match in the previous-month dir (a new
+    report's first run, sharing the output dir with badie/branca siblings),
+    _resolve_base must NOT fall back to a sibling report's file — it must
+    proceed to archivo_plantilla."""
+
+    def test_no_prefix_match_falls_through_to_archivo_plantilla(self, tmp_path, monkeypatch):
+        import src.services.avances.service as svc_mod
+
+        prev_dir = tmp_path / "2026-06"
+        prev_dir.mkdir()
+        # Only sibling reports' outputs exist — nothing matches "AVANCE GUEMES"
+        badie = prev_dir / "AVANCE BADIE - JUNIO 2026.xlsx"
+        branca = prev_dir / "AVANCE BRANCA - JUNIO 2026.xlsx"
+        for p in (badie, branca):
+            p.write_bytes(b"x")
+
+        monkeypatch.setattr(svc_mod, "service_output_dir", lambda *a, **k: prev_dir)
+
+        plantilla = tmp_path / "AVANCE GUEMES.xlsx"
+        plantilla.write_bytes(b"template")
+
+        service = AvancesService(data_loader=MagicMock())
+        config = AvancesConfig(
+            fecha_desde="2026-07-01",
+            fecha_hasta="2026-07-08",
+            archivo_plantilla=str(plantilla),
+            nombre_archivo="AVANCE GUEMES - JULIO 2026",
+        )
+        base = service._resolve_base(config, tmp_path / "2026-07")
+
+        assert base == plantilla, (
+            f"expected archivo_plantilla fallback, got sibling file {base!r}"
+        )
+
+    def test_badie_prefix_match_unaffected_regression(self, tmp_path, monkeypatch):
+        """Regression: badie resolution with a matching prefix in the prev
+        month must remain exactly as before this fix."""
+        import src.services.avances.service as svc_mod
+
+        prev_dir = tmp_path / "2026-06"
+        prev_dir.mkdir()
+        badie = prev_dir / "AVANCE BADIE - JUNIO 2026.xlsx"
+        branca = prev_dir / "AVANCE BRANCA - JUNIO 2026.xlsx"
+        for p in (badie, branca):
+            p.write_bytes(b"x")
+
+        monkeypatch.setattr(svc_mod, "service_output_dir", lambda *a, **k: prev_dir)
+
+        service = AvancesService(data_loader=MagicMock())
+        config = AvancesConfig(
+            fecha_desde="2026-07-01",
+            fecha_hasta="2026-07-08",
+            nombre_archivo="AVANCE BADIE - JULIO 2026",
+        )
+        base = service._resolve_base(config, tmp_path / "2026-07")
+
+        assert base == badie
