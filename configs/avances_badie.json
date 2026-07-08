@@ -7,12 +7,22 @@
         "archivo_plantilla": "data/input/avances/AVANCE BADIE.xlsx",
         "id_sucursal": 1,
         "id_fuerza_ventas": 1,
-        "enviar_email": false,
-        "enviar_whatsapp": false
+        "enviar_email": true,
+        "enviar_whatsapp": false,
+        "email_adjuntos": ["excel"]
     },
     "reportes": [
         {
-            "nombre": "AVANCE BADIE - JULIO 2026"
+            "nombre": "AVANCE BADIE - JULIO 2026",
+            "asunto_email": "AVANCE BADIE - JULIO 2026",
+            "enviar_a": {
+                "Sebastian Dellamea": {"via": ["email"]},
+                "Gonzalo Farah": {"via": ["email"]},
+                "Veronica Chapur": {"via": ["email"]},
+                "Facundo Guantay": {"via": ["email"]},
+                "Gustavo Flores": {"via": ["email"]},
+                "Nahuel Aguirre": {"via": ["email_cc"]}
+            }
         }
     ]
 }

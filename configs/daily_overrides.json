@@ -5,8 +5,8 @@
     },
     "avance-badie": {
         "ejecutar": true,
-        "enviar": false,
-        "razon": "Activacion pendiente — verificar primer output antes de habilitar el envio."
+        "enviar": true,
+        "razon": "Activado (Nivel 1): envia el Excel por email a los 5 supervisores (CC Nahuel) en cada corrida del daily. Imagenes por WhatsApp al grupo Preventa Salta pendientes (PR4)."
     },
     "avance-branca": {
         "ejecutar": true,
