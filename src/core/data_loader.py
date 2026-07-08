@@ -1782,19 +1782,34 @@ class DataLoader:
     def get_cupos_cobertura_generico_badie(
         self,
         periodo: str,
+        id_sucursal: int | None = None,
     ) -> pd.DataFrame:
         """Cupos de cobertura por genérico for Badie CuposCoberGen sheet.
 
         Source: gold.fact_cupos_cobertura filtered by tipo_apertura='generico'.
 
-        Includes all sucursales (table only contains id_sucursal IN (1, 16)
-        for the relevant period). CASA CENTRAL rows are re-zoned to
-        'VALLE SALTA' / 'SUB DISTRIBUIDOR' based on id_ruta per ZONAS_VIRTUALES.
+        By default (id_sucursal=None) includes all sucursales (table only
+        contains id_sucursal IN (1, 16) for the relevant period). CASA CENTRAL
+        rows are re-zoned to 'VALLE SALTA' / 'SUB DISTRIBUIDOR' based on
+        id_ruta per ZONAS_VIRTUALES. This is the badie path — SQL/params are
+        unchanged from before this parameter existed.
+
+        When id_sucursal is set (e.g. 16 for GUEMES), the WHERE clause is
+        additively scoped to that sucursal. The re-zoning CASE only ever
+        matches sucursal = '1 - CASA CENTRAL', so scoping to a non-CASA
+        CENTRAL sucursal makes the CASE inert (falls through to ELSE) —
+        no special-casing needed here.
 
         DATA QUIRK: when tipo_apertura='generico', the actual generico value
         lives in the `marca` column (the `generico` column is NULL). The
         SELECT swaps to compensate.
         """
+        sucursal_filter = ""
+        params: dict = {"periodo": periodo}
+        if id_sucursal is not None:
+            sucursal_filter = "\n          AND id_sucursal = :id_sucursal"
+            params["id_sucursal"] = id_sucursal
+
         sql = f"""
         SELECT
             id_ruta     AS "Ruta",
@@ -1810,27 +1825,42 @@ class DataLoader:
             cupo        AS "CUPO "
         FROM gold.fact_cupos_cobertura
         WHERE periodo = :periodo
-          AND tipo_apertura = 'generico'
+          AND tipo_apertura = 'generico'{sucursal_filter}
         """
-        return self.execute_query(sql, {"periodo": periodo})
+        return self.execute_query(sql, params)
 
     def get_cupos_cobertura_marca_badie(
         self,
         periodo: str,
+        id_sucursal: int | None = None,
     ) -> pd.DataFrame:
         """Cupos de cobertura por marca for Badie CuposCober sheet.
 
         Source: gold.fact_cupos_cobertura filtered by tipo_apertura='marca'.
 
-        Includes all sucursales (table only contains id_sucursal IN (1, 16)
-        for the relevant period). CASA CENTRAL rows are re-zoned to
-        'VALLE SALTA' / 'SUB DISTRIBUIDOR' based on id_ruta per ZONAS_VIRTUALES.
+        By default (id_sucursal=None) includes all sucursales (table only
+        contains id_sucursal IN (1, 16) for the relevant period). CASA CENTRAL
+        rows are re-zoned to 'VALLE SALTA' / 'SUB DISTRIBUIDOR' based on
+        id_ruta per ZONAS_VIRTUALES. This is the badie path — SQL/params are
+        unchanged from before this parameter existed.
+
+        When id_sucursal is set (e.g. 16 for GUEMES), the WHERE clause is
+        additively scoped to that sucursal. The re-zoning CASE only ever
+        matches sucursal = '1 - CASA CENTRAL', so scoping to a non-CASA
+        CENTRAL sucursal makes the CASE inert (falls through to ELSE) —
+        no special-casing needed here.
 
         DATA QUIRK: when tipo_apertura='marca', the actual marca value lives
         in the `generico` column (the `marca` column is NULL). The SELECT
         swaps to compensate. 'Descripción Vendedor' header in Excel has
         accented capital ó — SQL alias must match byte-for-byte.
         """
+        sucursal_filter = ""
+        params: dict = {"periodo": periodo}
+        if id_sucursal is not None:
+            sucursal_filter = "\n          AND id_sucursal = :id_sucursal"
+            params["id_sucursal"] = id_sucursal
+
         sql = f"""
         SELECT
             id_ruta     AS "Ruta",
@@ -1846,9 +1876,9 @@ class DataLoader:
             cupo        AS "CUPO "
         FROM gold.fact_cupos_cobertura
         WHERE periodo = :periodo
-          AND tipo_apertura = 'marca'
+          AND tipo_apertura = 'marca'{sucursal_filter}
         """
-        return self.execute_query(sql, {"periodo": periodo})
+        return self.execute_query(sql, params)
 
     # ──────────────────────────────────────────────────────────────
     # Graficos-Cobertura queries

@@ -11,8 +11,13 @@ from __future__ import annotations
 
 import os
 from datetime import date, timedelta
+from unittest.mock import MagicMock
 
+import pandas as pd
 import pytest
+from sqlalchemy import Engine
+
+from src.core.data_loader import DataLoader
 
 
 def _has_db_access() -> bool:
@@ -190,3 +195,88 @@ class TestCoberturaGrainConsistency:
         assert len(df_raw) == len(df_pivot), (
             f"cob_marca row count mismatch: raw={len(df_raw)} vs pivot={len(df_pivot)}"
         )
+
+
+# ── RF-03: optional id_sucursal scoping on cupos cobertura queries ──────────
+#
+# Unit-level (no DB) — spies on DataLoader.execute_query to inspect the exact
+# SQL text and params emitted. The "default None" SQL/params below were
+# captured byte-for-byte from the pre-change implementation so the None path
+# is provably unchanged (badie is unaffected by this widening).
+
+
+def _make_loader_with_mock_engine(query_result_df: pd.DataFrame) -> DataLoader:
+    """Create a DataLoader whose execute_query is a spy returning the given df."""
+    mock_engine = MagicMock(spec=Engine)
+    loader = DataLoader(engine=mock_engine)
+    loader.execute_query = MagicMock(return_value=query_result_df)
+    return loader
+
+
+_ORIGINAL_GENERICO_SQL = '\n        SELECT\n            id_ruta     AS "Ruta",\n            preventista AS "Preventista",\n            marca       AS "Generico",\n            CASE\n                WHEN sucursal = \'1 - CASA CENTRAL\'\n                     AND id_ruta IN (81,82,83,84,85,86,87,88,89,90,91,92,118,119,120,122) THEN \'VALLE SALTA\'\n                WHEN sucursal = \'1 - CASA CENTRAL\'\n                     AND id_ruta IN (93) THEN \'SUB DISTRIBUIDOR\'\n                ELSE sucursal\n            END AS "ZONA",\n            cupo        AS "CUPO "\n        FROM gold.fact_cupos_cobertura\n        WHERE periodo = :periodo\n          AND tipo_apertura = \'generico\'\n        '
+
+_ORIGINAL_MARCA_SQL = '\n        SELECT\n            id_ruta     AS "Ruta",\n            preventista AS "Descripción Vendedor",\n            generico    AS "MARCA",\n            CASE\n                WHEN sucursal = \'1 - CASA CENTRAL\'\n                     AND id_ruta IN (81,82,83,84,85,86,87,88,89,90,91,92,118,119,120,122) THEN \'VALLE SALTA\'\n                WHEN sucursal = \'1 - CASA CENTRAL\'\n                     AND id_ruta IN (93) THEN \'SUB DISTRIBUIDOR\'\n                ELSE sucursal\n            END AS "ZONA",\n            cupo        AS "CUPO "\n        FROM gold.fact_cupos_cobertura\n        WHERE periodo = :periodo\n          AND tipo_apertura = \'marca\'\n        '
+
+
+class TestCuposCoberturaIdSucursalScoping:
+    """RF-03: get_cupos_cobertura_{generico,marca}_badie accept an optional
+    id_sucursal. None must preserve today's all-zones SQL/params byte-for-byte
+    (badie unaffected). A set value must additively scope the WHERE clause
+    without disturbing the CASA CENTRAL re-zoning CASE block."""
+
+    def test_generico_default_none_preserves_sql_and_params_byte_for_byte(self):
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_cupos_cobertura_generico_badie("2026-06", id_sucursal=None)
+
+        sql, params = loader.execute_query.call_args[0]
+        assert sql == _ORIGINAL_GENERICO_SQL
+        assert params == {"periodo": "2026-06"}
+
+    def test_marca_default_none_preserves_sql_and_params_byte_for_byte(self):
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_cupos_cobertura_marca_badie("2026-06", id_sucursal=None)
+
+        sql, params = loader.execute_query.call_args[0]
+        assert sql == _ORIGINAL_MARCA_SQL
+        assert params == {"periodo": "2026-06"}
+
+    def test_generico_scoped_id_sucursal_adds_filter_and_param(self):
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_cupos_cobertura_generico_badie("2026-06", id_sucursal=16)
+
+        sql, params = loader.execute_query.call_args[0]
+        assert "AND id_sucursal = :id_sucursal" in sql
+        assert params["id_sucursal"] == 16
+        assert params["periodo"] == "2026-06"
+        # CASE re-zoning block preserved/untouched
+        assert "WHEN sucursal = '1 - CASA CENTRAL'" in sql
+        assert "THEN 'VALLE SALTA'" in sql
+        assert "THEN 'SUB DISTRIBUIDOR'" in sql
+        assert "ELSE sucursal" in sql
+        # DATA QUIRK column-swap SELECT alias unchanged (marca column -> "Generico")
+        assert 'marca       AS "Generico"' in sql
+
+    def test_marca_scoped_id_sucursal_adds_filter_and_param(self):
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_cupos_cobertura_marca_badie("2026-06", id_sucursal=16)
+
+        sql, params = loader.execute_query.call_args[0]
+        assert "AND id_sucursal = :id_sucursal" in sql
+        assert params["id_sucursal"] == 16
+        assert params["periodo"] == "2026-06"
+        # CASE re-zoning block preserved/untouched
+        assert "WHEN sucursal = '1 - CASA CENTRAL'" in sql
+        assert "THEN 'VALLE SALTA'" in sql
+        assert "THEN 'SUB DISTRIBUIDOR'" in sql
+        assert "ELSE sucursal" in sql
+        # DATA QUIRK column-swap SELECT alias unchanged (generico column -> "MARCA")
+        assert 'generico    AS "MARCA"' in sql
+
+    def test_generico_scoped_zero_rows_does_not_raise(self):
+        empty_df = pd.DataFrame(columns=["Ruta", "Preventista", "Generico", "ZONA", "CUPO "])
+        loader = _make_loader_with_mock_engine(empty_df)
+
+        result = loader.get_cupos_cobertura_generico_badie("2026-06", id_sucursal=16)
+
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
