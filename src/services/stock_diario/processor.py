@@ -65,9 +65,11 @@ def build_excel(
     htls_start = bultos_end + 1        # col 4+n
     htls_end = bultos_end + n_suc      # col 3+2n
 
-    # Build article list (sorted) and lookup dicts
+    # Build article list (sorted) and lookup dicts.
+    # dropna=False: keep articles whose generico/marca/des_articulo is NULL —
+    # pandas' default (dropna=True) would silently drop them and their stock.
     articles = (
-        df.groupby(["id_articulo", "generico", "marca", "des_articulo"])
+        df.groupby(["id_articulo", "generico", "marca", "des_articulo"], dropna=False)
         .size()
         .reset_index()[["id_articulo", "generico", "marca", "des_articulo"]]
         .sort_values(["des_articulo", "marca", "generico"])
@@ -78,8 +80,11 @@ def build_excel(
     htls_lookup: dict = {}
     for _, r in df.iterrows():
         key = (r["id_articulo"], r["sucursal"])
-        bultos_lookup[key] = int(r["cant_bultos"]) if pd.notna(r["cant_bultos"]) else 0
-        htls_lookup[key] = int(r["cant_htls"]) if pd.notna(r["cant_htls"]) else 0
+        # Keep the raw value — never int()-truncate. Fractional htls (and any
+        # future fractional bultos) must survive; display is handled by the
+        # Excel number_format only.
+        bultos_lookup[key] = float(r["cant_bultos"]) if pd.notna(r["cant_bultos"]) else 0
+        htls_lookup[key] = float(r["cant_htls"]) if pd.notna(r["cant_htls"]) else 0
 
     wb = Workbook()
     ws = wb.active
@@ -124,9 +129,10 @@ def build_excel(
     # ── Row 3+: Data ──
     for r_idx, (_, art) in enumerate(articles.iterrows(), 3):
         ws.cell(row=r_idx, column=1, value=art["id_articulo"])
-        ws.cell(row=r_idx, column=2, value=art["des_articulo"])
-        ws.cell(row=r_idx, column=3, value=art["marca"])
-        ws.cell(row=r_idx, column=4, value=art["generico"])
+        # Coalesce NULL text fields to "" so openpyxl never writes a bare NaN.
+        ws.cell(row=r_idx, column=2, value="" if pd.isna(art["des_articulo"]) else art["des_articulo"])
+        ws.cell(row=r_idx, column=3, value="" if pd.isna(art["marca"]) else art["marca"])
+        ws.cell(row=r_idx, column=4, value="" if pd.isna(art["generico"]) else art["generico"])
         for s_idx, suc in enumerate(sucursales):
             key = (art["id_articulo"], suc)
             val_b = bultos_lookup.get(key, 0)

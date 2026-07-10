@@ -550,3 +550,71 @@ class TestStockDiarioSucursalesFilter:
 
         assert len(result.archivos_generados) == 0
         assert "2026-04-10" in result.fechas_sin_datos
+
+
+# ── TS-012: Articulos con campo NULL NO se dropean (bug groupby dropna) ────────
+
+
+class TestNullFieldArticlesNotDropped:
+    """build_excel must NOT drop articles whose generico/marca/des_articulo is
+    NULL. pandas groupby defaults to dropna=True, which silently removed them."""
+
+    def _df_with_null_marca(self):
+        return pd.DataFrame({
+            "id_articulo": [8001, 8002],
+            "generico": ["CERVEZAS", "VINOS CCU"],
+            "marca": ["BRAHMA", None],          # 8002: marca NULL
+            "des_articulo": ["BRAHMA LATA 473", "SET DE VINO LA CELIA"],
+            "sucursal": ["CAFAYATE", "CAFAYATE"],
+            "cant_bultos": [10, 7],
+            "cant_htls": [100, 70],
+        })
+
+    def test_article_with_null_marca_is_kept(self, tmp_path):
+        from src.services.stock_diario.processor import build_excel
+        ruta = build_excel("2026-04-10", self._df_with_null_marca(), output_dir=tmp_path)
+        wb = load_workbook(ruta)
+        ws = wb.active
+        codigos = [ws.cell(row=r, column=1).value for r in range(3, ws.max_row + 1)]
+        assert 8002 in codigos, "article with NULL marca was dropped from the report"
+
+    def test_null_marca_rendered_as_blank_not_nan(self, tmp_path):
+        from src.services.stock_diario.processor import build_excel
+        ruta = build_excel("2026-04-10", self._df_with_null_marca(), output_dir=tmp_path)
+        wb = load_workbook(ruta)
+        ws = wb.active
+        row = next(r for r in range(3, ws.max_row + 1) if ws.cell(row=r, column=1).value == 8002)
+        marca = ws.cell(row=row, column=3).value
+        assert marca in (None, ""), f"NULL marca rendered as {marca!r}, expected blank"
+
+    def test_null_marca_stock_present(self, tmp_path):
+        from src.services.stock_diario.processor import build_excel
+        ruta = build_excel("2026-04-10", self._df_with_null_marca(), output_dir=tmp_path)
+        wb = load_workbook(ruta)
+        ws = wb.active
+        row = next(r for r in range(3, ws.max_row + 1) if ws.cell(row=r, column=1).value == 8002)
+        assert ws.cell(row=row, column=5).value == 7  # bultos, 1 sucursal
+
+
+# ── TS-013: No truncar valores fraccionarios (bug int()) ──────────────────────
+
+
+class TestNoTruncation:
+    """cant_bultos/cant_htls must be written raw, never int()-truncated."""
+
+    def test_fractional_values_not_truncated(self, tmp_path):
+        from src.services.stock_diario.processor import build_excel
+        df = pd.DataFrame({
+            "id_articulo": [9001],
+            "generico": ["CERVEZAS"],
+            "marca": ["BRAHMA"],
+            "des_articulo": ["ART FRACC"],
+            "sucursal": ["CAFAYATE"],
+            "cant_bultos": [10.5],
+            "cant_htls": [3.7],
+        })
+        ruta = build_excel("2026-04-10", df, output_dir=tmp_path)
+        wb = load_workbook(ruta)
+        ws = wb.active
+        assert ws.cell(row=3, column=5).value == 10.5, "cant_bultos was truncated"
+        assert ws.cell(row=3, column=6).value == 3.7, "cant_htls was truncated"
