@@ -10,7 +10,7 @@
     },
     "avance-branca": {
         "ejecutar": true,
-        "enviar": false,
-        "razon": "Envio pausado hasta nuevo aviso — todavia usa los cupos del mes pasado (junio) en lugar de los de julio. Reactivar cuando se carguen los cupos del mes actual."
+        "enviar": true,
+        "razon": "Activado: cupos de julio (2026-07) cargados y verificados en gold.fact_cupos (2046 filas). Envio diario por WhatsApp al grupo Preventa + Vinos Bodega E (CC Nahuel)."
     }
 }
