@@ -12,5 +12,10 @@
         "ejecutar": true,
         "enviar": true,
         "razon": "Activado: cupos de julio (2026-07) cargados y verificados en gold.fact_cupos (2046 filas). Envio diario por WhatsApp al grupo Preventa + Vinos Bodega E (CC Nahuel)."
+    },
+    "avance-guemes": {
+        "ejecutar": false,
+        "enviar": false,
+        "razon": "En preparacion — falta el template base (data/input/avances/AVANCE GUEMES.xlsx) y la verificacion build-time. Activar (ejecutar=true, enviar=false) recien cuando PR4 este mergeado a main."
     }
 }

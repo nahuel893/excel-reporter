@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from pathlib import Path
 
@@ -78,3 +79,32 @@ class TestServicioPatch:
             "fecha_desde": "2026-06-01",
             "fecha_hasta": "2026-06-10",
         }
+
+
+class TestAvanceGuemesRegistration:
+    """avance-guemes must be registered in the daily but stay DORMANT
+    (ejecutar=false) until the base template + build verification ship (PR4).
+    run_daily defaults ejecutar=True for unlisted services, so the override
+    entry is what prevents a template-less production run."""
+
+    def test_avance_guemes_in_servicios(self):
+        svc = next((s for s in run_daily.SERVICIOS if s.nombre == "avance-guemes"), None)
+        assert svc is not None, "avance-guemes not registered in SERVICIOS"
+        assert svc.config_path == run_daily.CONFIGS_DIR / "avances_guemes.json"
+        assert svc.fecha_modo == "mes_a_hoy"
+
+    def test_avance_guemes_override_dormant(self):
+        overrides = json.loads(run_daily.OVERRIDES_PATH.read_text(encoding="utf-8"))
+        assert "avance-guemes" in overrides, "avance-guemes missing from daily_overrides.json"
+        assert overrides["avance-guemes"]["ejecutar"] is False, (
+            "avance-guemes must stay dormant (ejecutar=false) until the template ships"
+        )
+
+    def test_avances_guemes_config_parses_as_guemes(self):
+        from src.config.resolver import load_report_config, merge_filters
+
+        cfg = load_report_config(run_daily.CONFIGS_DIR / "avances_guemes.json")
+        assert cfg.tipo == "avances"
+        merged = merge_filters(cfg.filtros, cfg.reportes[0].filtros)
+        assert merged["tipo_plantilla"] == "guemes"
+        assert merged["id_sucursal"] == 16

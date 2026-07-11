@@ -194,6 +194,11 @@ SERVICIOS: list[Servicio] = [
         fecha_modo="mes_a_hoy",
     ),
     Servicio(
+        nombre="avance-guemes",
+        config_path=CONFIGS_DIR / "avances_guemes.json",
+        fecha_modo="mes_a_hoy",
+    ),
+    Servicio(
         nombre="ventas",
         config_path=CONFIGS_DIR / "ventas.json",
         fecha_modo="mes_a_hoy",
