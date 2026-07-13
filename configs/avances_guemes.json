@@ -8,7 +8,7 @@
         "id_sucursal": 16,
         "id_fuerza_ventas": 1,
         "enviar_email": true,
-        "enviar_whatsapp": false,
+        "enviar_whatsapp": true,
         "email_adjuntos": ["excel"],
         "esperar_objetivo": true
     },
@@ -16,10 +16,15 @@
         {
             "nombre": "AVANCE GUEMES - {MES} {AÑO}",
             "asunto_email": "AVANCE GUEMES - {MES} {AÑO}",
+            "capture_images": [
+                {"hoja": "Avance", "rango": "A1:AR13", "renderer": "libreoffice"},
+                {"hoja": "Multicategoria", "rango": "A2:AG10", "renderer": "libreoffice"}
+            ],
             "enviar_a": {
                 "Gonzalo Farah": {"via": ["email"]},
                 "Sebastian Dellamea": {"via": ["email"]},
-                "Nahuel Aguirre": {"via": ["email_cc"]}
+                "Nahuel Aguirre": {"via": ["email_cc"]},
+                "Guemes": {"via": ["whatsapp"]}
             }
         }
     ]
