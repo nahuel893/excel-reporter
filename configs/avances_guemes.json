@@ -7,12 +7,20 @@
         "archivo_plantilla": "data/input/avances/AVANCE GUEMES.xlsx",
         "id_sucursal": 16,
         "id_fuerza_ventas": 1,
-        "enviar_email": false,
-        "enviar_whatsapp": false
+        "enviar_email": true,
+        "enviar_whatsapp": false,
+        "email_adjuntos": ["excel"],
+        "esperar_objetivo": true
     },
     "reportes": [
         {
-            "nombre": "AVANCE GUEMES - {MES} {AÑO}"
+            "nombre": "AVANCE GUEMES - {MES} {AÑO}",
+            "asunto_email": "AVANCE GUEMES - {MES} {AÑO}",
+            "enviar_a": {
+                "Gonzalo Farah": {"via": ["email"]},
+                "Sebastian Dellamea": {"via": ["email"]},
+                "Nahuel Aguirre": {"via": ["email_cc"]}
+            }
         }
     ]
 }

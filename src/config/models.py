@@ -85,6 +85,9 @@ class GlobalFilters(BaseModel):
     # Cupos hardcodeados {sucursal: {generico: cupo}} — se concatenan al df_cupos
     # antes del merge final. Útil para sucursales que no se cargan en fact_cupos.
     cupos_manuales: dict[str, dict[str, float]] | None = None
+    # avances: si True, el daily solo entrega el reporte cuando los cupos
+    # (objetivo) del mes ya están cargados en gold. Ver run_daily _objetivo_gate.
+    esperar_objetivo: bool = False
 
 
 class ReportFilters(BaseModel):

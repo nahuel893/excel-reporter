@@ -93,12 +93,13 @@ class TestAvanceGuemesRegistration:
         assert svc.config_path == run_daily.CONFIGS_DIR / "avances_guemes.json"
         assert svc.fecha_modo == "mes_a_hoy"
 
-    def test_avance_guemes_override_dormant(self):
+    def test_avance_guemes_override_active(self):
+        """Now activated: the template shipped and the objetivo gate (not a manual
+        pause) controls whether a send actually goes out."""
         overrides = json.loads(run_daily.OVERRIDES_PATH.read_text(encoding="utf-8"))
         assert "avance-guemes" in overrides, "avance-guemes missing from daily_overrides.json"
-        assert overrides["avance-guemes"]["ejecutar"] is False, (
-            "avance-guemes must stay dormant (ejecutar=false) until the template ships"
-        )
+        assert overrides["avance-guemes"]["ejecutar"] is True
+        assert overrides["avance-guemes"]["enviar"] is True
 
     def test_avances_guemes_config_parses_as_guemes(self):
         from src.config.resolver import load_report_config, merge_filters
@@ -108,3 +109,92 @@ class TestAvanceGuemesRegistration:
         merged = merge_filters(cfg.filtros, cfg.reportes[0].filtros)
         assert merged["tipo_plantilla"] == "guemes"
         assert merged["id_sucursal"] == 16
+
+    def test_avances_guemes_config_has_gate_and_recipients(self):
+        from src.config.resolver import load_report_config
+
+        cfg = load_report_config(run_daily.CONFIGS_DIR / "avances_guemes.json")
+        assert cfg.filtros.esperar_objetivo is True
+        enviar_a = cfg.reportes[0].enviar_a or {}
+        assert set(enviar_a) == {"Gonzalo Farah", "Sebastian Dellamea", "Nahuel Aguirre"}
+
+
+class TestObjetivoGate:
+    """The objetivo gate holds delivery until the month's cupos are loaded."""
+
+    def _patched(self, **filtros):
+        base = {"fecha_desde": "2026-08-01", "id_sucursal": 16}
+        base.update(filtros)
+        return {"filtros": base}
+
+    def test_no_gate_when_flag_absent(self):
+        # No esperar_objetivo -> never blocks, no DB call needed.
+        assert run_daily._objetivo_gate_bloquea(self._patched()) is False
+
+    def test_blocks_when_flag_set_and_cupos_missing(self, monkeypatch):
+        monkeypatch.setattr(run_daily, "_objetivo_cargado", lambda per, suc: False)
+        assert run_daily._objetivo_gate_bloquea(self._patched(esperar_objetivo=True)) is True
+
+    def test_passes_when_flag_set_and_cupos_loaded(self, monkeypatch):
+        monkeypatch.setattr(run_daily, "_objetivo_cargado", lambda per, suc: True)
+        assert run_daily._objetivo_gate_bloquea(self._patched(esperar_objetivo=True)) is False
+
+    def test_checks_period_from_fecha_desde_not_today(self, monkeypatch):
+        """The cierre (previous month) must be gated on the previous month's
+        cupos — the period comes from the report's own fecha_desde."""
+        seen = {}
+
+        def fake(periodo, id_sucursal):
+            seen["periodo"], seen["id_sucursal"] = periodo, id_sucursal
+            return True
+
+        monkeypatch.setattr(run_daily, "_objetivo_cargado", fake)
+        run_daily._objetivo_gate_bloquea(
+            self._patched(fecha_desde="2026-06-01", esperar_objetivo=True)
+        )
+        assert seen == {"periodo": "2026-06", "id_sucursal": 16}
+
+    def test_fail_closed_when_id_sucursal_missing(self):
+        """Gate opted in but no id_sucursal to check -> hold the send (fail-closed)."""
+        patched = {"filtros": {"fecha_desde": "2026-08-01", "esperar_objetivo": True}}
+        assert run_daily._objetivo_gate_bloquea(patched) is True
+
+    def test_fail_closed_when_id_sucursal_not_numeric(self, monkeypatch):
+        # Even if it reached the DB, a non-numeric sucursal must not send ungated.
+        monkeypatch.setattr(run_daily, "_objetivo_cargado", lambda per, suc: True)
+        patched = self._patched(id_sucursal="CASA CENTRAL", esperar_objetivo=True)
+        assert run_daily._objetivo_gate_bloquea(patched) is True
+
+    def test_ejecutar_servicio_blocked_gate_strips_delivery_but_still_runs(self, tmp_path, monkeypatch):
+        """Wiring: a blocked gate empties enviar_a (no send) yet the report still runs."""
+        monkeypatch.setattr(run_daily, "_objetivo_cargado", lambda per, suc: False)
+        monkeypatch.setattr(run_daily, "load_contacts", lambda p: {})
+        captured = {}
+
+        def fake_run_reportes(report_config, contactos, test_mode=False):
+            captured["reportes"] = report_config.reportes
+            return 0
+
+        monkeypatch.setattr(run_daily, "_run_reportes", fake_run_reportes)
+
+        cfg = {
+            "tipo": "avances",
+            "filtros": {
+                "tipo_plantilla": "guemes", "fecha_desde": "2026-08-01",
+                "fecha_hasta": "2026-08-31", "id_sucursal": 16, "id_fuerza_ventas": 1,
+                "enviar_email": True, "esperar_objetivo": True,
+            },
+            "reportes": [{
+                "nombre": "AVANCE GUEMES - TEST",
+                "enviar_a": {"Nahuel Aguirre": {"via": ["email"]}},
+            }],
+        }
+        cfg_path = tmp_path / "guemes_test.json"
+        cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+        svc = Servicio(nombre="avance-guemes", config_path=cfg_path, fecha_modo="mes_a_hoy")
+
+        rc = run_daily._ejecutar_servicio(svc, date(2026, 8, 15), enviar=True)
+
+        assert rc == 0
+        assert "reportes" in captured, "_run_reportes must still run (report is generated)"
+        assert all(not (r.enviar_a or {}) for r in captured["reportes"]), "delivery must be stripped"

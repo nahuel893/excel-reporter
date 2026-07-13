@@ -277,6 +277,68 @@ def _keep_only_channel(patched: dict, channel: str) -> dict:
     return patched
 
 
+def _objetivo_cargado(periodo: str, id_sucursal: int) -> bool:
+    """True if gold.fact_cupos has CCU cupo rows for this periodo + sucursal.
+
+    Fail-closed: if the objetivo cannot be confirmed (DB/connection error), this
+    returns False (treated as 'not loaded') so delivery is held — better to hold
+    the send than to email a report with missing/stale cupos.
+    """
+    import os
+
+    from dotenv import load_dotenv
+    from sqlalchemy import create_engine, text
+
+    try:
+        env_path = ROOT / ".env"
+        if env_path.exists():
+            load_dotenv(str(env_path), override=False)
+        host = os.getenv("DB_HOST", "localhost")
+        port = os.getenv("DB_PORT", "5432")
+        db = os.getenv("DB_NAME")
+        user = os.getenv("DB_USER")
+        password = os.getenv("DB_PASSWORD")
+        url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}"
+        engine = create_engine(url, connect_args={"connect_timeout": 15})
+        with engine.connect() as conn:
+            n = conn.execute(
+                text(
+                    "SELECT count(*) FROM gold.fact_cupos "
+                    "WHERE periodo = :p AND id_sucursal = :s AND proveedor = 'CCU'"
+                ),
+                {"p": periodo, "s": id_sucursal},
+            ).scalar()
+        return bool(n and int(n) > 0)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ⚠️  objetivo gate: no se pudo verificar cupos ({exc!r}) — se asume NO cargado")
+        return False
+
+
+def _objetivo_gate_bloquea(patched: dict) -> bool:
+    """True when a report opts into the objetivo gate (``filtros.esperar_objetivo``)
+    AND the month's cupos are not loaded in gold yet — i.e. delivery must be held.
+
+    The period comes from the report's own patched ``fecha_desde``, so the day-1
+    cierre (previous month, whose cupos are already loaded) is never blocked.
+    """
+    filtros = patched.get("filtros", {})
+    if not filtros.get("esperar_objetivo"):
+        return False
+    id_sucursal = filtros.get("id_sucursal")
+    fecha_desde = filtros.get("fecha_desde")
+    # Fail-closed: the gate is opted in, but we can't identify what to check —
+    # hold the send rather than deliver ungated.
+    if id_sucursal is None or not fecha_desde:
+        print("  ⚠️  objetivo gate activo pero falta id_sucursal/fecha_desde — se retiene el envío")
+        return True
+    try:
+        suc = int(id_sucursal)
+    except (TypeError, ValueError):
+        print(f"  ⚠️  objetivo gate: id_sucursal no numérico ({id_sucursal!r}) — se retiene el envío")
+        return True
+    return not _objetivo_cargado(str(fecha_desde)[:7], suc)
+
+
 def _ejecutar_servicio(
     svc: Servicio,
     hoy: date,
@@ -287,6 +349,18 @@ def _ejecutar_servicio(
     """Load the config, patch fechas, and run through the normal pipeline."""
     raw = json.loads(svc.config_path.read_text(encoding="utf-8"))
     patched = svc.patch(raw, hoy)
+
+    # Objetivo gate: opt-in reports (filtros.esperar_objetivo) only deliver once
+    # the month's cupos are loaded in gold. Otherwise generate but hold the send.
+    if enviar and _objetivo_gate_bloquea(patched):
+        f = patched.get("filtros", {})
+        print(
+            f"  🚧 {svc.nombre}: objetivo del mes no cargado "
+            f"(sucursal {f.get('id_sucursal')}, periodo {str(f.get('fecha_desde', ''))[:7]}) "
+            f"— se genera pero NO se envía"
+        )
+        enviar = False
+
     if not enviar:
         patched = _strip_delivery(patched)
     elif solo_canal:
