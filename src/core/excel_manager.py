@@ -187,6 +187,7 @@ class ExcelManager:
         range_addr: str,
         output_dir: Path | None = None,
         dpi: int = 300,
+        crop: bool = False,
     ) -> Path:
         """
         Captura un rango de una hoja como imagen PNG de alta calidad.
@@ -206,6 +207,12 @@ class ExcelManager:
             output_dir: Directorio de salida (por defecto DATA_OUTPUT)
             dpi: Resolucion de salida en puntos por pulgada (default 300).
                  Valores tipicos: 150 draft, 300 calidad de email, 600 impresion.
+            crop: Si es True, restringe el area de impresion al `range_addr`
+                  resuelto via `print_area`, recortando el render a esa region.
+                  Si es False (default), NO se toca `print_area` y se renderiza
+                  la hoja completa (comportamiento legacy previo a esta feature).
+                  El slug del filename siempre usa el rango resuelto sin importar
+                  `crop`.
 
         Returns:
             Path al archivo PNG generado
@@ -254,9 +261,15 @@ class ExcelManager:
                 self.ruta_excel, tmp_dir, soffice
             )
 
-            # Paso 2: Preparar xlsx con la hoja target activa y las demas ocultas
+            # Paso 2: Preparar xlsx con la hoja target activa y las demas ocultas.
+            # Solo restringir el area de impresion (print_area) al rango cuando
+            # crop=True; de lo contrario pasar None para renderizar la hoja
+            # completa (comportamiento legacy — backward compatible).
             export_path = self._prepare_sheet_for_export(
-                recalc_path, sheet_name, tmp_dir
+                recalc_path,
+                sheet_name,
+                tmp_dir,
+                range_addr=range_addr if crop else None,
             )
 
             # Paso 3: LibreOffice exporta a PDF (escala vectorial)
@@ -327,11 +340,24 @@ class ExcelManager:
         return out_path
 
     @staticmethod
-    def _prepare_sheet_for_export(source: Path, sheet_name: str, work_dir: Path) -> Path:
+    def _prepare_sheet_for_export(
+        source: Path,
+        sheet_name: str,
+        work_dir: Path,
+        range_addr: str | None = None,
+    ) -> Path:
         """Prepara un xlsx donde la hoja target es la activa y las demas estan ocultas.
 
         Configura el page setup para que toda la tabla quepa en una sola pagina,
         evitando que LibreOffice corte la imagen al ancho de A4.
+
+        Args:
+            source: Path al xlsx de origen (ya recalculado).
+            sheet_name: Hoja a exportar.
+            work_dir: Directorio de trabajo donde se guarda el xlsx preparado.
+            range_addr: Rango Excel concreto (ej. 'A2:R17') a restringir via
+                `print_area`. Si es None/falsy, no se toca `print_area` y
+                LibreOffice exporta la hoja completa (comportamiento previo).
         """
         wb = openpyxl.load_workbook(source)
         ws = wb[sheet_name]
@@ -342,6 +368,10 @@ class ExcelManager:
         for s in wb.sheetnames:
             if s != sheet_name:
                 wb[s].sheet_state = "hidden"
+
+        # Restringir el area de impresion al rango solicitado, si corresponde
+        if range_addr:
+            ws.print_area = range_addr
 
         # Configurar page setup: toda la tabla en 1 sola pagina
         ws.page_setup.orientation = "landscape"

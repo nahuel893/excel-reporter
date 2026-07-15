@@ -75,6 +75,28 @@ class TestDeliveryTarget:
 
 
 # ---------------------------------------------------------------------------
+# CaptureImageConfig
+# ---------------------------------------------------------------------------
+
+
+class TestCaptureImageConfigCaption:
+    def test_accepts_optional_caption_and_caption_anchor(self):
+        cfg = CaptureImageConfig(
+            hoja="Avance",
+            rango="auto:bordes",
+            caption="GFLORES",
+            caption_anchor="B2",
+        )
+        assert cfg.caption == "GFLORES"
+        assert cfg.caption_anchor == "B2"
+
+    def test_caption_and_caption_anchor_default_to_none(self):
+        cfg = CaptureImageConfig(hoja="Ventas Bultos", rango="A1:H20")
+        assert cfg.caption is None
+        assert cfg.caption_anchor is None
+
+
+# ---------------------------------------------------------------------------
 # GlobalFilters
 # ---------------------------------------------------------------------------
 
