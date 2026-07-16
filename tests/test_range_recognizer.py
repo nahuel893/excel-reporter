@@ -516,6 +516,181 @@ class TestCaptionExtraction:
         assert recognizer.detect_ranges_with_captions("Sheet1") == [("B2:D5", "Caption")]
 
 
+class TestCaptionHeaderExtraction:
+    """``caption_header`` opt-in strategy: for each region, find a cell whose
+    (stripped, case-insensitive) value equals the configured header text, and
+    use the value of the cell DIRECTLY BELOW it as the caption. Falls back to
+    the existing caption_anchor / first-text-cell logic when the header is
+    absent or the cell below it is empty."""
+
+    def test_caption_is_value_of_cell_directly_below_header(self, tmp_path):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        _set_box_border(ws, 2, 2, 6, 4)  # B2:D6
+        ws.cell(row=3, column=3, value="Super")     # C3 — header cell
+        ws.cell(row=4, column=3, value="GFLORES")   # C4 — directly below header
+        xlsx = tmp_path / "caption_header_basic.xlsx"
+        wb.save(xlsx)
+
+        recognizer = RangeRecognizer(xlsx)
+        assert recognizer.detect_ranges_with_captions("Sheet1", caption_header="Super") == [
+            ("B2:D6", "GFLORES"),
+        ]
+
+    def test_header_match_is_case_insensitive_and_stripped(self, tmp_path):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        _set_box_border(ws, 2, 2, 5, 4)  # B2:D5
+        ws.cell(row=2, column=2, value="  SUPER  ")  # different case + padding
+        ws.cell(row=3, column=2, value="GFLORES")
+        xlsx = tmp_path / "caption_header_case.xlsx"
+        wb.save(xlsx)
+
+        recognizer = RangeRecognizer(xlsx)
+        assert recognizer.detect_ranges_with_captions("Sheet1", caption_header="super") == [
+            ("B2:D5", "GFLORES"),
+        ]
+
+    def test_header_text_not_present_falls_back_to_default_scan(self, tmp_path):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        _set_box_border(ws, 2, 2, 5, 4)  # B2:D5
+        ws.cell(row=2, column=2, value="Region Label")
+        xlsx = tmp_path / "caption_header_missing.xlsx"
+        wb.save(xlsx)
+
+        recognizer = RangeRecognizer(xlsx)
+        assert recognizer.detect_ranges_with_captions("Sheet1", caption_header="Super") == [
+            ("B2:D5", "Region Label"),
+        ]
+
+    def test_header_found_but_cell_below_is_empty_falls_back_to_default_scan(self, tmp_path):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        _set_box_border(ws, 2, 2, 6, 4)  # B2:D6
+        ws.cell(row=2, column=2, value="Region Label")
+        ws.cell(row=4, column=3, value="Super")
+        # Row 5, col 3 (directly below the header) intentionally left empty.
+        xlsx = tmp_path / "caption_header_empty_below.xlsx"
+        wb.save(xlsx)
+
+        recognizer = RangeRecognizer(xlsx)
+        assert recognizer.detect_ranges_with_captions("Sheet1", caption_header="Super") == [
+            ("B2:D6", "Region Label"),
+        ]
+
+    def test_header_on_last_row_of_region_has_no_cell_below_falls_back(self, tmp_path):
+        """The header cell sits on the region's last row — there is no cell
+        below it WITHIN the region bounds. Must fall back, not read outside
+        the region."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        _set_box_border(ws, 2, 2, 5, 4)  # B2:D5
+        ws.cell(row=2, column=2, value="Region Label")
+        ws.cell(row=5, column=3, value="Super")  # last row of the region
+        xlsx = tmp_path / "caption_header_no_row_below.xlsx"
+        wb.save(xlsx)
+
+        recognizer = RangeRecognizer(xlsx)
+        assert recognizer.detect_ranges_with_captions("Sheet1", caption_header="Super") == [
+            ("B2:D5", "Region Label"),
+        ]
+
+    def test_header_not_found_falls_back_to_caption_anchor_when_both_given(self, tmp_path):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        _set_box_border(ws, 2, 2, 5, 4)  # B2:D5
+        ws.cell(row=3, column=3, value="Anchor Cell")  # C3, offset (1,1) from B2
+        xlsx = tmp_path / "caption_header_anchor_fallback.xlsx"
+        wb.save(xlsx)
+
+        recognizer = RangeRecognizer(xlsx)
+        assert recognizer.detect_ranges_with_captions(
+            "Sheet1", caption_anchor="B2", caption_header="Super",
+        ) == [
+            ("B2:D5", "Anchor Cell"),
+        ]
+
+    def test_multiple_regions_each_get_their_own_header_value(self, tmp_path):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        _set_box_border(ws, 1, 1, 4, 3)  # A1:C4
+        _set_box_border(ws, 6, 1, 9, 3)  # A6:C9
+        ws.cell(row=2, column=2, value="Super")
+        ws.cell(row=3, column=2, value="FGUANTAY")
+        ws.cell(row=7, column=2, value="Super")
+        ws.cell(row=8, column=2, value="VCHAPUR")
+        xlsx = tmp_path / "caption_header_multi.xlsx"
+        wb.save(xlsx)
+
+        recognizer = RangeRecognizer(xlsx)
+        assert recognizer.detect_ranges_with_captions("Sheet1", caption_header="Super") == [
+            ("A1:C4", "FGUANTAY"),
+            ("A6:C9", "VCHAPUR"),
+        ]
+
+    def test_detect_ranges_with_captions_default_behavior_unchanged_without_caption_header(self, tmp_path):
+        """caption_header defaults to None — omitting it must not change the
+        existing default-scan behavior (regression guard)."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        _set_box_border(ws, 2, 2, 5, 4)  # B2:D5
+        ws.cell(row=2, column=2, value="Caption")
+        xlsx = tmp_path / "caption_header_no_regression.xlsx"
+        wb.save(xlsx)
+
+        recognizer = RangeRecognizer(xlsx)
+        assert recognizer.detect_ranges_with_captions("Sheet1") == [("B2:D5", "Caption")]
+
+
+class TestCaptionHeaderAvanceGroundTruth:
+    """Synthetic fixture mirroring the real 'Avance' sheet layout of AVANCE
+    BADIE: 4 supervisor cards, each with a 'Super' header cell whose value
+    directly below it is the supervisor code. Built entirely with openpyxl
+    so this never depends on the gitignored real template file. Ground truth
+    (real template coordinates): regions A1:AR18, A20:AR33, A35:AR48,
+    A50:AR57; header 'Super' at C7/C21/C36/C51; values below: GFLORES,
+    FGUANTAY, VCHAPUR, GFARAH."""
+
+    def test_super_header_extracts_supervisor_code_for_all_four_cards(self, tmp_path):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Avance"
+
+        cards = [
+            (1, 18, 7, "GFLORES"),
+            (20, 33, 21, "FGUANTAY"),
+            (35, 48, 36, "VCHAPUR"),
+            (50, 57, 51, "GFARAH"),
+        ]
+        for r1, r2, header_row, value in cards:
+            _set_box_border(ws, r1, 1, r2, 44)  # A{r1}:AR{r2} (AR = column 44)
+            ws.cell(row=header_row, column=3, value="Super")       # C{header_row}
+            ws.cell(row=header_row + 1, column=3, value=value)     # C{header_row+1}
+
+        xlsx = tmp_path / "avance_super_header.xlsx"
+        wb.save(xlsx)
+
+        recognizer = RangeRecognizer(xlsx)
+        assert recognizer.detect_ranges("Avance") == [
+            "A1:AR18", "A20:AR33", "A35:AR48", "A50:AR57",
+        ]
+        assert recognizer.detect_ranges_with_captions("Avance", caption_header="Super") == [
+            ("A1:AR18", "GFLORES"),
+            ("A20:AR33", "FGUANTAY"),
+            ("A35:AR48", "VCHAPUR"),
+            ("A50:AR57", "GFARAH"),
+        ]
+
+
 @pytest.mark.skipif(_real_xlsx_path() is None, reason="Real AVANCE BADIE xlsx not present locally")
 class TestGoldenRealFile:
     """Ground-truth check against the real production template.
