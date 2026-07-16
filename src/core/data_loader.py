@@ -910,6 +910,53 @@ class DataLoader:
         }
         return self.execute_query(query, params)
 
+    def get_ventas_cobertura_por_vendedor(
+        self,
+        marca: str,
+        fecha_desde: str,
+        fecha_hasta: str,
+        id_sucursal: int = 1,
+    ) -> pd.DataFrame:
+        """Ventas de una marca por vendedor y cliente, para armar ventas + cobertura.
+
+        Grano fino (vendedor, id_cliente) para poder calcular en pandas tanto los
+        bultos (aditivo) como la cobertura (clientes distintos, NO aditiva) a nivel
+        vendedor y supervisor.
+
+        REGLA DE ORO: el join a dim_vendedor es por clave COMPUESTA
+        (id_vendedor + id_sucursal). id_vendedor se reusa entre sucursales; joinear
+        solo por id_vendedor duplica ventas y filtra vendedores de otras sucursales.
+
+        Args:
+            marca: Nombre exacto de la marca (ej. 'FULL SPORT').
+            fecha_desde / fecha_hasta: rango de dias 'YYYY-MM-DD' (inclusive).
+            id_sucursal: Sucursal a filtrar (default 1 = CASA CENTRAL).
+
+        Returns:
+            DataFrame con columnas [vendedor, id_cliente, bultos].
+        """
+        query = """
+        SELECT
+            dv.des_vendedor           AS vendedor,
+            f.id_cliente              AS id_cliente,
+            SUM(f.cantidades_total)   AS bultos
+        FROM gold.fact_ventas f
+        JOIN gold.dim_articulo da ON da.id_articulo = f.id_articulo
+        JOIN gold.dim_vendedor dv ON dv.id_vendedor = f.id_vendedor
+                                 AND dv.id_sucursal = f.id_sucursal
+        WHERE da.marca = :marca
+          AND f.id_sucursal = :id_sucursal
+          AND f.fecha_comprobante::date BETWEEN :fecha_desde AND :fecha_hasta
+        GROUP BY dv.des_vendedor, f.id_cliente
+        """
+        params = {
+            "marca": marca,
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+            "id_sucursal": id_sucursal,
+        }
+        return self.execute_query(query, params)
+
     def get_cobertura_generico_por_vendedor(
         self,
         generico: str,
@@ -2135,13 +2182,34 @@ class DataLoader:
         LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente
             AND fv.id_sucursal = dc.id_sucursal
         WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
-          AND fv.anulado = false
           AND ({cliente_clauses}){extra_filters}
         GROUP BY fv.id_cliente, fv.id_sucursal, nombre_cliente, generico, row_key, mes
         ORDER BY fv.id_cliente, row_key, mes
         """
         return self.execute_query(query, params)
 
+    def get_marca_universe(self, genericos: list[str]) -> pd.DataFrame:
+        """Todas las combinaciones (generico, marca) de los genericos dados.
+
+        Fuente: gold.dim_articulo. Usado por el reporte historico de cliente en
+        modo 'marcas completas' para rellenar con 0 las marcas sin venta y asi
+        exponer los huecos de compra.
+
+        Returns:
+            DataFrame con columnas: generico, marca.
+        """
+        if not genericos:
+            return pd.DataFrame(columns=["generico", "marca"])
+        placeholders = ", ".join(f":g{i}" for i in range(len(genericos)))
+        params = {f"g{i}": g for i, g in enumerate(genericos)}
+        query = f"""
+        SELECT DISTINCT da.generico, da.marca
+        FROM gold.dim_articulo da
+        WHERE da.generico IN ({placeholders})
+          AND da.marca IS NOT NULL AND da.marca <> ''
+        ORDER BY da.generico, da.marca
+        """
+        return self.execute_query(query, params)
 
     def get_ventas_mensuales_ccu(
         self, fecha_desde: str, fecha_hasta: str

@@ -209,6 +209,11 @@ SERVICIOS: list[Servicio] = [
         fecha_modo="mes_a_hoy",
     ),
     Servicio(
+        nombre="ventas-cober-preventista-marca",
+        config_path=CONFIGS_DIR / "ventas_cober_preventista_marca.json",
+        fecha_modo="mes_a_hoy",
+    ),
+    Servicio(
         nombre="resumen-mensual",
         config_path=CONFIGS_DIR / "resumen_mensual.json",
         fecha_modo="mes_a_hoy",

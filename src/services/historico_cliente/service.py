@@ -26,6 +26,11 @@ class HistoricoClienteConfig:
     # When True: show ALL marcas grouped by generico, with a subtotal row per
     # generico and a grand-total row. No marca/articulo filter required.
     agrupar_por_generico: bool = False
+    # When True (requires agrupar_por_generico): fill the FULL marca universe of
+    # `genericos_universo` (from dim_articulo), showing 0 for marcas the client
+    # did not buy — highlights coverage gaps.
+    marcas_completas: bool = False
+    genericos_universo: list[str] | None = None
     nombre_archivo: str | None = None
 
 
@@ -56,6 +61,8 @@ _GROUPED_STYLE = SheetStyle(
 # Fill colors for interleaved summary rows (readable in a LibreOffice capture).
 _SUBTOTAL_FILL = "D6E0F0"   # light blue — per-generico subtotal
 _GRAND_FILL = "FFE08A"      # amber — grand total
+_ZERO_FILL = "F2F2F2"       # light gray — marca sin venta (hueco de compra)
+_ZERO_FONT = "9E9E9E"       # gray font for zero rows
 _GENERICO_COL = "Genérico"
 _MARCA_COL = "Marca"
 _TOTAL_COL = "Total"
@@ -86,6 +93,13 @@ class HistoricoClienteService(BaseService):
             marcas=config.marcas,
             agrupar_por_generico=config.agrupar_por_generico,
         )
+
+        # 2b. Optional: full marca universe (for the "marcas completas" mode)
+        universe_df = None
+        if config.agrupar_por_generico and config.marcas_completas:
+            universe_df = self.data_loader.get_marca_universe(
+                config.genericos_universo or []
+            )
 
         # 3. Build full month range from config
         meses = (
@@ -128,10 +142,13 @@ class HistoricoClienteService(BaseService):
                 counter += 1
 
             if config.agrupar_por_generico:
-                sheet_df, subtotal_rows, grand_row = _build_grouped_frame(df_cli, meses)
+                sheet_df, subtotal_rows, grand_row, zero_rows = _build_grouped_frame(
+                    df_cli, meses, universe_df
+                )
                 writer.add_sheet(sheet_df, sheet_name=sheet_name, style=_GROUPED_STYLE)
                 _style_summary_rows(
-                    writer.workbook[sheet_name], subtotal_rows, grand_row, n_cols=len(sheet_df.columns)
+                    writer.workbook[sheet_name], subtotal_rows, grand_row, zero_rows,
+                    n_cols=len(sheet_df.columns),
                 )
                 total_registros += len(sheet_df)
             else:
@@ -164,41 +181,55 @@ class HistoricoClienteService(BaseService):
 
 
 def _build_grouped_frame(
-    df_cli: pd.DataFrame, meses: list[str]
-) -> tuple[pd.DataFrame, list[int], int]:
+    df_cli: pd.DataFrame, meses: list[str], universe_df: pd.DataFrame | None = None
+) -> tuple[pd.DataFrame, list[int], int, list[int]]:
     """Build the grouped-by-generico sheet frame with interleaved summary rows.
 
     Rows are: for each generico (ordered by descending total) its marcas (also by
     descending total), followed by a ``TOTAL {generico}`` subtotal row; finally a
     ``TOTAL GENERAL`` grand-total row.
 
+    When ``universe_df`` (columns generico, marca) is provided, the frame is
+    reindexed onto the full marca universe so marcas the client never bought
+    appear with 0 across every month (coverage-gap view).
+
     Returns:
-        (frame, subtotal_row_indices, grand_row_index) where the row indices are
-        0-based positions within the frame's data rows (excluding the header).
+        (frame, subtotal_row_indices, grand_row_index, zero_row_indices) where the
+        row indices are 0-based positions within the frame's data rows (excluding
+        the header). ``zero_row_indices`` are marca rows whose Total is 0.
     """
-    # Pivot marca × mes, then attach each marca's generico.
+    # Pivot at (generico, marca) grain, then reindex months to the full range.
     pivot = df_cli.pivot_table(
-        index="row_key",
+        index=["generico", "row_key"],
         columns="mes",
         values="bultos",
         aggfunc="sum",
         fill_value=0,
     ).reindex(columns=meses, fill_value=0)
+
+    # Fill the full marca universe with 0 for marcas the client did not buy.
+    if universe_df is not None and not universe_df.empty:
+        uni_index = pd.MultiIndex.from_frame(
+            universe_df.rename(columns={"marca": "row_key"})[["generico", "row_key"]]
+        )
+        pivot = pivot.reindex(uni_index.union(pivot.index), fill_value=0)
+
     pivot["Total"] = pivot[meses].sum(axis=1)
-    marca_generico = df_cli.groupby("row_key")["generico"].first()
 
     gen_totales = (
-        pivot["Total"].groupby(marca_generico).sum().sort_values(ascending=False)
+        pivot["Total"].groupby(level="generico").sum().sort_values(ascending=False)
     )
 
     records: list[dict] = []
     subtotal_rows: list[int] = []
+    zero_rows: list[int] = []
     for generico in gen_totales.index:
-        marcas_gen = marca_generico[marca_generico == generico].index
-        block = pivot.loc[pivot.index.isin(marcas_gen)].sort_values(
+        block = pivot.xs(generico, level="generico").sort_values(
             "Total", ascending=False
         )
         for marca, row in block.iterrows():
+            if row[_TOTAL_COL] == 0:
+                zero_rows.append(len(records))
             records.append(
                 {_GENERICO_COL: generico, _MARCA_COL: marca,
                  **{m: row[m] for m in meses}, _TOTAL_COL: row[_TOTAL_COL]}
@@ -218,25 +249,30 @@ def _build_grouped_frame(
     )
 
     frame = pd.DataFrame(records, columns=[_GENERICO_COL, _MARCA_COL, *meses, _TOTAL_COL])
-    return frame, subtotal_rows, grand_row
+    return frame, subtotal_rows, grand_row, zero_rows
 
 
-def _style_summary_rows(ws, subtotal_rows: list[int], grand_row: int, n_cols: int) -> None:
-    """Bold + fill the subtotal and grand-total rows of the grouped sheet.
+def _style_summary_rows(
+    ws, subtotal_rows: list[int], grand_row: int, zero_rows: list[int], n_cols: int
+) -> None:
+    """Fill the subtotal, grand-total and zero-sale rows of the grouped sheet.
 
     Row indices are 0-based within the data rows; the worksheet header occupies
     row 1, so data row ``i`` maps to worksheet row ``i + 2``.
     """
     from openpyxl.styles import Font, PatternFill
 
-    def _paint(data_idx: int, color: str) -> None:
+    def _paint(data_idx: int, color: str, *, bold: bool = True, font_color: str | None = None) -> None:
         excel_row = data_idx + 2
         fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
         for col in range(1, n_cols + 1):
             cell = ws.cell(row=excel_row, column=col)
             cell.fill = fill
-            cell.font = Font(bold=True)
+            cell.font = Font(bold=bold, color=font_color)
 
+    # Zero-sale rows first (subtotal/grand override if they ever collided).
+    for idx in zero_rows:
+        _paint(idx, _ZERO_FILL, bold=False, font_color=_ZERO_FONT)
     for idx in subtotal_rows:
         _paint(idx, _SUBTOTAL_FILL)
     _paint(grand_row, _GRAND_FILL)

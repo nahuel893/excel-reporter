@@ -278,6 +278,26 @@ python main.py ventas --config config.json
 - **Tablas cobertura**: cob_preventista_generico, cob_preventista_marca, cob_sucursal_generico, cob_sucursal_marca
 - **Conexion**: Variables en `.env` (DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
 
+### ⚠️ REGLA DE ORO — clave compuesta (id + id_sucursal)
+
+`id_vendedor` e `id_ruta` **NO son unicos globalmente**: se REUSAN en varias sucursales.
+La clave real es **compuesta**: `(id_vendedor, id_sucursal)` y `(id_ruta, id_sucursal)`.
+
+Al joinear un fact con `dim_vendedor` (o cualquier cosa keyed por `id_ruta`) hay que
+cruzar por **ambas** columnas, nunca solo por el id:
+
+```sql
+JOIN gold.dim_vendedor dv
+  ON fv.id_vendedor = dv.id_vendedor
+ AND fv.id_sucursal = dv.id_sucursal   -- OBLIGATORIO
+```
+
+Joinear solo por `id_vendedor` produce un **fan-out**: la misma venta matchea las filas
+de dim de TODAS las sucursales que reusan ese id → duplica ventas y mete nombres/rutas de
+otras sucursales en un informe de una sola sucursal. (Ej. real: FULL SPORT sucursal 1 dio
+486,5 bultos mal vs 450,5 correcto; dim_vendedor.id_vendedor=100 existe en 5 sucursales.)
+Mismo criterio para filtros/joins por `id_ruta`: siempre acotar por `(id_ruta, id_sucursal)`.
+
 ### Metodos de DataLoader
 
 - `get_ventas_diarias()`: Ventas agrupadas por fecha (para columnas de dias)

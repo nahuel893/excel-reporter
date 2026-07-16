@@ -289,6 +289,43 @@ def test_grouped_mode_generico_ordered_by_total(tmp_path):
     assert labels[-1] == "TOTAL GENERAL"
 
 
+def test_marcas_completas_fills_universe(tmp_path):
+    """marcas_completas=True → marcas del universo no compradas aparecen con Total 0."""
+    loader = MagicMock(spec=DataLoader)
+    loader.get_ventas_historico_cliente.return_value = _make_grouped_df()
+    # Universe adds QUILMES (CERVEZAS) + ANDES (VINOS) the client never bought.
+    loader.get_marca_universe.return_value = pd.DataFrame({
+        "generico": ["CERVEZAS", "CERVEZAS", "CERVEZAS", "VINOS", "VINOS"],
+        "marca": ["SALTA", "HEINEKEN", "QUILMES", "TORO", "ANDES"],
+    })
+
+    service = HistoricoClienteService(data_loader=loader)
+    config = _base_config(
+        clientes=[{"id_cliente": 1, "id_sucursal": 1}],
+        marcas=None,
+        articulos=None,
+        agrupar_por_generico=True,
+        marcas_completas=True,
+        genericos_universo=["CERVEZAS", "VINOS"],
+    )
+
+    with patch("src.services.historico_cliente.service.service_output_dir", return_value=tmp_path):
+        result = service.generar_reporte(config)
+
+    loader.get_marca_universe.assert_called_once_with(["CERVEZAS", "VINOS"])
+
+    rows = _read_marca_column(result.ruta_archivo)
+    labels = {label for label, _ in rows}
+    totals = dict(rows)
+    # Never-bought marcas are present with 0
+    assert "QUILMES" in labels and totals["QUILMES"] == 0
+    assert "ANDES" in labels and totals["ANDES"] == 0
+    # Bought marcas + subtotals unchanged by the zero-fill
+    assert totals["TOTAL CERVEZAS"] == 290
+    assert totals["TOTAL VINOS"] == 15
+    assert totals["TOTAL GENERAL"] == 305
+
+
 def test_long_client_name_truncated(tmp_path):
     """Client with 40-char nombre_cliente → sheet name is exactly 31 chars."""
     long_name = "A" * 40

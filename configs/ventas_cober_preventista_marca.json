@@ -1,0 +1,31 @@
+{
+    "tipo": "ventas-cober-preventista-marca",
+    "filtros": {
+        "fecha_desde": "2026-07-01",
+        "fecha_hasta": "2026-07-31",
+        "id_sucursal": 1,
+        "enviar_email": false,
+        "enviar_whatsapp": true,
+        "whatsapp_enviar_como": "imagen"
+    },
+    "reportes": [
+        {
+            "nombre": "Ventas y Cobertura FULL SPORT por Preventista",
+            "filtros": {
+                "marcas": ["FULL SPORT"]
+            },
+            "capture_images": [
+                {
+                    "hoja": "Ventas Cob x Preventista",
+                    "rango": "A1:D55",
+                    "renderer": "libreoffice"
+                }
+            ],
+            "enviar_a": {
+                "Gonzalo Farah": {
+                    "via": ["whatsapp"]
+                }
+            }
+        }
+    ]
+}

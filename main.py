@@ -81,6 +81,7 @@ REPORT_HANDLERS: dict[str, str] = {
     "subdistribuidores": "_run_subdistribuidores_report",
     "stock-suria": "_run_stock_suria_report",
     "ventas-marca": "_run_ventas_marca_report",
+    "ventas-cober-preventista-marca": "_run_ventas_cober_preventista_marca_report",
 }
 
 
@@ -770,6 +771,38 @@ def _run_ventas_marca_report(report, merged: dict) -> list[tuple[Path, dict]]:
     ]
 
 
+def _run_ventas_cober_preventista_marca_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate ventas-cober-preventista-marca report (ventas + cobertura por preventista)."""
+    from src.services.ventas_cober_preventista_marca import (
+        VentasCoberPreventistaMarcaConfig,
+        VentasCoberPreventistaMarcaService,
+    )
+
+    marcas = merged.get("marcas") or []
+    if not marcas:
+        print("Error: ventas-cober-preventista-marca requiere una marca en 'marcas' (filtros)")
+        return []
+
+    config = VentasCoberPreventistaMarcaConfig(
+        marca=marcas[0],
+        fecha_desde=merged["fecha_desde"],
+        fecha_hasta=merged.get("fecha_hasta") or merged["fecha_desde"],
+        id_sucursal=merged.get("id_sucursal") or 1,
+        nombre_archivo=report.nombre,
+    )
+
+    result = VentasCoberPreventistaMarcaService().generar_reporte(config)
+    print(f"Ventas+Cobertura por Preventista '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Preventistas: {result.preventistas} | Bultos: {result.total_bultos} | Cobertura: {result.cobertura_total}")
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
 def _run_historico_cliente_report(report, merged: dict) -> list[tuple[Path, dict]]:
     """Generate historico-cliente report. Returns list of (path, metadata) tuples."""
     from src.services.historico_cliente import (
@@ -793,6 +826,8 @@ def _run_historico_cliente_report(report, merged: dict) -> list[tuple[Path, dict
         articulos=articulos,
         marcas=marcas,
         agrupar_por_generico=merged.get("agrupar_por_generico", False),
+        marcas_completas=merged.get("marcas_completas", False),
+        genericos_universo=merged.get("genericos_universo"),
         nombre_archivo=report.nombre,
     )
 
