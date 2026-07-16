@@ -53,6 +53,22 @@ class TestCaptureConfigCaption:
         cfg = CaptureConfig(hoja="Cober Nueva", rango="auto:bordes")
         assert cfg.caption_anchor is None
 
+    def test_accepts_optional_caption_header(self):
+        cfg = CaptureConfig(hoja="Avance", rango="auto:bordes", caption_header="Super")
+        assert cfg.caption_header == "Super"
+
+    def test_caption_header_defaults_to_none(self):
+        cfg = CaptureConfig(hoja="Avance", rango="auto:bordes")
+        assert cfg.caption_header is None
+
+    def test_accepts_recortar_true(self):
+        cfg = CaptureConfig(hoja="Cober Nueva", rango="A49:R55", recortar=True)
+        assert cfg.recortar is True
+
+    def test_recortar_defaults_to_false(self):
+        cfg = CaptureConfig(hoja="Cober Nueva", rango="A49:R55")
+        assert cfg.recortar is False
+
 
 # ---------------------------------------------------------------------------
 # CaptureImageStep
@@ -530,7 +546,7 @@ def _mock_recognizer_class(regions_by_sheet: dict[str, list[tuple[str, str | Non
     def _factory(xlsx_path):
         instance = MagicMock()
         instance.detect_ranges_with_captions.side_effect = (
-            lambda sheet, caption_anchor=None: regions_by_sheet[sheet]
+            lambda sheet, caption_anchor=None, caption_header=None: regions_by_sheet[sheet]
         )
         instances.append(instance)
         return instance
@@ -676,6 +692,50 @@ class TestCaptureImageStepAutoBordesExpansion:
         mock_renderer.render.assert_called_once()
         assert mock_renderer.render.call_args.kwargs["crop"] is False
 
+    def test_non_sentinel_capture_with_recortar_true_renders_with_crop_true(self, tmp_path):
+        """RF: the `recortar` flag on a fixed-range (non-sentinel) capture
+        opts that one range into cropped rendering, without affecting the
+        auto:bordes default (always cropped) or other fixed ranges."""
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Cober Nueva", rango="A49:R55", recortar=True),
+            ]
+        )
+        artifact = _make_artifact(tmp_path)
+        fake_png = tmp_path / "fixed_recortado.png"
+        fake_png.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render.return_value = fake_png
+
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        mock_renderer.render.assert_called_once()
+        assert mock_renderer.render.call_args.kwargs["crop"] is True
+
+    def test_mixed_recortar_and_non_recortar_fixed_ranges_render_independently(self, tmp_path):
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Multicategoria", rango="A1:V57", recortar=True),
+                CaptureConfig(hoja="AVANCE", rango="B2:AX35"),
+            ]
+        )
+        artifact = _make_artifact(tmp_path)
+        png_cropped = tmp_path / "cropped.png"
+        png_whole = tmp_path / "whole.png"
+        png_cropped.write_bytes(b"png")
+        png_whole.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render.side_effect = [png_cropped, png_whole]
+
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        crops = [call.kwargs["crop"] for call in mock_renderer.render.call_args_list]
+        assert crops == [True, False]
+
     def test_expanded_regions_render_with_crop_true(self, tmp_path):
         regions = [("A1:B2", "Card A"), ("A3:B4", "Card B")]
         config = DeliveryConfig(
@@ -701,6 +761,60 @@ class TestCaptureImageStepAutoBordesExpansion:
         assert mock_renderer.render.call_count == 2
         for call in mock_renderer.render.call_args_list:
             assert call.kwargs["crop"] is True
+
+    def test_caption_header_forwarded_to_recognizer(self, tmp_path):
+        """The `caption_header` field on an auto:bordes CaptureConfig must be
+        forwarded to RangeRecognizer.detect_ranges_with_captions()."""
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Avance", rango="auto:bordes", caption_header="Super"),
+            ]
+        )
+        artifact = _make_artifact(tmp_path)
+        fake_png = tmp_path / "a1.png"
+        fake_png.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render.return_value = fake_png
+
+        mock_recognizer_cls = _mock_recognizer_class({"Avance": [("A1:B2", "GFLORES")]})
+
+        with (
+            patch("src.core.range_recognizer.RangeRecognizer", mock_recognizer_cls),
+            patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer),
+        ):
+            CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        instance = mock_recognizer_cls._instances[0]
+        instance.detect_ranges_with_captions.assert_called_once_with(
+            "Avance", caption_anchor=None, caption_header="Super",
+        )
+
+    def test_recortar_on_sentinel_capture_does_not_change_always_crop_true(self, tmp_path):
+        """Sentinel (auto:bordes) entries always crop=True regardless of the
+        `recortar` field's value — recortar only matters for fixed ranges."""
+        regions = [("A1:B2", "Card A")]
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Avance", rango="auto:bordes", recortar=True),
+            ]
+        )
+        artifact = _make_artifact(tmp_path)
+        fake_png = tmp_path / "a1.png"
+        fake_png.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render.return_value = fake_png
+
+        mock_recognizer_cls = _mock_recognizer_class({"Avance": regions})
+
+        with (
+            patch("src.core.range_recognizer.RangeRecognizer", mock_recognizer_cls),
+            patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer),
+        ):
+            CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert mock_renderer.render.call_args.kwargs["crop"] is True
 
     def test_captions_pushed_to_nombres_hojas_in_reading_order(self, tmp_path):
         regions = [("A1:B2", "Card A"), ("A3:B4", "Card B"), ("A5:B6", None)]

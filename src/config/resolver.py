@@ -184,6 +184,8 @@ def resolve_delivery(
                 renderer=c.renderer,
                 caption=c.caption,
                 caption_anchor=c.caption_anchor,
+                caption_header=c.caption_header,
+                recortar=c.recortar,
             )
             for c in report.capture_images
         ]
@@ -195,6 +197,8 @@ def resolve_delivery(
                 renderer=report.capture_image.renderer,
                 caption=report.capture_image.caption,
                 caption_anchor=report.capture_image.caption_anchor,
+                caption_header=report.capture_image.caption_header,
+                recortar=report.capture_image.recortar,
             )
         ]
 

@@ -96,6 +96,26 @@ class TestCaptureImageConfigCaption:
         assert cfg.caption_anchor is None
 
 
+class TestCaptureImageConfigCaptionHeader:
+    def test_accepts_optional_caption_header(self):
+        cfg = CaptureImageConfig(hoja="Avance", rango="auto:bordes", caption_header="Super")
+        assert cfg.caption_header == "Super"
+
+    def test_caption_header_defaults_to_none(self):
+        cfg = CaptureImageConfig(hoja="Avance", rango="auto:bordes")
+        assert cfg.caption_header is None
+
+
+class TestCaptureImageConfigRecortar:
+    def test_accepts_recortar_true(self):
+        cfg = CaptureImageConfig(hoja="Cober Nueva", rango="A49:R55", recortar=True)
+        assert cfg.recortar is True
+
+    def test_recortar_defaults_to_false(self):
+        cfg = CaptureImageConfig(hoja="Cober Nueva", rango="A49:R55")
+        assert cfg.recortar is False
+
+
 # ---------------------------------------------------------------------------
 # GlobalFilters
 # ---------------------------------------------------------------------------
@@ -365,6 +385,39 @@ class TestResolveDelivery:
         assert result.capture_image is not None
         assert result.capture_image.hoja == "Ventas Bultos"
         assert result.capture_image.rango == "A1:H20"
+
+    def test_capture_images_resolved_with_caption_header_and_recortar(self):
+        """caption_header and recortar from CaptureImageConfig (config layer)
+        must survive resolve_delivery into the pipeline-layer CaptureConfig."""
+        report = ReportEntry(
+            nombre="Test",
+            capture_images=[
+                CaptureImageConfig(hoja="Avance", rango="auto:bordes", caption_header="Super"),
+                CaptureImageConfig(hoja="Cober Nueva", rango="A49:R55", recortar=True, caption="Cervezas 1"),
+            ],
+            enviar_a={"W": DeliveryTarget(via=["email"])},
+        )
+        contactos = {"W": ContactInfo(email="w@test.com")}
+        result = resolve_delivery(report, contactos)
+
+        assert result.capture_images[0].caption_header == "Super"
+        assert result.capture_images[0].recortar is False
+        assert result.capture_images[1].recortar is True
+        assert result.capture_images[1].caption_header is None
+
+    def test_legacy_capture_image_resolved_with_caption_header_and_recortar(self):
+        report = ReportEntry(
+            nombre="Test",
+            capture_image=CaptureImageConfig(
+                hoja="Multicategoria", rango="A1:V57", recortar=True, caption="Multicategoria",
+            ),
+            enviar_a={"W": DeliveryTarget(via=["email"])},
+        )
+        contactos = {"W": ContactInfo(email="w@test.com")}
+        result = resolve_delivery(report, contactos)
+
+        assert result.capture_image.recortar is True
+        assert result.capture_image.caption_header is None
 
     def test_propagates_whatsapp_enviar_como_ambos(self):
         report = ReportEntry(

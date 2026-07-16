@@ -20,6 +20,11 @@ class CaptureImageStep(DeliveryStep):
     de render, en N CaptureConfig concretos (uno por region detectada por
     RangeRecognizer), cada uno renderizado con crop=True. Nunca muta
     `config`/`DeliveryConfig` — la expansion arma una lista local nueva.
+
+    Las entradas con rango fijo (no ``auto:bordes``) se renderizan con
+    crop=``cfg.recortar`` (default False, comportamiento historico de
+    branca/schneider preservado); las expandidas de ``auto:bordes`` siempre
+    usan crop=True.
     """
 
     def execute(
@@ -140,17 +145,18 @@ class CaptureImageStep(DeliveryStep):
     ) -> list[tuple[CaptureConfig, bool]]:
         """Expands any ``rango == "auto:bordes"`` entry into one concrete
         CaptureConfig per detected region (crop=True), leaving non-sentinel
-        entries untouched (crop=False). Builds a NEW local list — `captures`
-        (and therefore the shared DeliveryConfig it came from) is never
-        mutated. Reuses a SINGLE RangeRecognizer instance across every
-        auto:bordes entry in this run (the underlying workbook load is
-        expensive, ~110-125s on real templates — see range_recognizer.py)."""
+        entries untouched (crop=``cfg.recortar``, default False). Builds a
+        NEW local list — `captures` (and therefore the shared DeliveryConfig
+        it came from) is never mutated. Reuses a SINGLE RangeRecognizer
+        instance across every auto:bordes entry in this run (the underlying
+        workbook load is expensive, ~110-125s on real templates — see
+        range_recognizer.py)."""
         expanded: list[tuple[CaptureConfig, bool]] = []
         recognizer = None
         try:
             for cfg in captures:
                 if cfg.rango != AUTO_BORDES_SENTINEL:
-                    expanded.append((cfg, False))
+                    expanded.append((cfg, cfg.recortar))
                     continue
 
                 renderer_name = getattr(cfg, "renderer", "libreoffice")
@@ -170,7 +176,7 @@ class CaptureImageStep(DeliveryStep):
 
                 try:
                     regions = recognizer.detect_ranges_with_captions(
-                        cfg.hoja, caption_anchor=cfg.caption_anchor,
+                        cfg.hoja, caption_anchor=cfg.caption_anchor, caption_header=cfg.caption_header,
                     )
                 except Exception as exc:
                     logger.error(
