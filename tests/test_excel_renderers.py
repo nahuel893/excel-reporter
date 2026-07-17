@@ -111,6 +111,55 @@ class TestLibreOfficeRenderer:
             crop=True,
         )
 
+    def test_render_many_delegates_to_excel_manager_capture_ranges(self, tmp_path):
+        """Batch wrapper (PR5) must call ExcelManager.capture_ranges with
+        the same args, keeping render() completely untouched."""
+        from src.core.excel_renderers.libreoffice_renderer import LibreOfficeRenderer
+
+        xlsx = tmp_path / "x.xlsx"
+        xlsx.write_bytes(b"")
+        specs = [("Sheet1", "A1:B2", False), ("Sheet1", "C1:D2", True)]
+        expected_results = [tmp_path / "a.png", ValueError("boom")]
+
+        with patch(
+            "src.core.excel_renderers.libreoffice_renderer.ExcelManager"
+        ) as MockManager:
+            instance = MockManager.return_value
+            instance.capture_ranges.return_value = expected_results
+
+            result = LibreOfficeRenderer().render_many(
+                xlsx, specs, tmp_path, dpi=200
+            )
+
+        MockManager.assert_called_once_with(xlsx)
+        instance.capture_ranges.assert_called_once_with(
+            specs=specs,
+            output_dir=tmp_path,
+            dpi=200,
+        )
+        assert result == expected_results
+
+    def test_render_many_default_dpi(self, tmp_path):
+        from src.core.excel_renderers.libreoffice_renderer import LibreOfficeRenderer
+
+        xlsx = tmp_path / "x.xlsx"
+        xlsx.write_bytes(b"")
+        specs = [("Sheet1", "A1:B2", False)]
+
+        with patch(
+            "src.core.excel_renderers.libreoffice_renderer.ExcelManager"
+        ) as MockManager:
+            instance = MockManager.return_value
+            instance.capture_ranges.return_value = [tmp_path / "a.png"]
+
+            LibreOfficeRenderer().render_many(xlsx, specs, tmp_path)
+
+        instance.capture_ranges.assert_called_once_with(
+            specs=specs,
+            output_dir=tmp_path,
+            dpi=300,
+        )
+
 
 class TestHtmlPlaywrightRenderer:
     def test_name(self):
