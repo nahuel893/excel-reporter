@@ -1,7 +1,10 @@
 """Wiring tests for configs/avances_badie.json — PR4 activates the dormant
 RangeRecognizer/auto:bordes capture pipeline for the AVANCE BADIE report:
 - Sheet "Avance": auto:bordes + caption_header "Super" -> 4 supervisor cards.
-- Sheet "Cober Nueva": 5 fixed, cropped ranges with explicit captions.
+- Sheet "Cober Nueva": 20 fixed, cropped ranges (5 sections x 4 bands each)
+  with explicit captions. auto:bordes is NOT viable on this sheet — bands 1
+  and 3 have inconsistent/fragmented borders — so every band uses a fixed
+  range instead.
 - Sheet "Multicategoria": 1 fixed, cropped range with an explicit caption.
 - "Preventa Salta" added as a WhatsApp-only delivery target (WhatsApp itself
   stays globally disabled via filtros.enviar_whatsapp=False until manual
@@ -13,6 +16,36 @@ from src.config.resolver import load_contacts, load_report_config
 
 CONFIG_PATH = Path("configs/avances_badie.json")
 CONTACTS_PATH = Path("configs/contactos.json")
+
+# Ground truth (verified against the real workbook via RangeRecognizer + cell
+# probe): each Cober Nueva section spans a fixed column range across all 4
+# row bands. Bands 1-3 are per-supervisor detail; band 4 is the summary.
+COBER_NUEVA_SECTIONS = [
+    ("Cervezas 1", "A", "R"),
+    ("Cervezas 2", "T", "AW"),
+    ("ADO", "AY", "BX"),
+    ("Vinos CCU", "BZ", "CW"),
+    ("Sidras y Licores", "CY", "DV"),
+]
+
+COBER_NUEVA_BANDS = [
+    (2, 17, "GFLORES"),
+    (19, 32, "FGUANTAY"),
+    (34, 47, "VCHAPUR"),
+    (49, 55, "Resumen"),
+]
+
+
+def _expected_cober_nueva_ranges_in_order():
+    """Returns [(rango, caption), ...] in section-major, band-minor order
+    (band1 -> band4 within each section, sections in declaration order)."""
+    pairs = []
+    for seccion, col_start, col_end in COBER_NUEVA_SECTIONS:
+        for row_start, row_end, band_label in COBER_NUEVA_BANDS:
+            rango = f"{col_start}{row_start}:{col_end}{row_end}"
+            caption = f"Cober Nueva - {seccion} - {band_label}"
+            pairs.append((rango, caption))
+    return pairs
 
 
 class TestAvancesBadieConfigLoads:
@@ -34,8 +67,9 @@ class TestAvancesBadieCaptureImages:
         assert report.capture_images is not None
         return report.capture_images
 
-    def test_seven_captures_configured(self):
-        assert len(self._captures()) == 7
+    def test_twenty_two_captures_configured(self):
+        # 1 Avance (auto:bordes) + 20 Cober Nueva (5 sections x 4 bands) + 1 Multicategoria
+        assert len(self._captures()) == 22
 
     def test_all_captures_use_libreoffice_renderer(self):
         assert all(c.renderer == "libreoffice" for c in self._captures())
@@ -47,21 +81,33 @@ class TestAvancesBadieCaptureImages:
         assert avance[0].rango == "auto:bordes"
         assert avance[0].caption_header == "Super"
 
-    def test_cober_nueva_has_five_fixed_cropped_ranges_with_captions(self):
+    def test_cober_nueva_has_twenty_fixed_cropped_ranges_covering_all_four_bands(self):
         captures = self._captures()
         cober = [c for c in captures if c.hoja == "Cober Nueva"]
-        assert len(cober) == 5
+        assert len(cober) == 20
         assert all(c.recortar is True for c in cober)
         assert all(c.rango != "auto:bordes" for c in cober)
 
         by_rango = {c.rango: c.caption for c in cober}
-        assert by_rango == {
-            "A49:R55": "Cober Nueva - Cervezas 1",
-            "T49:AW55": "Cober Nueva - Cervezas 2",
-            "AY49:BX55": "Cober Nueva - ADO",
-            "BZ49:CW55": "Cober Nueva - Vinos CCU",
-            "CY49:DV55": "Cober Nueva - Sidras y Licores",
-        }
+        assert by_rango == dict(_expected_cober_nueva_ranges_in_order())
+
+    def test_cober_nueva_bands_ordered_band1_to_band4_per_section(self):
+        """Entries must appear in section-major, band1->band4 order — not
+        just be present as an unordered set — so downstream WhatsApp/email
+        delivery shows the cards in a predictable, reviewable sequence."""
+        captures = self._captures()
+        cober = [c for c in captures if c.hoja == "Cober Nueva"]
+        actual_order = [(c.rango, c.caption) for c in cober]
+        assert actual_order == _expected_cober_nueva_ranges_in_order()
+
+    def test_ado_fguantay_band_example_matches_coordinator_ground_truth(self):
+        """Pins the exact example given in the scope-change spec:
+        'Cober Nueva - ADO - FGUANTAY' -> hoja 'Cober Nueva', rango 'AY19:BX32'."""
+        captures = self._captures()
+        match = [c for c in captures if c.hoja == "Cober Nueva" and c.rango == "AY19:BX32"]
+        assert len(match) == 1
+        assert match[0].caption == "Cober Nueva - ADO - FGUANTAY"
+        assert match[0].recortar is True
 
     def test_multicategoria_has_one_fixed_cropped_range_with_caption(self):
         captures = self._captures()

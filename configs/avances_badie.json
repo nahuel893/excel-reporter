@@ -27,37 +27,142 @@
                 },
                 {
                     "hoja": "Cober Nueva",
+                    "rango": "A2:R17",
+                    "recortar": true,
+                    "caption": "Cober Nueva - Cervezas 1 - GFLORES",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "A19:R32",
+                    "recortar": true,
+                    "caption": "Cober Nueva - Cervezas 1 - FGUANTAY",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "A34:R47",
+                    "recortar": true,
+                    "caption": "Cober Nueva - Cervezas 1 - VCHAPUR",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
                     "rango": "A49:R55",
                     "recortar": true,
-                    "caption": "Cober Nueva - Cervezas 1",
+                    "caption": "Cober Nueva - Cervezas 1 - Resumen",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "T2:AW17",
+                    "recortar": true,
+                    "caption": "Cober Nueva - Cervezas 2 - GFLORES",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "T19:AW32",
+                    "recortar": true,
+                    "caption": "Cober Nueva - Cervezas 2 - FGUANTAY",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "T34:AW47",
+                    "recortar": true,
+                    "caption": "Cober Nueva - Cervezas 2 - VCHAPUR",
                     "renderer": "libreoffice"
                 },
                 {
                     "hoja": "Cober Nueva",
                     "rango": "T49:AW55",
                     "recortar": true,
-                    "caption": "Cober Nueva - Cervezas 2",
+                    "caption": "Cober Nueva - Cervezas 2 - Resumen",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "AY2:BX17",
+                    "recortar": true,
+                    "caption": "Cober Nueva - ADO - GFLORES",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "AY19:BX32",
+                    "recortar": true,
+                    "caption": "Cober Nueva - ADO - FGUANTAY",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "AY34:BX47",
+                    "recortar": true,
+                    "caption": "Cober Nueva - ADO - VCHAPUR",
                     "renderer": "libreoffice"
                 },
                 {
                     "hoja": "Cober Nueva",
                     "rango": "AY49:BX55",
                     "recortar": true,
-                    "caption": "Cober Nueva - ADO",
+                    "caption": "Cober Nueva - ADO - Resumen",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "BZ2:CW17",
+                    "recortar": true,
+                    "caption": "Cober Nueva - Vinos CCU - GFLORES",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "BZ19:CW32",
+                    "recortar": true,
+                    "caption": "Cober Nueva - Vinos CCU - FGUANTAY",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "BZ34:CW47",
+                    "recortar": true,
+                    "caption": "Cober Nueva - Vinos CCU - VCHAPUR",
                     "renderer": "libreoffice"
                 },
                 {
                     "hoja": "Cober Nueva",
                     "rango": "BZ49:CW55",
                     "recortar": true,
-                    "caption": "Cober Nueva - Vinos CCU",
+                    "caption": "Cober Nueva - Vinos CCU - Resumen",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "CY2:DV17",
+                    "recortar": true,
+                    "caption": "Cober Nueva - Sidras y Licores - GFLORES",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "CY19:DV32",
+                    "recortar": true,
+                    "caption": "Cober Nueva - Sidras y Licores - FGUANTAY",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cober Nueva",
+                    "rango": "CY34:DV47",
+                    "recortar": true,
+                    "caption": "Cober Nueva - Sidras y Licores - VCHAPUR",
                     "renderer": "libreoffice"
                 },
                 {
                     "hoja": "Cober Nueva",
                     "rango": "CY49:DV55",
                     "recortar": true,
-                    "caption": "Cober Nueva - Sidras y Licores",
+                    "caption": "Cober Nueva - Sidras y Licores - Resumen",
                     "renderer": "libreoffice"
                 },
                 {
