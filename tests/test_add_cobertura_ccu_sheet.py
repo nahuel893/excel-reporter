@@ -379,6 +379,9 @@ def test_golden_formulas_marca_group_first_data_row():
     )
     assert ws["D4"].value == "=C4-B4"
     assert ws["E4"].value == '=IF(C4=0,"",B4/C4)'
+    # Percentage columns display exactly 2 decimals; the value is never rounded.
+    assert ws["E4"].number_format == "0.00%"
+    assert ws["B4"].number_format == "#,##0"
 
 
 def test_golden_formulas_marca_group_total_guemes_row():
@@ -401,62 +404,112 @@ def test_golden_formulas_marca_group_total_guemes_row():
     assert ws["E7"].value == '=IF(C7=0,"",B7/C7)'
 
 
+def _find_total_generico_header(ws, generico: str):
+    """Locate the "TOTAL {generico}" header cell without hardcoding its
+    row/column — section layout can shift when a section is inserted."""
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value == f"TOTAL {generico}":
+                return cell
+    raise AssertionError(f"no 'TOTAL {generico}' header found")
+
+
 def test_golden_formulas_generico_total_group_first_data_row():
-    """Section 2 (CERVEZAS 2/2): top_row=9, header_row=10, subheader_row=11,
-    first_data_row=12. 7 marcas + 1 total group -> total group at column
-    index 30 (AD/AE/AF/AG)."""
+    """The TOTAL CERVEZAS group now lives in the third CERVEZAS section
+    (CERVEZAS (3/3)). Locate it dynamically instead of hardcoding a fixed
+    column/row, since inserting a section shifts everything after it."""
     wb = _make_workbook()
     ccu.build_cobertura_ccu(wb)
     ws = wb[SHEET]
 
-    assert ws["A12"].value == "JORGE RAMOS"
-    assert ws["AD10"].value == "TOTAL CERVEZAS"
+    header_cell = _find_total_generico_header(ws, "CERVEZAS")
+    pdv_col = get_column_letter(header_cell.column)
+    obj_col = get_column_letter(header_cell.column + 1)
+    faltan_col = get_column_letter(header_cell.column + 2)
+    pct_col = get_column_letter(header_cell.column + 3)
+    data_row = header_cell.row + 2  # header_row -> subheader_row -> first data row
 
-    expected_marcas = (
-        ["SALTA", "HEINEKEN", "IMPERIAL", "MILLER",
-         "BIECKERT", "SCHNEIDER", "SOL", "AMSTEL", "KUNSTMAN", "BLUE MOON", "SALTA CAUTIVA1"]
-        + ccu.OBJ_ONLY_MARCAS["CERVEZAS"]
-    )
+    assert ws[f"A{data_row}"].value == "JORGE RAMOS"
+
+    expected_marcas = ccu.GENERICO_MARCAS["CERVEZAS"]
+    assert len(expected_marcas) == 17
     array_literal = "{" + ";".join(f'"{m}"' for m in expected_marcas) + "}"
 
-    assert ws["AD12"].value == (
+    pdv_formula = ws[f"{pdv_col}{data_row}"].value
+    obj_formula = ws[f"{obj_col}{data_row}"].value
+
+    assert pdv_formula == (
         '=SUMIFS(COBER!$L:$L,COBER!$H:$H,"16 - SUCURSAL GUEMES",'
-        'COBER!$I:$I,$A12,COBER!$K:$K,"CERVEZAS")'
+        f'COBER!$I:$I,$A{data_row},COBER!$K:$K,"CERVEZAS")'
     )
-    assert ws["AE12"].value == (
+    assert obj_formula == (
         '=SUM(SUMIFS(CuposCober!$H:$H,CuposCober!$E:$E,"16 - SUCURSAL GUEMES",'
-        f'CuposCober!$C:$C,$A12,CuposCober!$D:$D,{array_literal}))'
+        f'CuposCober!$C:$C,$A{data_row},CuposCober!$D:$D,{array_literal}))'
     )
-    assert ws["AF12"].value == "=AE12-AD12"
-    assert ws["AG12"].value == '=IF(AE12=0,"",AD12/AE12)'
+    assert ws[f"{faltan_col}{data_row}"].value == f"={obj_col}{data_row}-{pdv_col}{data_row}"
+    assert ws[f"{pct_col}{data_row}"].value == (
+        f'=IF({obj_col}{data_row}=0,"",{pdv_col}{data_row}/{obj_col}{data_row})'
+    )
+    assert len(_extract_array_literal(obj_formula)) == 17
 
 
 def test_golden_formulas_generico_total_group_total_guemes_row():
-    """Same generico-total group (CERVEZAS), TOTAL GUEMES row of section 2
-    -> row 15."""
+    """Same generico-total group (CERVEZAS), TOTAL GUEMES row of its section,
+    located dynamically."""
     wb = _make_workbook()
     ccu.build_cobertura_ccu(wb)
     ws = wb[SHEET]
 
-    assert ws["A15"].value == "TOTAL GUEMES"
+    header_cell = _find_total_generico_header(ws, "CERVEZAS")
+    pdv_col = get_column_letter(header_cell.column)
+    obj_col = get_column_letter(header_cell.column + 1)
+    faltan_col = get_column_letter(header_cell.column + 2)
+    pct_col = get_column_letter(header_cell.column + 3)
+    data_row = header_cell.row + 2
+    total_row = data_row + len(ccu.PREVENTISTAS)
 
-    expected_marcas = (
-        ["SALTA", "HEINEKEN", "IMPERIAL", "MILLER",
-         "BIECKERT", "SCHNEIDER", "SOL", "AMSTEL", "KUNSTMAN", "BLUE MOON", "SALTA CAUTIVA1"]
-        + ccu.OBJ_ONLY_MARCAS["CERVEZAS"]
-    )
+    assert ws[f"A{total_row}"].value == "TOTAL GUEMES"
+
+    expected_marcas = ccu.GENERICO_MARCAS["CERVEZAS"]
+    assert len(expected_marcas) == 17
     array_literal = "{" + ";".join(f'"{m}"' for m in expected_marcas) + "}"
 
-    assert ws["AD15"].value == (
+    pdv_formula = ws[f"{pdv_col}{total_row}"].value
+    obj_formula = ws[f"{obj_col}{total_row}"].value
+
+    assert pdv_formula == (
         '=SUMIFS(COBER!$L:$L,COBER!$H:$H,"16 - SUCURSAL GUEMES",'
         'COBER!$K:$K,"CERVEZAS")'
     )
-    assert ws["AE15"].value == (
+    assert obj_formula == (
         '=SUM(SUMIFS(CuposCober!$H:$H,CuposCober!$E:$E,"16 - SUCURSAL GUEMES",'
         f'CuposCober!$D:$D,{array_literal}))'
     )
-    assert ws["AF15"].value == "=AE15-AD15"
-    assert ws["AG15"].value == '=IF(AE15=0,"",AD15/AE15)'
+    assert ws[f"{faltan_col}{total_row}"].value == f"={obj_col}{total_row}-{pdv_col}{total_row}"
+    assert ws[f"{pct_col}{total_row}"].value == (
+        f'=IF({obj_col}{total_row}=0,"",{pdv_col}{total_row}/{obj_col}{total_row})'
+    )
+    assert len(_extract_array_literal(obj_formula)) == 17
+
+
+# --- promoted marcas: OBJ_ONLY_MARCAS is now empty --------------------------
+
+
+def test_promoted_marcas_are_displayed_columns_and_obj_only_is_empty():
+    """The 7 marcas previously hidden in OBJ_ONLY_MARCAS (verified generico
+    via gold.dim_articulo) must now be their own displayed columns, not an
+    OBJ-only rollup contributor."""
+    promoted = ["GROLSCH", "IGUANA", "ISENBECK", "WARSTEINER", "NORTE", "PALERMO", "CONTROL C"]
+
+    wb = _make_workbook()
+    ccu.build_cobertura_ccu(wb)
+    ws = wb[SHEET]
+    marca_headers = {cell.value for row in ws.iter_rows() for cell in row}
+
+    for marca in promoted:
+        assert marca in marca_headers, f"{marca} is not displayed as a column header"
+
+    assert ccu.OBJ_ONLY_MARCAS == {}
 
 
 # --- F1 + F7.2: generico OBJ rollup must cover ALL marcas of the generico ---

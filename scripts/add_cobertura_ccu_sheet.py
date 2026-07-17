@@ -1,9 +1,9 @@
 """Add (or replace) the 'Cobertura CCU' sheet on a GUEMES workbook, IN-PLACE.
 
 Layout: preventistas as ROWS, marcas as COLUMNS. One section per CCU generico,
-with CERVEZAS split across two sections (too many marcas for one row of
+with CERVEZAS split across three sections (too many marcas for one row of
 headers). Each section ends with a per-generico TOTAL column group (except
-the first CERVEZAS half, which shares its total with the second half) and a
+the first two CERVEZAS thirds, which share their total with the third) and a
 sucursal-wide TOTAL GUEMES row.
 
 Formulas are written from scratch against COBER / CuposCober, scoped to
@@ -49,28 +49,28 @@ SUC = "16 - SUCURSAL GUEMES"
 PREVENTISTAS = ["JORGE RAMOS", "TALLO GABRIELA", "DIRECTA"]
 
 # (section title, generico, marcas, emit_generico_total)
-# CERVEZAS spans two sections; only the second carries the CERVEZAS total.
+# CERVEZAS spans three sections; only the third carries the CERVEZAS total.
 SECTIONS = [
-    ("CERVEZAS (1/2)", "CERVEZAS",
+    ("CERVEZAS (1/3)", "CERVEZAS",
      ["SALTA", "HEINEKEN", "IMPERIAL", "MILLER"], False),
-    ("CERVEZAS (2/2)", "CERVEZAS",
-     ["BIECKERT", "SCHNEIDER", "SOL", "AMSTEL", "KUNSTMAN", "BLUE MOON", "SALTA CAUTIVA1"], True),
+    ("CERVEZAS (2/3)", "CERVEZAS",
+     ["BIECKERT", "SCHNEIDER", "SOL", "AMSTEL", "KUNSTMAN", "BLUE MOON", "SALTA CAUTIVA1"], False),
+    ("CERVEZAS (3/3)", "CERVEZAS",
+     ["GROLSCH", "IGUANA", "ISENBECK", "WARSTEINER", "NORTE", "PALERMO"], True),
     ("AGUAS DANONE", "AGUAS DANONE",
      ["LEVITE", "VILLAVICENCIO", "VILLA DEL SUR", "BRIO", "SER", "FULL SPORT"], True),
     ("VINOS CCU", "VINOS CCU",
      ["COLON", "LA CELIA", "GRAFFIGNA", "EUGENIO BUSTOS", "O-61", "SANTA SILVIA"], True),
     ("SIDRAS Y LICORES", "SIDRAS Y LICORES",
-     ["REAL", "LA VICTORIA", "SAENZ BRIONES", "EL ABUELO", "PEHUENIA", "MISTRAL"], True),
+     ["REAL", "LA VICTORIA", "SAENZ BRIONES", "EL ABUELO", "PEHUENIA", "MISTRAL", "CONTROL C"], True),
 ]
 
 # Marcas with published cupos in CuposCober that are NOT rendered as columns.
-# They must still count toward the generico OBJ: the generico PDV comes from
-# COBER's generico grain (all marcas), so the OBJ universe must match or the
-# coverage ratio is overstated. Verified against gold.dim_articulo 2026-07.
-OBJ_ONLY_MARCAS = {
-    "CERVEZAS": ["GROLSCH", "IGUANA", "ISENBECK", "WARSTEINER", "NORTE", "PALERMO"],
-    "SIDRAS Y LICORES": ["CONTROL C"],
-}
+# Empty: every marca verified against gold.dim_articulo with a published cupo
+# is now a displayed column (see SECTIONS above), so nothing is OBJ-only
+# anymore. Kept as a dict (rather than removed) because GENERICO_MARCAS and
+# existing call sites still do `.get(generico, [])` on it.
+OBJ_ONLY_MARCAS: dict[str, list[str]] = {}
 
 # All marcas that roll up into each generico total (CERVEZAS = both halves +
 # OBJ_ONLY_MARCAS). Extra marcas from OBJ_ONLY_MARCAS never become columns —
@@ -148,7 +148,9 @@ def _write_group(ws, row: int, col: int, pdv_formula: str, obj_formula: str, *, 
     ws.cell(row=row, column=col + 3, value=f'=IF({obj_letter}{row}=0,"",{pdv_letter}{row}/{obj_letter}{row})')
     for i in range(4):
         cell = ws.cell(row=row, column=col + i)
-        cell.number_format = "0%" if i == 3 else "#,##0"
+        # Percentage column shows exactly 2 decimals; the value is never
+        # rounded (formatting only). Everything else is an integer count.
+        cell.number_format = "0.00%" if i == 3 else "#,##0"
         cell.border = _BORDER
         if fill:
             cell.fill = fill
