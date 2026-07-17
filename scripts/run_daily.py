@@ -96,6 +96,49 @@ def _refresh_mv_resumen_mensual() -> None:
         print(f"  ⚠️  gold.mv_resumen_mensual refresh failed (non-fatal): {exc!r}")
 
 
+def _refresh_mv_stock_quiebre() -> None:
+    """Refresh gold.mv_stock_quiebre so the Superset "Stock BADIE" dashboard has
+    current data.
+
+    Mirrors _refresh_mv_resumen_mensual(): called once at the start of every
+    daily run, right after the resumen-mensual refresh. CONCURRENTLY means the
+    dashboard is never locked during the refresh (requires the unique index
+    uix_mv_stock_quiebre_pk created by scripts/sql/v_stock_quiebre.sql).
+
+    Errors are logged and silenced — a stale MV is acceptable; crashing the
+    entire daily run for a dashboard refresh is not.
+    """
+    try:
+        import os
+        from sqlalchemy import create_engine, text
+        from dotenv import load_dotenv
+
+        env_path = ROOT / ".env"
+        if env_path.exists():
+            load_dotenv(str(env_path), override=False)
+
+        host = os.getenv("DB_HOST", "localhost")
+        port = os.getenv("DB_PORT", "5432")
+        db = os.getenv("DB_NAME")
+        user = os.getenv("DB_USER")
+        password = os.getenv("DB_PASSWORD")
+
+        if not all([db, user, password]):
+            print("  ⚠️  MV refresh skipped — DB credentials not set in environment")
+            return
+
+        url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}"
+        engine = create_engine(url, connect_args={"connect_timeout": 30})
+        with engine.connect() as conn:
+            conn.execute(text(
+                "REFRESH MATERIALIZED VIEW CONCURRENTLY gold.mv_stock_quiebre"
+            ))
+            conn.commit()
+        print("  ✅  gold.mv_stock_quiebre refreshed")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ⚠️  gold.mv_stock_quiebre refresh failed (non-fatal): {exc!r}")
+
+
 CONFIGS_DIR = ROOT / "configs"
 CONTACTOS_PATH = CONFIGS_DIR / "contactos.json"
 OVERRIDES_PATH = CONFIGS_DIR / "daily_overrides.json"
@@ -585,6 +628,9 @@ def main() -> int:
         # (ETL finishes before 07:00; daily timer fires at 07:00).
         print("\n--- Refreshing gold.mv_resumen_mensual ---")
         _refresh_mv_resumen_mensual()
+
+        print("\n--- Refreshing gold.mv_stock_quiebre ---")
+        _refresh_mv_stock_quiebre()
 
     if args.dry_run:
         print("\n=== DRY RUN (no se ejecuta nada) ===")
