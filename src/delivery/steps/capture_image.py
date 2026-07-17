@@ -25,6 +25,12 @@ class CaptureImageStep(DeliveryStep):
     crop=``cfg.recortar`` (default False, comportamiento historico de
     branca/schneider preservado); las expandidas de ``auto:bordes`` siempre
     usan crop=True.
+
+    Gate de consumo: si ningun canal de entrega va a CONSUMIR las imagenes
+    (ver ``_images_consumed``), el paso se omite inmediatamente, ANTES de
+    ``_expand_auto_bordes`` (la costosa carga de workbook de RangeRecognizer)
+    y antes de cualquier render — evita gastar tiempo de render en imagenes
+    que nadie va a ver.
     """
 
     def execute(
@@ -43,6 +49,16 @@ class CaptureImageStep(DeliveryStep):
                 status="skipped",
                 step_name="CaptureImageStep",
                 message="capture_images no configurado",
+            )
+
+        if not self._images_consumed(config):
+            return StepResult(
+                status="skipped",
+                step_name="CaptureImageStep",
+                message=(
+                    "Sin canal que consuma imagenes (whatsapp off, email sin "
+                    "adjunto imagen); captura omitida"
+                ),
             )
 
         from src.core.excel_renderers import get_renderer
@@ -135,6 +151,27 @@ class CaptureImageStep(DeliveryStep):
             step_name="CaptureImageStep",
             message=f"Todas las capturas fallaron: {'; '.join(errores)}",
         )
+
+    @staticmethod
+    def _images_consumed(config: DeliveryConfig) -> bool:
+        """True iff at least one delivery channel will actually consume the
+        rendered images:
+        - WhatsApp is configured AND enviar_como is 'imagen' or 'ambos', OR
+        - Email is configured AND 'imagen' is in adjuntos.
+
+        Used to gate the expensive render/expand path (RangeRecognizer
+        workbook load + LibreOffice renders per region) so it never runs
+        when nothing downstream will consume the output — e.g. WhatsApp
+        disabled/archivo-only and email attaching only the excel file."""
+        whatsapp_consumes = (
+            config.whatsapp is not None
+            and config.whatsapp.enviar_como in ("imagen", "ambos")
+        )
+        email_consumes = (
+            config.email is not None
+            and "imagen" in config.email.adjuntos
+        )
+        return whatsapp_consumes or email_consumes
 
     @staticmethod
     def _expand_auto_bordes(
