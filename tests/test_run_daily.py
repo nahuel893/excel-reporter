@@ -116,7 +116,7 @@ class TestAvanceGuemesRegistration:
         cfg = load_report_config(run_daily.CONFIGS_DIR / "avances_guemes.json")
         assert cfg.filtros.esperar_objetivo is True
         enviar_a = cfg.reportes[0].enviar_a or {}
-        assert set(enviar_a) == {"Gonzalo Farah", "Sebastian Dellamea", "Nahuel Aguirre"}
+        assert set(enviar_a) == {"Gonzalo Farah", "Sebastian Dellamea", "Nahuel Aguirre", "Guemes"}
 
 
 class TestObjetivoGate:

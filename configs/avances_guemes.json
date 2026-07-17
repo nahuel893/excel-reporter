@@ -18,7 +18,8 @@
             "asunto_email": "AVANCE GUEMES - {MES} {AÑO}",
             "capture_images": [
                 {"hoja": "Avance", "rango": "A1:AR13", "renderer": "libreoffice"},
-                {"hoja": "Multicategoria", "rango": "A2:AG10", "renderer": "libreoffice"}
+                {"hoja": "Multicategoria", "rango": "A2:AG10", "renderer": "libreoffice"},
+                {"hoja": "Cobertura CCU", "rango": "A1:AG39", "renderer": "libreoffice"}
             ],
             "enviar_a": {
                 "Gonzalo Farah": {"via": ["email"]},
