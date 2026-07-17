@@ -223,6 +223,23 @@ def test_section_and_row_structure():
     assert total_row_count == len(ccu.SECTIONS)
 
 
+def test_full_sport_is_a_displayed_aguas_danone_column():
+    """FULL SPORT is a real AGUAS DANONE marca (gold.dim_articulo) and must be
+    shown as its own column, not hidden as an OBJ-only rollup contributor."""
+    aguas = next(
+        marcas for _title, generico, marcas, _ in ccu.SECTIONS
+        if generico == "AGUAS DANONE"
+    )
+    assert "FULL SPORT" in aguas
+    assert "FULL SPORT" not in ccu.OBJ_ONLY_MARCAS.get("AGUAS DANONE", [])
+
+    wb = _make_workbook()
+    ccu.build_cobertura_ccu(wb)
+    ws = wb[SHEET]
+    marca_headers = {cell.value for row in ws.iter_rows() for cell in row}
+    assert "FULL SPORT" in marca_headers
+
+
 def test_cervezas_emits_exactly_one_total_column_group():
     wb = _make_workbook()
     ccu.build_cobertura_ccu(wb)

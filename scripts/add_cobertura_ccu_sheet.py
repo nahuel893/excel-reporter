@@ -56,7 +56,7 @@ SECTIONS = [
     ("CERVEZAS (2/2)", "CERVEZAS",
      ["BIECKERT", "SCHNEIDER", "SOL", "AMSTEL", "KUNSTMAN", "BLUE MOON", "SALTA CAUTIVA1"], True),
     ("AGUAS DANONE", "AGUAS DANONE",
-     ["LEVITE", "VILLAVICENCIO", "VILLA DEL SUR", "BRIO", "SER"], True),
+     ["LEVITE", "VILLAVICENCIO", "VILLA DEL SUR", "BRIO", "SER", "FULL SPORT"], True),
     ("VINOS CCU", "VINOS CCU",
      ["COLON", "LA CELIA", "GRAFFIGNA", "EUGENIO BUSTOS", "O-61", "SANTA SILVIA"], True),
     ("SIDRAS Y LICORES", "SIDRAS Y LICORES",
@@ -69,7 +69,6 @@ SECTIONS = [
 # coverage ratio is overstated. Verified against gold.dim_articulo 2026-07.
 OBJ_ONLY_MARCAS = {
     "CERVEZAS": ["GROLSCH", "IGUANA", "ISENBECK", "WARSTEINER", "NORTE", "PALERMO"],
-    "AGUAS DANONE": ["FULL SPORT"],
     "SIDRAS Y LICORES": ["CONTROL C"],
 }
 
