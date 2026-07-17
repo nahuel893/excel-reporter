@@ -25,6 +25,8 @@ class CaptureConfig(BaseModel):
     renderer: str = "libreoffice"  # backend key, resolved by excel_renderers.get_renderer
     caption: str | None = None  # etiqueta de la imagen (nombres_hojas / WhatsApp caption)
     caption_anchor: str | None = None  # override A1 (relativo a la region) de donde leer el caption
+    caption_header: str | None = None  # etiqueta de encabezado a buscar; caption = celda directamente debajo
+    recortar: bool = False  # recorta el PNG renderizado a `rango` (solo aplica a rangos fijos, no "auto:bordes")
 
 
 class EmailConfig(BaseModel):

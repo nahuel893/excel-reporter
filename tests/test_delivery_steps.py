@@ -31,6 +31,13 @@ def _make_artifact_with_image(tmp_path: Path) -> ReportArtifact:
     return ReportArtifact(ruta_excel=xlsx, rutas_imagenes=[png])
 
 
+def _consuming_whatsapp() -> WhatsAppConfig:
+    """A WhatsAppConfig that satisfies CaptureImageStep's images-consumed
+    gate (enviar_como='imagen'), for tests that exercise the render/expand
+    path and are not themselves testing the gate."""
+    return WhatsAppConfig(grupos=["Grupo Test"], enviar_como="imagen")
+
+
 # ---------------------------------------------------------------------------
 # CaptureConfig — caption / caption_anchor fields
 # ---------------------------------------------------------------------------
@@ -53,6 +60,22 @@ class TestCaptureConfigCaption:
         cfg = CaptureConfig(hoja="Cober Nueva", rango="auto:bordes")
         assert cfg.caption_anchor is None
 
+    def test_accepts_optional_caption_header(self):
+        cfg = CaptureConfig(hoja="Avance", rango="auto:bordes", caption_header="Super")
+        assert cfg.caption_header == "Super"
+
+    def test_caption_header_defaults_to_none(self):
+        cfg = CaptureConfig(hoja="Avance", rango="auto:bordes")
+        assert cfg.caption_header is None
+
+    def test_accepts_recortar_true(self):
+        cfg = CaptureConfig(hoja="Cober Nueva", rango="A49:R55", recortar=True)
+        assert cfg.recortar is True
+
+    def test_recortar_defaults_to_false(self):
+        cfg = CaptureConfig(hoja="Cober Nueva", rango="A49:R55")
+        assert cfg.recortar is False
+
 
 # ---------------------------------------------------------------------------
 # CaptureImageStep
@@ -70,7 +93,8 @@ class TestCaptureImageStepSkip:
 
     def test_skips_when_pillow_missing(self, tmp_path):
         config = DeliveryConfig(
-            capture_image=CaptureConfig(hoja="Hoja1", rango="A1:B2")
+            capture_image=CaptureConfig(hoja="Hoja1", rango="A1:B2"),
+            whatsapp=_consuming_whatsapp(),
         )
         artifact = _make_artifact(tmp_path)
 
@@ -91,7 +115,8 @@ class TestCaptureImageStepSkip:
 class TestCaptureImageStepSuccess:
     def test_success_sets_artifact_ruta_imagen(self, tmp_path):
         config = DeliveryConfig(
-            capture_image=CaptureConfig(hoja="Ventas", rango="A1:H20")
+            capture_image=CaptureConfig(hoja="Ventas", rango="A1:H20"),
+            whatsapp=_consuming_whatsapp(),
         )
         artifact = _make_artifact(tmp_path)
         fake_png = tmp_path / "captura.png"
@@ -115,7 +140,8 @@ class TestCaptureImageStepSuccess:
 class TestCaptureImageStepError:
     def test_unexpected_error_returns_error_status(self, tmp_path):
         config = DeliveryConfig(
-            capture_image=CaptureConfig(hoja="Hoja1", rango="A1:B2")
+            capture_image=CaptureConfig(hoja="Hoja1", rango="A1:B2"),
+            whatsapp=_consuming_whatsapp(),
         )
         artifact = _make_artifact(tmp_path)
 
@@ -136,7 +162,8 @@ class TestCaptureImageStepError:
         a missing dependency. For a single capture it must surface as status
         'error' (the one region failed), never a misleading 'skipped'."""
         config = DeliveryConfig(
-            capture_image=CaptureConfig(hoja="Hoja1", rango="A1:B2")
+            capture_image=CaptureConfig(hoja="Hoja1", rango="A1:B2"),
+            whatsapp=_consuming_whatsapp(),
         )
         artifact = _make_artifact(tmp_path)
 
@@ -152,6 +179,257 @@ class TestCaptureImageStepError:
 
         assert result.status == "error"
         assert "soffice exit 1" in result.message
+
+
+# ---------------------------------------------------------------------------
+# CaptureImageStep — images-consumed gate
+#
+# Rationale: rendering (auto:bordes expansion + RangeRecognizer workbook
+# load + LibreOffice renders) is expensive (~110min for 25 captures). If no
+# downstream channel will actually consume the images (WhatsApp off/archivo,
+# email without an 'imagen' attachment), the whole render path is a wasted
+# cost that must be skipped BEFORE _expand_auto_bordes runs.
+# ---------------------------------------------------------------------------
+
+
+class TestImagesConsumedGate:
+    def test_images_consumed_true_when_whatsapp_enviar_como_imagen(self):
+        config = DeliveryConfig(
+            whatsapp=WhatsAppConfig(grupos=["G"], enviar_como="imagen"),
+        )
+        assert CaptureImageStep._images_consumed(config) is True
+
+    def test_images_consumed_true_when_whatsapp_enviar_como_ambos(self):
+        config = DeliveryConfig(
+            whatsapp=WhatsAppConfig(grupos=["G"], enviar_como="ambos"),
+        )
+        assert CaptureImageStep._images_consumed(config) is True
+
+    def test_images_consumed_false_when_whatsapp_enviar_como_archivo(self):
+        config = DeliveryConfig(
+            whatsapp=WhatsAppConfig(grupos=["G"], enviar_como="archivo"),
+        )
+        assert CaptureImageStep._images_consumed(config) is False
+
+    def test_images_consumed_true_when_email_adjuntos_has_imagen(self):
+        config = DeliveryConfig(
+            email=EmailConfig(destinatarios=["a@b.com"], adjuntos=["excel", "imagen"]),
+        )
+        assert CaptureImageStep._images_consumed(config) is True
+
+    def test_images_consumed_false_when_email_adjuntos_excel_only(self):
+        config = DeliveryConfig(
+            email=EmailConfig(destinatarios=["a@b.com"], adjuntos=["excel"]),
+        )
+        assert CaptureImageStep._images_consumed(config) is False
+
+    def test_images_consumed_false_when_no_whatsapp_and_no_email(self):
+        config = DeliveryConfig()
+        assert CaptureImageStep._images_consumed(config) is False
+
+    def test_images_consumed_false_when_whatsapp_archivo_and_email_excel_only(self):
+        config = DeliveryConfig(
+            whatsapp=WhatsAppConfig(grupos=["G"], enviar_como="archivo"),
+            email=EmailConfig(destinatarios=["a@b.com"], adjuntos=["excel"]),
+        )
+        assert CaptureImageStep._images_consumed(config) is False
+
+    def test_images_consumed_true_when_either_channel_alone_satisfies_it(self):
+        """Whatsapp archivo-only does NOT consume images, but email WITH
+        imagen still does — the rule is an OR across channels."""
+        config = DeliveryConfig(
+            whatsapp=WhatsAppConfig(grupos=["G"], enviar_como="archivo"),
+            email=EmailConfig(destinatarios=["a@b.com"], adjuntos=["imagen"]),
+        )
+        assert CaptureImageStep._images_consumed(config) is True
+
+
+class TestCaptureImageStepConsumedGateShortCircuit:
+    def test_not_consumed_returns_skipped_without_rendering(self, tmp_path):
+        """No whatsapp, email excel-only -> skipped, renderer never invoked."""
+        config = DeliveryConfig(
+            capture_image=CaptureConfig(hoja="Ventas", rango="A1:H20"),
+            email=EmailConfig(destinatarios=["a@b.com"], adjuntos=["excel"]),
+        )
+        artifact = _make_artifact(tmp_path)
+
+        mock_renderer = MagicMock()
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            result = CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert result.status == "skipped"
+        assert "imagenes" in result.message.lower()
+        mock_renderer.render.assert_not_called()
+
+    def test_not_consumed_never_invokes_range_recognizer_for_auto_bordes(self, tmp_path):
+        """The expensive path (auto:bordes -> RangeRecognizer workbook load)
+        must be short-circuited entirely — RangeRecognizer is never even
+        instantiated when nothing will consume the images."""
+        config = DeliveryConfig(
+            capture_images=[CaptureConfig(hoja="Avance", rango="auto:bordes")],
+            # whatsapp is None (default), email is None (default) -> not consumed
+        )
+        artifact = _make_artifact(tmp_path)
+
+        mock_recognizer_cls = _mock_recognizer_class({"Avance": [("A1:B2", "Card A")]})
+        mock_renderer = MagicMock()
+
+        with (
+            patch("src.core.range_recognizer.RangeRecognizer", mock_recognizer_cls),
+            patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer),
+        ):
+            result = CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert result.status == "skipped"
+        mock_recognizer_cls.assert_not_called()
+        mock_renderer.render.assert_not_called()
+        assert artifact.rutas_imagenes == []
+
+    def test_whatsapp_archivo_and_email_excel_only_returns_skipped(self, tmp_path):
+        config = DeliveryConfig(
+            capture_image=CaptureConfig(hoja="Ventas", rango="A1:H20"),
+            whatsapp=WhatsAppConfig(grupos=["G"], enviar_como="archivo"),
+            email=EmailConfig(destinatarios=["a@b.com"], adjuntos=["excel"]),
+        )
+        artifact = _make_artifact(tmp_path)
+
+        mock_renderer = MagicMock()
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            result = CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert result.status == "skipped"
+        mock_renderer.render.assert_not_called()
+
+    def test_consumed_via_whatsapp_imagen_still_renders(self, tmp_path):
+        config = DeliveryConfig(
+            capture_image=CaptureConfig(hoja="Ventas", rango="A1:H20"),
+            whatsapp=WhatsAppConfig(grupos=["G"], enviar_como="imagen"),
+        )
+        artifact = _make_artifact(tmp_path)
+        fake_png = tmp_path / "captura.png"
+        fake_png.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render.return_value = fake_png
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            result = CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert result.status == "success"
+        mock_renderer.render.assert_called_once()
+
+    def test_consumed_via_whatsapp_ambos_still_renders(self, tmp_path):
+        config = DeliveryConfig(
+            capture_image=CaptureConfig(hoja="Ventas", rango="A1:H20"),
+            whatsapp=WhatsAppConfig(grupos=["G"], enviar_como="ambos"),
+        )
+        artifact = _make_artifact(tmp_path)
+        fake_png = tmp_path / "captura.png"
+        fake_png.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render.return_value = fake_png
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            result = CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert result.status == "success"
+        mock_renderer.render.assert_called_once()
+
+    def test_consumed_via_email_adjuntos_imagen_still_renders(self, tmp_path):
+        config = DeliveryConfig(
+            capture_image=CaptureConfig(hoja="Ventas", rango="A1:H20"),
+            email=EmailConfig(destinatarios=["a@b.com"], adjuntos=["excel", "imagen"]),
+        )
+        artifact = _make_artifact(tmp_path)
+        fake_png = tmp_path / "captura.png"
+        fake_png.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render.return_value = fake_png
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            result = CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert result.status == "success"
+        mock_renderer.render.assert_called_once()
+
+
+class TestImagesConsumedGateRegressionGuard:
+    """Regression guard: the gate must NOT silently disable a capture that a
+    live production config consumes today. avance-branca and avance-guemes
+    both run with enviar_whatsapp=true (daily_overrides.json: enviar=true)
+    and neither sets whatsapp_enviar_como, which defaults to 'imagen'
+    (GlobalFilters.whatsapp_enviar_como) — so both resolve to a WhatsApp
+    channel that DOES consume images. Pinned here via the real resolver so
+    a future default change would break this test loudly instead of
+    silently turning off a live capture."""
+
+    def test_branca_resolved_delivery_keeps_capture_on(self):
+        from src.config.resolver import load_contacts, load_report_config, merge_filters, resolve_delivery
+
+        report_config = load_report_config(Path("configs/avances_branca.json"))
+        contactos = load_contacts(Path("configs/contactos.json"))
+        report = report_config.reportes[0]
+        merged = merge_filters(report_config.filtros, report.filtros)
+
+        delivery = resolve_delivery(
+            report,
+            contactos,
+            enviar_email=merged["enviar_email"],
+            enviar_whatsapp=merged["enviar_whatsapp"],
+            whatsapp_enviar_como=merged["whatsapp_enviar_como"],
+            email_adjuntos=merged["email_adjuntos"],
+        )
+
+        assert delivery is not None
+        assert delivery.whatsapp is not None
+        assert delivery.whatsapp.enviar_como == "imagen"
+        assert CaptureImageStep._images_consumed(delivery) is True
+
+    def test_guemes_resolved_delivery_keeps_capture_on(self):
+        from src.config.resolver import load_contacts, load_report_config, merge_filters, resolve_delivery
+
+        report_config = load_report_config(Path("configs/avances_guemes.json"))
+        contactos = load_contacts(Path("configs/contactos.json"))
+        report = report_config.reportes[0]
+        merged = merge_filters(report_config.filtros, report.filtros)
+
+        delivery = resolve_delivery(
+            report,
+            contactos,
+            enviar_email=merged["enviar_email"],
+            enviar_whatsapp=merged["enviar_whatsapp"],
+            whatsapp_enviar_como=merged["whatsapp_enviar_como"],
+            email_adjuntos=merged["email_adjuntos"],
+        )
+
+        assert delivery is not None
+        assert delivery.whatsapp is not None
+        assert delivery.whatsapp.enviar_como == "imagen"
+        assert CaptureImageStep._images_consumed(delivery) is True
+
+    def test_badie_current_config_is_correctly_not_consumed(self):
+        """avance-badie has enviar_whatsapp=false today (PR4 images not yet
+        verified) -> the gate SHOULD skip it. This is the exact scenario
+        motivating the gate, pinned as a regression guard in the other
+        direction."""
+        from src.config.resolver import load_contacts, load_report_config, merge_filters, resolve_delivery
+
+        report_config = load_report_config(Path("configs/avances_badie.json"))
+        contactos = load_contacts(Path("configs/contactos.json"))
+        report = report_config.reportes[0]
+        merged = merge_filters(report_config.filtros, report.filtros)
+
+        delivery = resolve_delivery(
+            report,
+            contactos,
+            enviar_email=merged["enviar_email"],
+            enviar_whatsapp=merged["enviar_whatsapp"],
+            whatsapp_enviar_como=merged["whatsapp_enviar_como"],
+            email_adjuntos=merged["email_adjuntos"],
+        )
+
+        assert delivery is not None
+        assert delivery.whatsapp is None  # enviar_whatsapp=false -> no whatsapp targets resolved
+        assert CaptureImageStep._images_consumed(delivery) is False
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +774,8 @@ class TestCaptureImageStepOutputDir:
         artifact = ReportArtifact(ruta_excel=xlsx)
 
         config = DeliveryConfig(
-            capture_image=CaptureConfig(hoja="Ventas", rango="A1:H20")
+            capture_image=CaptureConfig(hoja="Ventas", rango="A1:H20"),
+            whatsapp=_consuming_whatsapp(),
         )
 
         fake_png = xlsx.parent / "captura.png"
@@ -530,7 +809,7 @@ def _mock_recognizer_class(regions_by_sheet: dict[str, list[tuple[str, str | Non
     def _factory(xlsx_path):
         instance = MagicMock()
         instance.detect_ranges_with_captions.side_effect = (
-            lambda sheet, caption_anchor=None: regions_by_sheet[sheet]
+            lambda sheet, caption_anchor=None, caption_header=None: regions_by_sheet[sheet]
         )
         instances.append(instance)
         return instance
@@ -544,7 +823,8 @@ class TestCaptureImageStepAutoBordesExpansion:
     def test_cober_nueva_sentinel_expands_to_20_captures_all_rendered(self, tmp_path):
         regions = [(f"R{i}C1:R{i}C2", f"Caption {i}") for i in range(20)]
         config = DeliveryConfig(
-            capture_images=[CaptureConfig(hoja="Cober Nueva", rango="auto:bordes")]
+            capture_images=[CaptureConfig(hoja="Cober Nueva", rango="auto:bordes")],
+            whatsapp=_consuming_whatsapp(),
         )
         artifact = _make_artifact(tmp_path)
 
@@ -572,7 +852,8 @@ class TestCaptureImageStepAutoBordesExpansion:
     def test_avance_sentinel_expands_to_4_captures(self, tmp_path):
         regions = [(f"A{i}:B{i}", f"Card {i}") for i in range(4)]
         config = DeliveryConfig(
-            capture_images=[CaptureConfig(hoja="Avance", rango="auto:bordes")]
+            capture_images=[CaptureConfig(hoja="Avance", rango="auto:bordes")],
+            whatsapp=_consuming_whatsapp(),
         )
         artifact = _make_artifact(tmp_path)
 
@@ -600,7 +881,7 @@ class TestCaptureImageStepAutoBordesExpansion:
     def test_expansion_never_mutates_shared_delivery_config(self, tmp_path):
         regions = [("A1:B2", "Card 1"), ("A3:B4", "Card 2")]
         original_capture = CaptureConfig(hoja="Avance", rango="auto:bordes")
-        config = DeliveryConfig(capture_images=[original_capture])
+        config = DeliveryConfig(capture_images=[original_capture], whatsapp=_consuming_whatsapp())
         artifact = _make_artifact(tmp_path)
 
         png_paths = [tmp_path / "c1.png", tmp_path / "c2.png"]
@@ -632,7 +913,8 @@ class TestCaptureImageStepAutoBordesExpansion:
             capture_images=[
                 CaptureConfig(hoja="Avance", rango="auto:bordes"),
                 CaptureConfig(hoja="Cober Nueva", rango="auto:bordes"),
-            ]
+            ],
+            whatsapp=_consuming_whatsapp(),
         )
         artifact = _make_artifact(tmp_path)
 
@@ -661,7 +943,8 @@ class TestCaptureImageStepAutoBordesExpansion:
 
     def test_non_sentinel_capture_renders_with_crop_false(self, tmp_path):
         config = DeliveryConfig(
-            capture_images=[CaptureConfig(hoja="Multicategoria", rango="A1:H20")]
+            capture_images=[CaptureConfig(hoja="Multicategoria", rango="A1:H20")],
+            whatsapp=_consuming_whatsapp(),
         )
         artifact = _make_artifact(tmp_path)
         fake_png = tmp_path / "fixed.png"
@@ -676,10 +959,57 @@ class TestCaptureImageStepAutoBordesExpansion:
         mock_renderer.render.assert_called_once()
         assert mock_renderer.render.call_args.kwargs["crop"] is False
 
+    def test_non_sentinel_capture_with_recortar_true_renders_with_crop_true(self, tmp_path):
+        """RF: the `recortar` flag on a fixed-range (non-sentinel) capture
+        opts that one range into cropped rendering, without affecting the
+        auto:bordes default (always cropped) or other fixed ranges."""
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Cober Nueva", rango="A49:R55", recortar=True),
+            ],
+            whatsapp=_consuming_whatsapp(),
+        )
+        artifact = _make_artifact(tmp_path)
+        fake_png = tmp_path / "fixed_recortado.png"
+        fake_png.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render.return_value = fake_png
+
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        mock_renderer.render.assert_called_once()
+        assert mock_renderer.render.call_args.kwargs["crop"] is True
+
+    def test_mixed_recortar_and_non_recortar_fixed_ranges_render_independently(self, tmp_path):
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Multicategoria", rango="A1:V57", recortar=True),
+                CaptureConfig(hoja="AVANCE", rango="B2:AX35"),
+            ],
+            whatsapp=_consuming_whatsapp(),
+        )
+        artifact = _make_artifact(tmp_path)
+        png_cropped = tmp_path / "cropped.png"
+        png_whole = tmp_path / "whole.png"
+        png_cropped.write_bytes(b"png")
+        png_whole.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render.side_effect = [png_cropped, png_whole]
+
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        crops = [call.kwargs["crop"] for call in mock_renderer.render.call_args_list]
+        assert crops == [True, False]
+
     def test_expanded_regions_render_with_crop_true(self, tmp_path):
         regions = [("A1:B2", "Card A"), ("A3:B4", "Card B")]
         config = DeliveryConfig(
-            capture_images=[CaptureConfig(hoja="Avance", rango="auto:bordes")]
+            capture_images=[CaptureConfig(hoja="Avance", rango="auto:bordes")],
+            whatsapp=_consuming_whatsapp(),
         )
         artifact = _make_artifact(tmp_path)
 
@@ -702,10 +1032,67 @@ class TestCaptureImageStepAutoBordesExpansion:
         for call in mock_renderer.render.call_args_list:
             assert call.kwargs["crop"] is True
 
+    def test_caption_header_forwarded_to_recognizer(self, tmp_path):
+        """The `caption_header` field on an auto:bordes CaptureConfig must be
+        forwarded to RangeRecognizer.detect_ranges_with_captions()."""
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Avance", rango="auto:bordes", caption_header="Super"),
+            ],
+            whatsapp=_consuming_whatsapp(),
+        )
+        artifact = _make_artifact(tmp_path)
+        fake_png = tmp_path / "a1.png"
+        fake_png.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render.return_value = fake_png
+
+        mock_recognizer_cls = _mock_recognizer_class({"Avance": [("A1:B2", "GFLORES")]})
+
+        with (
+            patch("src.core.range_recognizer.RangeRecognizer", mock_recognizer_cls),
+            patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer),
+        ):
+            CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        instance = mock_recognizer_cls._instances[0]
+        instance.detect_ranges_with_captions.assert_called_once_with(
+            "Avance", caption_anchor=None, caption_header="Super",
+        )
+
+    def test_recortar_on_sentinel_capture_does_not_change_always_crop_true(self, tmp_path):
+        """Sentinel (auto:bordes) entries always crop=True regardless of the
+        `recortar` field's value — recortar only matters for fixed ranges."""
+        regions = [("A1:B2", "Card A")]
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Avance", rango="auto:bordes", recortar=True),
+            ],
+            whatsapp=_consuming_whatsapp(),
+        )
+        artifact = _make_artifact(tmp_path)
+        fake_png = tmp_path / "a1.png"
+        fake_png.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render.return_value = fake_png
+
+        mock_recognizer_cls = _mock_recognizer_class({"Avance": regions})
+
+        with (
+            patch("src.core.range_recognizer.RangeRecognizer", mock_recognizer_cls),
+            patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer),
+        ):
+            CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert mock_renderer.render.call_args.kwargs["crop"] is True
+
     def test_captions_pushed_to_nombres_hojas_in_reading_order(self, tmp_path):
         regions = [("A1:B2", "Card A"), ("A3:B4", "Card B"), ("A5:B6", None)]
         config = DeliveryConfig(
-            capture_images=[CaptureConfig(hoja="Avance", rango="auto:bordes")]
+            capture_images=[CaptureConfig(hoja="Avance", rango="auto:bordes")],
+            whatsapp=_consuming_whatsapp(),
         )
         artifact = _make_artifact(tmp_path)
 
@@ -732,7 +1119,8 @@ class TestCaptureImageStepAutoBordesExpansion:
         config = DeliveryConfig(
             capture_images=[
                 CaptureConfig(hoja="Avance", rango="auto:bordes", renderer="html_playwright")
-            ]
+            ],
+            whatsapp=_consuming_whatsapp(),
         )
         artifact = _make_artifact(tmp_path)
 
@@ -761,7 +1149,8 @@ class TestCaptureImageStepAutoBordesExpansion:
         region no longer aborts the other 19."""
         regions = [("A1:B2", "Card 1"), ("A3:B4", "Card 2"), ("A5:B6", "Card 3")]
         config = DeliveryConfig(
-            capture_images=[CaptureConfig(hoja="Avance", rango="auto:bordes")]
+            capture_images=[CaptureConfig(hoja="Avance", rango="auto:bordes")],
+            whatsapp=_consuming_whatsapp(),
         )
         artifact = _make_artifact(tmp_path)
 
@@ -801,7 +1190,8 @@ class TestCaptureImageStepAutoBordesExpansion:
         misleading 'no configurado' — it names the sheet so an operator can
         investigate."""
         config = DeliveryConfig(
-            capture_images=[CaptureConfig(hoja="Avance", rango="auto:bordes")]
+            capture_images=[CaptureConfig(hoja="Avance", rango="auto:bordes")],
+            whatsapp=_consuming_whatsapp(),
         )
         artifact = _make_artifact(tmp_path)
 

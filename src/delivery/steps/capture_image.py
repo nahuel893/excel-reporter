@@ -20,6 +20,17 @@ class CaptureImageStep(DeliveryStep):
     de render, en N CaptureConfig concretos (uno por region detectada por
     RangeRecognizer), cada uno renderizado con crop=True. Nunca muta
     `config`/`DeliveryConfig` — la expansion arma una lista local nueva.
+
+    Las entradas con rango fijo (no ``auto:bordes``) se renderizan con
+    crop=``cfg.recortar`` (default False, comportamiento historico de
+    branca/schneider preservado); las expandidas de ``auto:bordes`` siempre
+    usan crop=True.
+
+    Gate de consumo: si ningun canal de entrega va a CONSUMIR las imagenes
+    (ver ``_images_consumed``), el paso se omite inmediatamente, ANTES de
+    ``_expand_auto_bordes`` (la costosa carga de workbook de RangeRecognizer)
+    y antes de cualquier render — evita gastar tiempo de render en imagenes
+    que nadie va a ver.
     """
 
     def execute(
@@ -38,6 +49,16 @@ class CaptureImageStep(DeliveryStep):
                 status="skipped",
                 step_name="CaptureImageStep",
                 message="capture_images no configurado",
+            )
+
+        if not self._images_consumed(config):
+            return StepResult(
+                status="skipped",
+                step_name="CaptureImageStep",
+                message=(
+                    "Sin canal que consuma imagenes (whatsapp off, email sin "
+                    "adjunto imagen); captura omitida"
+                ),
             )
 
         from src.core.excel_renderers import get_renderer
@@ -132,6 +153,27 @@ class CaptureImageStep(DeliveryStep):
         )
 
     @staticmethod
+    def _images_consumed(config: DeliveryConfig) -> bool:
+        """True iff at least one delivery channel will actually consume the
+        rendered images:
+        - WhatsApp is configured AND enviar_como is 'imagen' or 'ambos', OR
+        - Email is configured AND 'imagen' is in adjuntos.
+
+        Used to gate the expensive render/expand path (RangeRecognizer
+        workbook load + LibreOffice renders per region) so it never runs
+        when nothing downstream will consume the output — e.g. WhatsApp
+        disabled/archivo-only and email attaching only the excel file."""
+        whatsapp_consumes = (
+            config.whatsapp is not None
+            and config.whatsapp.enviar_como in ("imagen", "ambos")
+        )
+        email_consumes = (
+            config.email is not None
+            and "imagen" in config.email.adjuntos
+        )
+        return whatsapp_consumes or email_consumes
+
+    @staticmethod
     def _expand_auto_bordes(
         artifact: ReportArtifact,
         captures: list[CaptureConfig],
@@ -140,17 +182,18 @@ class CaptureImageStep(DeliveryStep):
     ) -> list[tuple[CaptureConfig, bool]]:
         """Expands any ``rango == "auto:bordes"`` entry into one concrete
         CaptureConfig per detected region (crop=True), leaving non-sentinel
-        entries untouched (crop=False). Builds a NEW local list — `captures`
-        (and therefore the shared DeliveryConfig it came from) is never
-        mutated. Reuses a SINGLE RangeRecognizer instance across every
-        auto:bordes entry in this run (the underlying workbook load is
-        expensive, ~110-125s on real templates — see range_recognizer.py)."""
+        entries untouched (crop=``cfg.recortar``, default False). Builds a
+        NEW local list — `captures` (and therefore the shared DeliveryConfig
+        it came from) is never mutated. Reuses a SINGLE RangeRecognizer
+        instance across every auto:bordes entry in this run (the underlying
+        workbook load is expensive, ~110-125s on real templates — see
+        range_recognizer.py)."""
         expanded: list[tuple[CaptureConfig, bool]] = []
         recognizer = None
         try:
             for cfg in captures:
                 if cfg.rango != AUTO_BORDES_SENTINEL:
-                    expanded.append((cfg, False))
+                    expanded.append((cfg, cfg.recortar))
                     continue
 
                 renderer_name = getattr(cfg, "renderer", "libreoffice")
@@ -170,7 +213,7 @@ class CaptureImageStep(DeliveryStep):
 
                 try:
                     regions = recognizer.detect_ranges_with_captions(
-                        cfg.hoja, caption_anchor=cfg.caption_anchor,
+                        cfg.hoja, caption_anchor=cfg.caption_anchor, caption_header=cfg.caption_header,
                     )
                 except Exception as exc:
                     logger.error(

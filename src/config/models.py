@@ -51,6 +51,8 @@ class CaptureImageConfig(BaseModel):
     renderer: Literal["libreoffice", "html_playwright"] = "libreoffice"
     caption: str | None = None  # image label (nombres_hojas / WhatsApp caption)
     caption_anchor: str | None = None  # A1 override (relative to each detected region) for the caption cell
+    caption_header: str | None = None  # header label to scan for; caption = value of the cell directly below it
+    recortar: bool = False  # crop the rendered PNG to `rango` (only meaningful for non-"auto:bordes" ranges)
 
 
 class GlobalFilters(BaseModel):

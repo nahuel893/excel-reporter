@@ -184,7 +184,7 @@ class RangeRecognizer:
         return {name: self._detect_ranges_in_sheet(wb[name]) for name in wb.sheetnames}
 
     def detect_ranges_with_captions(
-        self, sheet: str, caption_anchor: str | None = None,
+        self, sheet: str, caption_anchor: str | None = None, caption_header: str | None = None,
     ) -> list[tuple[str, str | None]]:
         """Returns ``(a1_range, caption)`` pairs for every maximal bordered
         region of ``sheet``, in the same reading order as ``detect_ranges``.
@@ -213,6 +213,17 @@ class RangeRecognizer:
         to every region of the sheet, so it only makes sense when the
         template places the label at a consistent relative position across
         all cards.
+
+        If ``caption_header`` is given (a header LABEL, e.g. ``"Super"``),
+        each region is scanned (reading order) for a cell whose value —
+        stripped and compared case-insensitively — equals ``caption_header``;
+        the caption is the value of the cell DIRECTLY BELOW that header cell
+        (same column, next row). This does not require the label to sit at a
+        fixed relative offset across cards, unlike ``caption_anchor``. If the
+        header is not found in a region, or the cell below it is empty/out of
+        the region bounds, that region falls back to ``caption_anchor``
+        (if given) or the default first-text-cell scan — ``caption_header``
+        only overrides captioning for the regions where it actually matches.
         """
         wb = self._get_workbook()
         if sheet not in wb.sheetnames:
@@ -231,16 +242,22 @@ class RangeRecognizer:
         seen_captions: set[str] = set()
         for a1_range in ranges:
             r1, c1, r2, c2 = self._parse_a1_range(a1_range)
-            if anchor_offset is not None:
-                caption = self._extract_caption_at_anchor(
-                    ws_data, r1, c1, r2, c2, anchor_offset, a1_range,
+            caption: str | None = None
+            if caption_header:
+                caption = self._extract_caption_by_header(
+                    ws_data, r1, c1, r2, c2, caption_header,
                 )
-            else:
-                caption = self._extract_unique_caption(
-                    ws_data, r1, c1, r2, c2, seen_captions, a1_range,
-                )
-                if caption is not None:
-                    seen_captions.add(caption)
+            if caption is None:
+                if anchor_offset is not None:
+                    caption = self._extract_caption_at_anchor(
+                        ws_data, r1, c1, r2, c2, anchor_offset, a1_range,
+                    )
+                else:
+                    caption = self._extract_unique_caption(
+                        ws_data, r1, c1, r2, c2, seen_captions, a1_range,
+                    )
+                    if caption is not None:
+                        seen_captions.add(caption)
             pairs.append((a1_range, caption))
         return pairs
 
@@ -271,6 +288,31 @@ class RangeRecognizer:
             return None
         value = ws_data.cell(row=target_row, column=target_col).value
         return value.strip() if isinstance(value, str) and value.strip() else None
+
+    @staticmethod
+    def _extract_caption_by_header(
+        ws_data, r1: int, c1: int, r2: int, c2: int, header_text: str,
+    ) -> str | None:
+        """Scans the region (reading order) for the FIRST cell whose value —
+        stripped and compared case-insensitively — equals ``header_text``,
+        and returns the value of the cell DIRECTLY BELOW it (same column,
+        next row), stripped. Returns None if no such header cell exists in
+        the region, if the header sits on the region's last row (no cell
+        below it within bounds), or if the cell below it is empty/non-text —
+        the caller falls back to caption_anchor / default-scan in that case."""
+        target = header_text.strip().lower()
+        for r in range(r1, r2 + 1):
+            for c in range(c1, c2 + 1):
+                value = ws_data.cell(row=r, column=c).value
+                if isinstance(value, str) and value.strip().lower() == target:
+                    below_row = r + 1
+                    if below_row > r2:
+                        return None
+                    below_value = ws_data.cell(row=below_row, column=c).value
+                    if isinstance(below_value, str) and below_value.strip():
+                        return below_value.strip()
+                    return None
+        return None
 
     @staticmethod
     def _extract_unique_caption(
