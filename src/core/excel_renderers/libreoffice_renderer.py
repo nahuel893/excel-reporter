@@ -27,3 +27,22 @@ class LibreOfficeRenderer:
             dpi=dpi,
             crop=crop,
         )
+
+    def render_many(
+        self,
+        xlsx_path: Path,
+        specs: list[tuple[str, str, bool]],
+        output_dir: Path,
+        dpi: int = 300,
+    ) -> list[Path | Exception]:
+        """Batch variant of render(): delegates to
+        ExcelManager.capture_ranges, which recalculates the workbook ONCE
+        and reuses it across every spec — proven pixel-identical to N
+        individual capture_range() calls, at a fraction of the wall time
+        (see scratchpad/pr5_bench in the PR that introduced this method).
+        """
+        return ExcelManager(xlsx_path).capture_ranges(
+            specs=specs,
+            output_dir=output_dir,
+            dpi=dpi,
+        )

@@ -31,6 +31,15 @@ class CaptureImageStep(DeliveryStep):
     ``_expand_auto_bordes`` (la costosa carga de workbook de RangeRecognizer)
     y antes de cualquier render — evita gastar tiempo de render en imagenes
     que nadie va a ver.
+
+    Ruteo por lote (``render_many``): si la lista expandida tiene 2+
+    entradas, TODAS con renderer 'libreoffice', y ese renderer expone
+    ``render_many``, se llama UNA sola vez con todos los specs en lugar de
+    iterar `render()` por-item — recalcula el workbook una sola vez (ver
+    ``ExcelManager.capture_ranges``), probado pixel-identico al loop
+    per-item. Una unica captura 'libreoffice', renderers mixtos (p.ej.
+    'html_playwright'), o un renderer sin `render_many`, siguen usando el
+    loop per-item original sin cambios.
     """
 
     def execute(
@@ -93,25 +102,22 @@ class CaptureImageStep(DeliveryStep):
 
         produced: list[str] = []
 
-        for cfg, crop in expanded:
-            renderer_name = getattr(cfg, "renderer", "libreoffice")
+        batch_renderer = self._resolve_batch_renderer(expanded, get_renderer)
+
+        if batch_renderer is not None:
+            renderer_name = "libreoffice"
+            specs = [(cfg.hoja, cfg.rango, crop) for cfg, crop in expanded]
             try:
-                renderer = get_renderer(renderer_name)
-                png_path = renderer.render(
+                results = batch_renderer.render_many(
                     xlsx_path=artifact.ruta_excel,
-                    sheet=cfg.hoja,
-                    range_addr=cfg.rango,
+                    specs=specs,
                     output_dir=artifact.ruta_excel.parent,
-                    crop=crop,
                 )
-                artifact.rutas_imagenes.append(png_path)
-                artifact.nombres_hojas.append(cfg.caption or cfg.hoja)
-                produced.append(f"{cfg.hoja}[{renderer_name}]:{png_path.name}")
             except ImportError as exc:
                 # A genuinely missing renderer dependency (e.g. Pillow) affects
-                # every region equally — there is no point continuing the loop.
+                # every spec equally — there is no point continuing.
                 logger.warning(
-                    "Dependencia faltante en renderer '%s', omitiendo capturas: %s",
+                    "Dependencia faltante en renderer '%s' (lote), omitiendo capturas: %s",
                     renderer_name, exc,
                 )
                 return StepResult(
@@ -119,15 +125,64 @@ class CaptureImageStep(DeliveryStep):
                     step_name="CaptureImageStep",
                     message=str(exc),
                 )
-            except Exception as exc:  # per-region failure (incl. RuntimeError)
-                # RuntimeError from soffice/pdftoppm (non-zero exit, missing
-                # binary) is per-render: isolate it so one bad region does not
-                # abort the remaining regions. Record it and keep going.
+            except Exception as exc:
+                # A batch-wide failure (e.g. the shared recalc itself failed)
+                # affects every spec in this batch equally — mirror what would
+                # happen if each spec's own recalc failed individually in the
+                # per-item path (every spec ends up as its own error entry).
                 logger.error(
-                    "Captura fallida [%s %s/%s]: %s",
-                    cfg.hoja, cfg.rango, renderer_name, exc,
+                    "render_many fallo antes de producir resultados: %s", exc,
                 )
-                errores.append(f"{cfg.hoja}[{cfg.rango}]/{renderer_name}: {exc}")
+                for cfg, _crop in expanded:
+                    errores.append(f"{cfg.hoja}[{cfg.rango}]/{renderer_name}: {exc}")
+            else:
+                for (cfg, _crop), result in zip(expanded, results):
+                    if isinstance(result, Exception):
+                        logger.error(
+                            "Captura fallida [%s %s/%s]: %s",
+                            cfg.hoja, cfg.rango, renderer_name, result,
+                        )
+                        errores.append(f"{cfg.hoja}[{cfg.rango}]/{renderer_name}: {result}")
+                    else:
+                        artifact.rutas_imagenes.append(result)
+                        artifact.nombres_hojas.append(cfg.caption or cfg.hoja)
+                        produced.append(f"{cfg.hoja}[{renderer_name}]:{result.name}")
+        else:
+            for cfg, crop in expanded:
+                renderer_name = getattr(cfg, "renderer", "libreoffice")
+                try:
+                    renderer = get_renderer(renderer_name)
+                    png_path = renderer.render(
+                        xlsx_path=artifact.ruta_excel,
+                        sheet=cfg.hoja,
+                        range_addr=cfg.rango,
+                        output_dir=artifact.ruta_excel.parent,
+                        crop=crop,
+                    )
+                    artifact.rutas_imagenes.append(png_path)
+                    artifact.nombres_hojas.append(cfg.caption or cfg.hoja)
+                    produced.append(f"{cfg.hoja}[{renderer_name}]:{png_path.name}")
+                except ImportError as exc:
+                    # A genuinely missing renderer dependency (e.g. Pillow) affects
+                    # every region equally — there is no point continuing the loop.
+                    logger.warning(
+                        "Dependencia faltante en renderer '%s', omitiendo capturas: %s",
+                        renderer_name, exc,
+                    )
+                    return StepResult(
+                        status="skipped",
+                        step_name="CaptureImageStep",
+                        message=str(exc),
+                    )
+                except Exception as exc:  # per-region failure (incl. RuntimeError)
+                    # RuntimeError from soffice/pdftoppm (non-zero exit, missing
+                    # binary) is per-render: isolate it so one bad region does not
+                    # abort the remaining regions. Record it and keep going.
+                    logger.error(
+                        "Captura fallida [%s %s/%s]: %s",
+                        cfg.hoja, cfg.rango, renderer_name, exc,
+                    )
+                    errores.append(f"{cfg.hoja}[{cfg.rango}]/{renderer_name}: {exc}")
 
         if produced and not errores:
             return StepResult(
@@ -172,6 +227,27 @@ class CaptureImageStep(DeliveryStep):
             and "imagen" in config.email.adjuntos
         )
         return whatsapp_consumes or email_consumes
+
+    @staticmethod
+    def _resolve_batch_renderer(expanded: list[tuple[CaptureConfig, bool]], get_renderer):
+        """Returns the renderer instance to use for a SINGLE batched
+        `render_many` call, or None to fall back to the per-item loop.
+
+        Eligible only when: there are 2+ expanded entries (batching a
+        single item has no recalc-amortization benefit — see
+        ExcelManager.capture_ranges), EVERY entry uses renderer
+        'libreoffice', and the resolved renderer actually exposes
+        `render_many`. Anything else (mixed renderer types, a single
+        capture, or a renderer without `render_many`) returns None."""
+        if len(expanded) <= 1:
+            return None
+        renderer_names = {getattr(cfg, "renderer", "libreoffice") for cfg, _crop in expanded}
+        if renderer_names != {"libreoffice"}:
+            return None
+        candidate = get_renderer("libreoffice")
+        if not hasattr(candidate, "render_many"):
+            return None
+        return candidate
 
     @staticmethod
     def _expand_auto_bordes(

@@ -339,6 +339,192 @@ class ExcelManager:
         )
         return out_path
 
+    # ── Captura por lote (multiples rangos, UN solo recalculo) ───────────
+
+    def capture_ranges(
+        self,
+        specs: list[tuple[str, str, bool]],
+        output_dir: Path | None = None,
+        dpi: int = 300,
+    ) -> list[Path | Exception]:
+        """
+        Version por lote de `capture_range`: recalcula el workbook con
+        LibreOffice UNA SOLA VEZ y reutiliza ese archivo recalculado como
+        `source` para cada spec (PDF export + pdftoppm + autocrop + save).
+
+        El recalculo repetido por-imagen es el costo dominante del flujo
+        original (LibreOffice recalcula el LIBRO COMPLETO, no solo el
+        rango pedido, asi que ese trabajo es identico sin importar cuantas
+        veces se repita). Compartirlo entre N specs esta probado
+        pixel-identico a llamar `capture_range()` una vez por rango
+        (mean_abs_diff=0.0 en benchmark contra el workbook real de
+        produccion — ver scratchpad del PR que introdujo este metodo),
+        a una fraccion del tiempo total.
+
+        Args:
+            specs: lista de tuplas `(sheet_name, range_addr, crop)`. Mismos
+                significados que los parametros homonimos de `capture_range`
+                (`crop=True` restringe el area de impresion a `range_addr`;
+                `crop=False` renderiza la hoja completa).
+            output_dir: Directorio de salida (por defecto DATA_OUTPUT).
+            dpi: Resolucion de salida en puntos por pulgada (default 300).
+
+        Returns:
+            Lista PARALELA a `specs` (mismo largo, mismo orden): cada
+            entrada es el Path de salida (exito) o la Exception que se
+            levanto al producir ese spec (fallo). Un spec fallido NO
+            aborta los demas — aislamiento de errores por-spec.
+
+        Raises:
+            RuntimeError: si soffice o pdftoppm no estan disponibles, o si
+                el recalculo compartido (unico, afecta a todos los specs
+                por igual) falla.
+            ImportError: si Pillow no esta instalado — se valida ANTES del
+                recalculo (afecta a todos los specs por igual, no tiene
+                sentido seguir).
+        """
+        if not specs:
+            return []
+
+        soffice = self._find_soffice()
+        if soffice is None:
+            raise RuntimeError(
+                "LibreOffice no encontrado. Instalar con: sudo pacman -S libreoffice-fresh"
+            )
+
+        pdftoppm = shutil.which("pdftoppm")
+        if pdftoppm is None:
+            raise RuntimeError(
+                "pdftoppm no encontrado. Instalar poppler: sudo pacman -S poppler"
+            )
+
+        # Import eager: si Pillow falta, levantar ANTES del recalculo (afecta
+        # a todos los specs por igual — mismo criterio que capture_range()).
+        from PIL import Image  # noqa: F401
+
+        output_dir = Path(output_dir) if output_dir else DATA_OUTPUT
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        results: list[Path | Exception] = []
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_dir = Path(tmp_dir)
+
+            # Paso compartido: recalcular formulas UNA SOLA VEZ.
+            recalc_path = self._recalc_with_libreoffice(self.ruta_excel, tmp_dir, soffice)
+
+            for idx, (sheet_name, range_addr, crop) in enumerate(specs):
+                spec_work_dir = tmp_dir / f"spec_{idx}"
+                try:
+                    out_path = self._capture_one_from_recalculated(
+                        recalc_path, sheet_name, range_addr, crop,
+                        spec_work_dir, output_dir, dpi, soffice, pdftoppm,
+                    )
+                    results.append(out_path)
+                except Exception as exc:  # aislamiento por-spec — un rango
+                    # malo (hoja inexistente, fallo de export, etc.) NO debe
+                    # abortar los demas specs del lote.
+                    logger.error(
+                        "capture_ranges: fallo [%s %s]: %s", sheet_name, range_addr, exc,
+                    )
+                    results.append(exc)
+
+        return results
+
+    def _capture_one_from_recalculated(
+        self,
+        recalc_path: Path,
+        sheet_name: str,
+        range_addr: str,
+        crop: bool,
+        work_dir: Path,
+        output_dir: Path,
+        dpi: int,
+        soffice: str,
+        pdftoppm: str,
+    ) -> Path:
+        """Exporta UN par (hoja, rango) a PNG recortado, a partir de un
+        workbook YA recalculado. Espeja los pasos 2-5 de `capture_range`,
+        aislado en su propio `work_dir` para que specs concurrentes del
+        mismo lote nunca choquen en nombres de archivo temporal."""
+        work_dir.mkdir(parents=True, exist_ok=True)
+
+        wb_check = openpyxl.load_workbook(recalc_path, data_only=True, read_only=True)
+        if sheet_name not in wb_check.sheetnames:
+            available = wb_check.sheetnames
+            wb_check.close()
+            raise ValueError(
+                f"Hoja '{sheet_name}' no encontrada en {self.ruta_excel.name}. "
+                f"Hojas disponibles: {available}"
+            )
+        wb_check.close()
+
+        export_path = self._prepare_sheet_for_export(
+            recalc_path, sheet_name, work_dir,
+            range_addr=range_addr if crop else None,
+        )
+
+        pdf_dir = work_dir / "pdf"
+        pdf_dir.mkdir()
+        result = subprocess.run(
+            [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(pdf_dir), str(export_path)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"LibreOffice fallo al exportar PDF: {result.stderr.strip()}"
+            )
+
+        pdf_candidates = list(pdf_dir.glob("*.pdf"))
+        if not pdf_candidates:
+            raise RuntimeError("LibreOffice no genero ningun archivo PDF")
+        pdf_path = pdf_candidates[0]
+
+        png_dir = work_dir / "png"
+        png_dir.mkdir()
+        png_prefix = png_dir / "page"
+        result = subprocess.run(
+            [pdftoppm, "-r", str(dpi), "-png", "-f", "1", "-l", "1",
+             str(pdf_path), str(png_prefix)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"pdftoppm fallo al rasterizar PDF: {result.stderr.strip()}"
+            )
+
+        png_candidates = list(png_dir.glob("page-*.png"))
+        if not png_candidates:
+            raise RuntimeError("pdftoppm no genero ningun archivo PNG")
+
+        from PIL import Image
+        import numpy as np
+
+        img = Image.open(png_candidates[0])
+        arr = np.array(img.convert("RGB"))
+        non_white = np.any(arr < 250, axis=2)
+        rows = np.any(non_white, axis=1)
+        cols = np.any(non_white, axis=0)
+        if rows.any() and cols.any():
+            rmin, rmax = np.where(rows)[0][[0, -1]]
+            cmin, cmax = np.where(cols)[0][[0, -1]]
+            cropped = img.crop((cmin, rmin, cmax + 1, rmax + 1))
+        else:
+            cropped = img
+
+        range_slug = range_addr.replace(":", "_")
+        out_path = output_dir / f"{self.ruta_excel.stem}_{sheet_name}_{range_slug}.png"
+        cropped.save(out_path, "PNG", dpi=(dpi, dpi))
+
+        logger.info(
+            "Imagen capturada (lote): %s (%dx%d px @ %d DPI)",
+            out_path.name, cropped.width, cropped.height, dpi,
+        )
+        return out_path
+
     @staticmethod
     def _prepare_sheet_for_export(
         source: Path,

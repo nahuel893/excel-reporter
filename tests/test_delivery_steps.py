@@ -833,7 +833,7 @@ class TestCaptureImageStepAutoBordesExpansion:
             p.write_bytes(b"png")
 
         mock_renderer = MagicMock()
-        mock_renderer.render.side_effect = png_paths
+        mock_renderer.render_many.return_value = png_paths
 
         mock_recognizer_cls = _mock_recognizer_class({"Cober Nueva": regions})
 
@@ -846,7 +846,10 @@ class TestCaptureImageStepAutoBordesExpansion:
             )
 
         assert result.status == "success"
-        assert mock_renderer.render.call_count == 20
+        # 20 expanded auto:bordes regions, all libreoffice -> ONE render_many
+        # call (PR5 batch path), never the per-item render() loop.
+        mock_renderer.render_many.assert_called_once()
+        mock_renderer.render.assert_not_called()
         assert len(artifact.rutas_imagenes) == 20
 
     def test_avance_sentinel_expands_to_4_captures(self, tmp_path):
@@ -862,7 +865,7 @@ class TestCaptureImageStepAutoBordesExpansion:
             p.write_bytes(b"png")
 
         mock_renderer = MagicMock()
-        mock_renderer.render.side_effect = png_paths
+        mock_renderer.render_many.return_value = png_paths
 
         mock_recognizer_cls = _mock_recognizer_class({"Avance": regions})
 
@@ -875,7 +878,8 @@ class TestCaptureImageStepAutoBordesExpansion:
             )
 
         assert result.status == "success"
-        assert mock_renderer.render.call_count == 4
+        mock_renderer.render_many.assert_called_once()
+        mock_renderer.render.assert_not_called()
         assert len(artifact.rutas_imagenes) == 4
 
     def test_expansion_never_mutates_shared_delivery_config(self, tmp_path):
@@ -889,7 +893,7 @@ class TestCaptureImageStepAutoBordesExpansion:
             p.write_bytes(b"png")
 
         mock_renderer = MagicMock()
-        mock_renderer.render.side_effect = png_paths
+        mock_renderer.render_many.return_value = png_paths
 
         mock_recognizer_cls = _mock_recognizer_class({"Avance": regions})
 
@@ -923,7 +927,7 @@ class TestCaptureImageStepAutoBordesExpansion:
             p.write_bytes(b"png")
 
         mock_renderer = MagicMock()
-        mock_renderer.render.side_effect = png_paths
+        mock_renderer.render_many.return_value = png_paths
 
         mock_recognizer_cls = _mock_recognizer_class({
             "Avance": [("A1:B2", "Card A")],
@@ -997,12 +1001,14 @@ class TestCaptureImageStepAutoBordesExpansion:
         png_whole.write_bytes(b"png")
 
         mock_renderer = MagicMock()
-        mock_renderer.render.side_effect = [png_cropped, png_whole]
+        mock_renderer.render_many.return_value = [png_cropped, png_whole]
 
         with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
             CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
 
-        crops = [call.kwargs["crop"] for call in mock_renderer.render.call_args_list]
+        mock_renderer.render_many.assert_called_once()
+        specs = mock_renderer.render_many.call_args.kwargs["specs"]
+        crops = [crop for (_hoja, _rango, crop) in specs]
         assert crops == [True, False]
 
     def test_expanded_regions_render_with_crop_true(self, tmp_path):
@@ -1018,7 +1024,7 @@ class TestCaptureImageStepAutoBordesExpansion:
             p.write_bytes(b"png")
 
         mock_renderer = MagicMock()
-        mock_renderer.render.side_effect = png_paths
+        mock_renderer.render_many.return_value = png_paths
 
         mock_recognizer_cls = _mock_recognizer_class({"Avance": regions})
 
@@ -1028,9 +1034,11 @@ class TestCaptureImageStepAutoBordesExpansion:
         ):
             CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
 
-        assert mock_renderer.render.call_count == 2
-        for call in mock_renderer.render.call_args_list:
-            assert call.kwargs["crop"] is True
+        mock_renderer.render_many.assert_called_once()
+        specs = mock_renderer.render_many.call_args.kwargs["specs"]
+        assert len(specs) == 2
+        for (_hoja, _rango, crop) in specs:
+            assert crop is True
 
     def test_caption_header_forwarded_to_recognizer(self, tmp_path):
         """The `caption_header` field on an auto:bordes CaptureConfig must be
@@ -1101,7 +1109,7 @@ class TestCaptureImageStepAutoBordesExpansion:
             p.write_bytes(b"png")
 
         mock_renderer = MagicMock()
-        mock_renderer.render.side_effect = png_paths
+        mock_renderer.render_many.return_value = png_paths
 
         mock_recognizer_cls = _mock_recognizer_class({"Avance": regions})
 
@@ -1160,7 +1168,7 @@ class TestCaptureImageStepAutoBordesExpansion:
         png3.write_bytes(b"png")
 
         mock_renderer = MagicMock()
-        mock_renderer.render.side_effect = [
+        mock_renderer.render_many.return_value = [
             png1,
             RuntimeError("soffice exit 1 on region 2"),
             png3,
@@ -1177,8 +1185,9 @@ class TestCaptureImageStepAutoBordesExpansion:
             )
 
         assert result.status == "partial"
-        # All 3 regions were attempted; regions 1 and 3 rendered successfully.
-        assert mock_renderer.render.call_count == 3
+        # All 3 regions were attempted (ONE render_many batch call); regions
+        # 1 and 3 rendered successfully.
+        mock_renderer.render_many.assert_called_once()
         assert artifact.rutas_imagenes == [png1, png3]
         # Region 2 is identified in the failure message by its A1 range.
         assert "A3:B4" in result.message
@@ -1211,3 +1220,232 @@ class TestCaptureImageStepAutoBordesExpansion:
         assert "no configurado" not in result.message
         mock_renderer.render.assert_not_called()
         assert artifact.rutas_imagenes == []
+
+
+# ---------------------------------------------------------------------------
+# CaptureImageStep — batch routing via render_many (PR5 render optimization)
+#
+# When the fully-expanded capture list has 2+ entries, ALL using renderer
+# 'libreoffice', AND that renderer exposes render_many, CaptureImageStep
+# calls render_many ONCE instead of looping per-item render() calls — this
+# is what makes the recalc-once optimization reach production (branca 2
+# captures, guemes 2 captures, badie 25 captures all qualify). A SINGLE
+# libreoffice capture deliberately stays on the per-item path (batching one
+# item has no recalc-amortization benefit). Mixed renderer types, or a
+# 'libreoffice' renderer without render_many, fall back to the ORIGINAL
+# per-item loop unchanged.
+# ---------------------------------------------------------------------------
+
+
+class TestCaptureImageStepBatchRouting:
+    def test_all_libreoffice_multi_item_uses_render_many_once(self, tmp_path):
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Multicategoria", rango="A1:H20"),
+                CaptureConfig(hoja="Avance", rango="B2:AX35"),
+            ],
+            whatsapp=_consuming_whatsapp(),
+        )
+        artifact = _make_artifact(tmp_path)
+        png1 = tmp_path / "p1.png"
+        png2 = tmp_path / "p2.png"
+        png1.write_bytes(b"png")
+        png2.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render_many.return_value = [png1, png2]
+
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            result = CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert result.status == "success"
+        mock_renderer.render_many.assert_called_once()
+        mock_renderer.render.assert_not_called()
+        assert artifact.rutas_imagenes == [png1, png2]
+
+    def test_render_many_called_with_hoja_rango_crop_spec_tuples(self, tmp_path):
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Multicategoria", rango="A1:H20", recortar=True),
+                CaptureConfig(hoja="Avance", rango="B2:AX35"),
+            ],
+            whatsapp=_consuming_whatsapp(),
+        )
+        artifact = _make_artifact(tmp_path)
+        png1 = tmp_path / "p1.png"
+        png2 = tmp_path / "p2.png"
+        png1.write_bytes(b"png")
+        png2.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render_many.return_value = [png1, png2]
+
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        mock_renderer.render_many.assert_called_once()
+        call_kwargs = mock_renderer.render_many.call_args.kwargs
+        assert call_kwargs["specs"] == [
+            ("Multicategoria", "A1:H20", True),
+            ("Avance", "B2:AX35", False),
+        ]
+        assert call_kwargs["xlsx_path"] == artifact.ruta_excel
+        assert call_kwargs["output_dir"] == artifact.ruta_excel.parent
+
+    def test_mixed_renderer_types_falls_back_to_per_item_loop(self, tmp_path):
+        """When NOT all entries are 'libreoffice' (e.g. one is
+        html_playwright), the whole step falls back to the ORIGINAL
+        per-item render() loop — render_many is never invoked, even for
+        the libreoffice entries."""
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Multicategoria", rango="A1:H20", renderer="libreoffice"),
+                CaptureConfig(hoja="Otros", rango="A1:H20", renderer="html_playwright"),
+            ],
+            whatsapp=_consuming_whatsapp(),
+        )
+        artifact = _make_artifact(tmp_path)
+        png_lo = tmp_path / "lo.png"
+        png_hp = tmp_path / "hp.png"
+        png_lo.write_bytes(b"png")
+        png_hp.write_bytes(b"png")
+
+        mock_lo = MagicMock()
+        mock_lo.render.return_value = png_lo
+        mock_hp = MagicMock()
+        mock_hp.render.return_value = png_hp
+
+        def _get_renderer(name):
+            return {"libreoffice": mock_lo, "html_playwright": mock_hp}[name]
+
+        with patch("src.core.excel_renderers.get_renderer", side_effect=_get_renderer):
+            result = CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert result.status == "success"
+        mock_lo.render_many.assert_not_called()
+        mock_lo.render.assert_called_once()
+        mock_hp.render.assert_called_once()
+
+    def test_render_many_absent_falls_back_to_per_item_loop(self, tmp_path):
+        """If the resolved 'libreoffice' renderer doesn't expose
+        render_many, fall back to the per-item loop even when all entries
+        are libreoffice and there are multiple."""
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Multicategoria", rango="A1:H20"),
+                CaptureConfig(hoja="Avance", rango="B2:AX35"),
+            ],
+            whatsapp=_consuming_whatsapp(),
+        )
+        artifact = _make_artifact(tmp_path)
+        png1 = tmp_path / "p1.png"
+        png2 = tmp_path / "p2.png"
+        png1.write_bytes(b"png")
+        png2.write_bytes(b"png")
+
+        mock_renderer = MagicMock(spec=["render", "name"])  # no render_many
+        mock_renderer.render.side_effect = [png1, png2]
+
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            result = CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert result.status == "success"
+        assert mock_renderer.render.call_count == 2
+
+    def test_single_libreoffice_item_uses_per_item_path_not_render_many(self, tmp_path):
+        """A SINGLE all-libreoffice capture deliberately stays on the
+        per-item render() path — batching one item has no recalc-
+        amortization benefit."""
+        config = DeliveryConfig(
+            capture_image=CaptureConfig(hoja="Ventas", rango="A1:H20"),
+            whatsapp=_consuming_whatsapp(),
+        )
+        artifact = _make_artifact(tmp_path)
+        fake_png = tmp_path / "captura.png"
+        fake_png.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render.return_value = fake_png
+
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            result = CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert result.status == "success"
+        mock_renderer.render.assert_called_once()
+        mock_renderer.render_many.assert_not_called()
+
+    def test_render_many_import_error_returns_skipped(self, tmp_path):
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Multicategoria", rango="A1:H20"),
+                CaptureConfig(hoja="Avance", rango="B2:AX35"),
+            ],
+            whatsapp=_consuming_whatsapp(),
+        )
+        artifact = _make_artifact(tmp_path)
+
+        mock_renderer = MagicMock()
+        mock_renderer.render_many.side_effect = ImportError("Pillow es requerido")
+
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            result = CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert result.status == "skipped"
+        assert "Pillow" in result.message
+        mock_renderer.render.assert_not_called()
+
+    def test_render_many_general_exception_marks_all_specs_as_errors(self, tmp_path):
+        """A batch-wide failure (e.g. the shared recalc itself fails) must
+        still report status='error' naming every spec, matching what would
+        happen if each spec's own recalc failed individually in the old
+        per-item path."""
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Multicategoria", rango="A1:H20"),
+                CaptureConfig(hoja="Avance", rango="B2:AX35"),
+            ],
+            whatsapp=_consuming_whatsapp(),
+        )
+        artifact = _make_artifact(tmp_path)
+
+        mock_renderer = MagicMock()
+        mock_renderer.render_many.side_effect = RuntimeError("LibreOffice fallo al recalcular")
+
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            result = CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert result.status == "error"
+        assert "Todas las capturas fallaron" in result.message
+        assert "Multicategoria" in result.message
+        assert "Avance" in result.message
+        assert "LibreOffice fallo al recalcular" in result.message
+
+    def test_render_many_partial_failure_returns_partial_status(self, tmp_path):
+        config = DeliveryConfig(
+            capture_images=[
+                CaptureConfig(hoja="Multicategoria", rango="A1:H20"),
+                CaptureConfig(hoja="Avance", rango="B2:AX35"),
+                CaptureConfig(hoja="Otros", rango="A1:B2"),
+            ],
+            whatsapp=_consuming_whatsapp(),
+        )
+        artifact = _make_artifact(tmp_path)
+        png1 = tmp_path / "p1.png"
+        png3 = tmp_path / "p3.png"
+        png1.write_bytes(b"png")
+        png3.write_bytes(b"png")
+
+        mock_renderer = MagicMock()
+        mock_renderer.render_many.return_value = [
+            png1,
+            RuntimeError("LibreOffice fallo al exportar PDF"),
+            png3,
+        ]
+
+        with patch("src.core.excel_renderers.get_renderer", return_value=mock_renderer):
+            result = CaptureImageStep().execute(artifact, config, logging.getLogger("test"))
+
+        assert result.status == "partial"
+        assert artifact.rutas_imagenes == [png1, png3]
+        assert "Avance" in result.message
+        assert "LibreOffice fallo al exportar PDF" in result.message

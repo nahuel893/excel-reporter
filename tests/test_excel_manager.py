@@ -321,6 +321,237 @@ class TestCaptureRangeThreadsRangeAddr:
         assert kwargs.get("range_addr") is None
 
 
+# ---------------------------------------------------------------------------
+# capture_ranges — batch capture (PR5 render optimization)
+#
+# recalc_with_libreoffice runs ONCE for N specs (proven pixel-identical to
+# calling capture_range() once per spec — see scratchpad/pr5_bench in the
+# PR that introduced this: recalc_once vs baseline, mean_abs_diff=0.0 on 3
+# real ranges). These tests mock the heavy calls (recalc, per-spec export)
+# to stay fast; a separate GUARDED real-soffice test below proves actual
+# pixel parity on a small synthetic workbook.
+# ---------------------------------------------------------------------------
+
+
+class TestCaptureRangesOrchestration:
+    """Fast unit tests — mock _recalc_with_libreoffice and the per-spec
+    export helper so no real LibreOffice/pdftoppm process runs."""
+
+    def _make_xlsx(self, tmp_path: Path) -> Path:
+        xlsx = tmp_path / "reporte.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Hoja1"
+        ws["A1"] = "Header"
+        wb.save(xlsx)
+        return xlsx
+
+    def test_empty_specs_returns_empty_list_no_recalc(self, tmp_path):
+        xlsx = self._make_xlsx(tmp_path)
+        mgr = ExcelManager(xlsx)
+        with patch.object(ExcelManager, "_find_soffice", return_value="/usr/bin/soffice"):
+            with patch.object(ExcelManager, "_recalc_with_libreoffice") as mock_recalc:
+                result = mgr.capture_ranges([], output_dir=tmp_path)
+
+        assert result == []
+        mock_recalc.assert_not_called()
+
+    def test_soffice_not_found_raises_runtime_error_before_recalc(self, tmp_path):
+        xlsx = self._make_xlsx(tmp_path)
+        mgr = ExcelManager(xlsx)
+        with patch.object(ExcelManager, "_find_soffice", return_value=None):
+            with patch.object(ExcelManager, "_recalc_with_libreoffice") as mock_recalc:
+                with pytest.raises(RuntimeError, match="LibreOffice no encontrado"):
+                    mgr.capture_ranges([("Hoja1", "A1:B2", False)], output_dir=tmp_path)
+
+        mock_recalc.assert_not_called()
+
+    def test_pdftoppm_not_found_raises_runtime_error_before_recalc(self, tmp_path):
+        xlsx = self._make_xlsx(tmp_path)
+        mgr = ExcelManager(xlsx)
+        with patch.object(ExcelManager, "_find_soffice", return_value="/usr/bin/soffice"):
+            with patch("shutil.which", return_value=None):
+                with patch.object(ExcelManager, "_recalc_with_libreoffice") as mock_recalc:
+                    with pytest.raises(RuntimeError, match="pdftoppm no encontrado"):
+                        mgr.capture_ranges([("Hoja1", "A1:B2", False)], output_dir=tmp_path)
+
+        mock_recalc.assert_not_called()
+
+    def test_recalc_runs_exactly_once_for_n_specs(self, tmp_path):
+        xlsx = self._make_xlsx(tmp_path)
+        mgr = ExcelManager(xlsx)
+        specs = [("Hoja1", "A1:B2", False), ("Hoja1", "C1:D2", False), ("Hoja1", "E1:F2", True)]
+
+        fake_outputs = [tmp_path / f"out_{i}.png" for i in range(3)]
+
+        with patch.object(ExcelManager, "_find_soffice", return_value="/usr/bin/soffice"):
+            with patch.object(
+                ExcelManager, "_recalc_with_libreoffice", return_value=xlsx
+            ) as mock_recalc:
+                with patch.object(
+                    ExcelManager, "_capture_one_from_recalculated",
+                    side_effect=fake_outputs,
+                ) as mock_capture_one:
+                    result = mgr.capture_ranges(specs, output_dir=tmp_path)
+
+        mock_recalc.assert_called_once()
+        assert mock_capture_one.call_count == 3
+        assert result == fake_outputs
+
+    def test_results_list_is_parallel_to_specs_same_order(self, tmp_path):
+        xlsx = self._make_xlsx(tmp_path)
+        mgr = ExcelManager(xlsx)
+        specs = [("Hoja1", "A1:B2", False), ("Hoja1", "C1:D2", False)]
+        png_a = tmp_path / "a.png"
+        png_b = tmp_path / "b.png"
+
+        with patch.object(ExcelManager, "_find_soffice", return_value="/usr/bin/soffice"):
+            with patch.object(ExcelManager, "_recalc_with_libreoffice", return_value=xlsx):
+                with patch.object(
+                    ExcelManager, "_capture_one_from_recalculated",
+                    side_effect=[png_a, png_b],
+                ):
+                    result = mgr.capture_ranges(specs, output_dir=tmp_path)
+
+        assert result == [png_a, png_b]
+
+    def test_error_isolation_bad_sheet_others_still_produced(self, tmp_path):
+        """One spec referencing a nonexistent sheet must not abort the
+        others — its slot in the results list is the raised Exception."""
+        xlsx = self._make_xlsx(tmp_path)
+        mgr = ExcelManager(xlsx)
+        specs = [
+            ("Hoja1", "A1:B2", False),
+            ("NoExiste", "A1:B2", False),
+            ("Hoja1", "C1:D2", False),
+        ]
+        png_a = tmp_path / "a.png"
+        png_c = tmp_path / "c.png"
+        bad_sheet_error = ValueError("Hoja 'NoExiste' no encontrada")
+
+        with patch.object(ExcelManager, "_find_soffice", return_value="/usr/bin/soffice"):
+            with patch.object(ExcelManager, "_recalc_with_libreoffice", return_value=xlsx):
+                with patch.object(
+                    ExcelManager, "_capture_one_from_recalculated",
+                    side_effect=[png_a, bad_sheet_error, png_c],
+                ):
+                    result = mgr.capture_ranges(specs, output_dir=tmp_path)
+
+        assert result[0] == png_a
+        assert result[1] is bad_sheet_error
+        assert result[2] == png_c
+
+    def test_pillow_missing_raises_import_error_before_recalc(self, tmp_path):
+        """A genuinely missing Pillow dependency affects every spec equally
+        — it must surface BEFORE the (expensive) recalc runs, matching
+        capture_range()'s existing 'no point continuing' semantics."""
+        xlsx = self._make_xlsx(tmp_path)
+        mgr = ExcelManager(xlsx)
+        with patch.object(ExcelManager, "_find_soffice", return_value="/usr/bin/soffice"):
+            with patch.object(ExcelManager, "_recalc_with_libreoffice") as mock_recalc:
+                with patch.dict("sys.modules", {"PIL": None, "PIL.Image": None}):
+                    with pytest.raises((ImportError, ModuleNotFoundError)):
+                        mgr.capture_ranges([("Hoja1", "A1:B2", False)], output_dir=tmp_path)
+
+        mock_recalc.assert_not_called()
+
+
+class TestCaptureOneFromRecalculated:
+    """Fast unit test for the per-spec sheet-validation error path."""
+
+    def _make_xlsx(self, tmp_path: Path) -> Path:
+        xlsx = tmp_path / "reporte.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Hoja1"
+        ws["A1"] = "Header"
+        wb.save(xlsx)
+        return xlsx
+
+    def test_missing_sheet_raises_value_error(self, tmp_path):
+        xlsx = self._make_xlsx(tmp_path)
+        mgr = ExcelManager(xlsx)
+        work_dir = tmp_path / "work"
+        with pytest.raises(ValueError, match="Hoja 'NoExiste' no encontrada"):
+            mgr._capture_one_from_recalculated(
+                xlsx, "NoExiste", "A1:B2", False, work_dir, tmp_path,
+                300, "/usr/bin/soffice", "/usr/bin/pdftoppm",
+            )
+
+
+@pytest.mark.skipif(
+    shutil.which("soffice") is None or shutil.which("pdftoppm") is None,
+    reason="soffice/pdftoppm not present locally",
+)
+class TestCaptureRangesPixelParityWithCaptureRange:
+    """GUARDED correctness test — proves capture_ranges() produces the SAME
+    output as calling capture_range() once per spec, on a SMALL synthetic
+    multi-sheet workbook (fast — a couple seconds with real soffice/pdftoppm,
+    unlike the multi-minute real-production-workbook benchmark). Includes a
+    FORMULA cell so the shared recalc actually matters: openpyxl never
+    computes formulas, so without a real LibreOffice recalc the formula
+    cell would render as blank/stale."""
+
+    def _make_workbook_with_formula(self, tmp_path: Path) -> Path:
+        xlsx = tmp_path / "formula_book.xlsx"
+        wb = openpyxl.Workbook()
+        ws1 = wb.active
+        ws1.title = "Sheet1"
+        ws1["A1"] = "Precio"
+        ws1["B1"] = 100
+        ws1["A2"] = "Cantidad"
+        ws1["B2"] = 3
+        ws1["A3"] = "Total"
+        ws1["B3"] = "=B1*B2"  # openpyxl leaves no cached value -> needs recalc
+
+        ws2 = wb.create_sheet("Sheet2")
+        ws2["A1"] = "Otro"
+        ws2["B1"] = 7
+        ws2["A2"] = "Doble"
+        ws2["B2"] = "=B1*2"
+
+        wb.save(xlsx)
+        return xlsx
+
+    def test_capture_ranges_matches_capture_range_per_spec(self, tmp_path):
+        xlsx = self._make_workbook_with_formula(tmp_path)
+        mgr = ExcelManager(xlsx)
+
+        specs = [
+            ("Sheet1", "A1:B3", False),
+            ("Sheet2", "A1:B2", False),
+        ]
+
+        out_dir_batch = tmp_path / "batch"
+        out_dir_single = tmp_path / "single"
+
+        batch_results = mgr.capture_ranges(specs, output_dir=out_dir_batch)
+        assert all(isinstance(r, Path) for r in batch_results), batch_results
+
+        single_results = [
+            mgr.capture_range(sheet, rango, output_dir=out_dir_single, crop=crop)
+            for sheet, rango, crop in specs
+        ]
+
+        from PIL import Image
+        import numpy as np
+
+        for batch_png, single_png in zip(batch_results, single_results):
+            batch_img = np.array(Image.open(batch_png).convert("RGB"))
+            single_img = np.array(Image.open(single_png).convert("RGB"))
+            assert batch_img.shape == single_img.shape, (
+                f"{batch_png} vs {single_png}: dims differ "
+                f"{batch_img.shape} != {single_img.shape}"
+            )
+            mean_abs_diff = np.mean(np.abs(
+                batch_img.astype(int) - single_img.astype(int)
+            ))
+            assert mean_abs_diff == 0.0, (
+                f"{batch_png} vs {single_png}: mean_abs_diff={mean_abs_diff} "
+                f"(expected pixel-identical)"
+            )
+
+
 class TestExcelManagerDetectBorderedRange:
     def test_detects_thick_borders(self, tmp_path):
         from openpyxl.styles import Border, Side
