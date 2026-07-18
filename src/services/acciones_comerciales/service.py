@@ -39,6 +39,7 @@ from src.services.acciones_comerciales.config import AccionesComercialesConfig
 from src.services.acciones_comerciales.constants import (
     ZONA_CONFIG_PATH,
 )
+from src.services.acciones_comerciales.diff import run_diff_step
 from src.services.acciones_comerciales.gold_source import (
     load_aexcel_equivalent,
     load_sucursal_por_cliente,
@@ -69,10 +70,16 @@ _WAPI_FECHA_COL = "Fecha"
 
 @dataclass
 class AccionesComercialesResult:
-    """Resultado de la generacion del reporte de acciones comerciales."""
+    """Resultado de la generacion del reporte de acciones comerciales.
+
+    ``diff_report_paths`` — cuando ``config.backup_dir`` esta seteado y hay un
+    workbook de backup, contiene {"json"/"xlsx"/"summary": Path} del reporte
+    de diff paralelo (RF-12, S4) escrito junto al BASE. None en caso contrario.
+    """
 
     ruta_archivo: Path
     registros_procesados: int
+    diff_report_paths: dict | None = None
 
 
 def _normalize_fecha_col(series: pd.Series) -> pd.Series:
@@ -157,6 +164,40 @@ class AccionesComercialesService(BaseService):
 
         logger.info("Acciones Comerciales BASE control generado: %s", ruta)
 
+        # 7. Optional Phase-1 parallel-diff step (RF-12, S4) — off unless
+        #    config.backup_dir points at a manual-backup workbook. Writes the
+        #    diff report NEXT TO the BASE output; never fails the BASE run.
+        diff_report_paths = None
+        if config.backup_dir:
+            base_frames = {
+                "FACT_NET": fact_net,
+                "ART-ACCION": art_accion,
+                "CLIENTE-FECHA": cliente_fecha,
+                "ACC-GEN": acc_gen,
+            }
+            generated_ternas = self._generated_ternas(aexcel_data)
+            diff_report_paths = run_diff_step(
+                base_frames=base_frames,
+                backup_dir=config.backup_dir,
+                aexcel_path=config.aexcel_path,
+                generated_ternas=generated_ternas,
+                fecha_desde=config.fecha_desde,
+                fecha_hasta=config.fecha_hasta,
+                output_dir=output_dir,
+            )
+
         return AccionesComercialesResult(
-            ruta_archivo=ruta, registros_procesados=len(aexcel_data)
+            ruta_archivo=ruta,
+            registros_procesados=len(aexcel_data),
+            diff_report_paths=diff_report_paths,
         )
+
+    @staticmethod
+    def _generated_ternas(aexcel_data: pd.DataFrame) -> pd.DataFrame | None:
+        """The generated terna->precio/Bonific table (RF-01 picked-line
+        values) the diff harness validates empirically against the real
+        aexcel (Decision 14). None when the aexcel-equivalent is empty."""
+        cols = ["Descripción Período", "Cod. Cliente", "Código", "Precio", "Bonific"]
+        if aexcel_data.empty or not all(c in aexcel_data.columns for c in cols):
+            return None
+        return aexcel_data[cols].copy()

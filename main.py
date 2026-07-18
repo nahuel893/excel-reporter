@@ -1169,6 +1169,8 @@ def _run_acciones_comerciales_report(report, merged: dict) -> list[tuple[Path, d
         fecha_hasta=merged["fecha_hasta"],
         input_dir=input_dir,
         nombre_archivo=report.nombre,
+        backup_dir=merged.get("backup_dir"),
+        aexcel_path=merged.get("aexcel_path"),
         escribir_informe=merged.get("escribir_informe", False),
         informe_path=merged.get("informe_path"),
         esperar_wapi_fresco=merged.get("esperar_wapi_fresco", False),
@@ -1180,6 +1182,8 @@ def _run_acciones_comerciales_report(report, merged: dict) -> list[tuple[Path, d
 
     print(f"Acciones Comerciales '{report.nombre}' generado exitosamente:")
     print(f"  - Archivo: {result.ruta_archivo}")
+    if result.diff_report_paths:
+        print(f"  - Diff paralelo (RF-12): {result.diff_report_paths['xlsx']}")
 
     return [
         (

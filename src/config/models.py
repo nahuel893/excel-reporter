@@ -105,6 +105,13 @@ class GlobalFilters(BaseModel):
     esperar_wapi_fresco: bool = False
     # acciones-comerciales: umbral de frescura configurable (RF-20, Decision 16)
     wapi_cobertura_requerida: str | None = None
+    # acciones-comerciales: directorio con el backup manual (backup.xlsx +
+    # known_defects.json) para el diff paralelo Fase-1 (RF-12, S4). None => diff
+    # deshabilitado.
+    backup_dir: str | None = None
+    # acciones-comerciales: ruta al aexcel.xlsx real para validar el pick de
+    # precio por terna contra la fuente (RF-12/Decision 14). None => sin validación.
+    aexcel_path: str | None = None
 
 
 class ReportFilters(BaseModel):

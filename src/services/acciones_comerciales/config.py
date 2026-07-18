@@ -45,6 +45,15 @@ class AccionesComercialesConfig:
     nombre_archivo: str | None = None
     output_dir: Path | None = None
 
+    # Phase-1 parallel-diff step (S4, RF-12) — optional, off unless set:
+    #   backup_dir: directory holding the manual-backup pivot workbook
+    #     (``backup.xlsx``) + optional ``known_defects.json`` evidence file.
+    #   aexcel_path: the real ``aexcel.xlsx`` export used to validate the
+    #     RF-01 terna->precio pick empirically (Decision 14). When either is
+    #     None the diff step is a no-op — the BASE run is unaffected.
+    backup_dir: str | None = None
+    aexcel_path: str | None = None
+
     # Phase-2 (flag-gated) — inert defaults.
     escribir_informe: bool = False
     informe_path: str | None = None

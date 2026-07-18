@@ -47,6 +47,31 @@ from src.services.acciones_comerciales.service import (
 _BANNER_ROWS = 7  # wapi.xlsx: 7 banner rows above the real header (Excel row 8)
 
 
+def _write_backup_pivot_workbook(path: Path) -> None:
+    """A minimal manual-backup workbook shaped like the BASE control (one
+    ART-ACCION pivot sheet, header in row 1) — enough for the optional diff
+    step (S4.3) to load and compare against the just-built BASE frames."""
+    from src.services.acciones_comerciales.constants import ART_ACCION_ROW_FIELDS
+
+    cols = ART_ACCION_ROW_FIELDS + ["Suma de Descuento"]
+    df = pd.DataFrame(
+        [
+            {
+                "SUCURSAL": "CASA CENTRAL",
+                "Artículo Distribuidora": 900,
+                "Descripción": "ART UNO",
+                "Acción": "ACC1",
+                "Descripción Acción": "MVB PROMO",
+                "mvb": "MVB",
+                "Suma de Descuento": 45.0,  # diverges from BASE -> a surfaced delta
+            }
+        ],
+        columns=cols,
+    )
+    with pd.ExcelWriter(path, engine="openpyxl") as xw:
+        df.to_excel(xw, sheet_name="ART-ACCION", index=False)
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # shared fixture builders — fake gold + real wapi.xlsx (no live DB, ever)
 # ─────────────────────────────────────────────────────────────────────────
@@ -397,6 +422,25 @@ class TestMainWiring:
         assert merged["esperar_wapi_fresco"] is True
         assert merged["wapi_cobertura_requerida"] == "habil_anterior"
 
+    def test_merge_filters_carries_backup_dir_and_aexcel_path(self):
+        """S4.3: the optional parallel-diff step reads a config-driven backup
+        dir + real aexcel path — both must survive the global->merged merge."""
+        from src.config.models import GlobalFilters
+        from src.config.resolver import merge_filters
+
+        global_f = GlobalFilters(
+            fecha_desde="2026-07-01",
+            fecha_hasta="2026-07-31",
+            input_dir="/tmp/acciones-input",
+            backup_dir="/tmp/backups/acciones-comerciales-2026-07-16",
+            aexcel_path="/tmp/acciones-input/aexcel.xlsx",
+        )
+
+        merged = merge_filters(global_f, None)
+
+        assert merged["backup_dir"] == "/tmp/backups/acciones-comerciales-2026-07-16"
+        assert merged["aexcel_path"] == "/tmp/acciones-input/aexcel.xlsx"
+
     def test_run_acciones_comerciales_report_returns_path_and_meta(self, tmp_path, monkeypatch):
         import main as main_module
 
@@ -460,3 +504,81 @@ class TestMainWiring:
         assert expected_dir.is_dir()
         assert any(expected_dir.glob("*.xlsx"))
         assert not informe_path.exists()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# S4.3 — optional parallel-diff step wired behind config.backup_dir
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestDiffStepWiring:
+    def test_backup_dir_defaults_none_and_no_diff_report(self, tmp_path, monkeypatch):
+        """Default run (no backup_dir) never produces a diff report — the
+        diff step is strictly opt-in."""
+        input_dir = _default_gold_and_wapi(tmp_path, monkeypatch)
+
+        with patch("config.settings.DATA_OUTPUT", tmp_path / "out"):
+            service = AccionesComercialesService()
+            config = AccionesComercialesConfig(
+                fecha_desde="2026-07-01",
+                fecha_hasta="2026-07-31",
+                input_dir=str(input_dir),
+                nombre_archivo="BASE control TEST",
+            )
+            result = service.generar_reporte(config)
+
+        assert config.backup_dir is None
+        assert result.diff_report_paths is None
+        out_dir = result.ruta_archivo.parent
+        assert not list(out_dir.glob("diff_acciones_comerciales.*"))
+
+    def test_service_writes_diff_report_next_to_base_when_backup_dir_set(self, tmp_path, monkeypatch):
+        """S4.3/RF-12: with backup_dir pointing at a backup workbook, the
+        service runs the diff and writes the JSON+xlsx report next to the
+        BASE output."""
+        input_dir = _default_gold_and_wapi(tmp_path, monkeypatch)
+        backup_dir = tmp_path / "backups" / "acciones-comerciales-2026-07-16"
+        backup_dir.mkdir(parents=True)
+        _write_backup_pivot_workbook(backup_dir / "backup.xlsx")
+
+        with patch("config.settings.DATA_OUTPUT", tmp_path / "out"):
+            service = AccionesComercialesService()
+            config = AccionesComercialesConfig(
+                fecha_desde="2026-07-01",
+                fecha_hasta="2026-07-31",
+                input_dir=str(input_dir),
+                nombre_archivo="BASE control TEST",
+                backup_dir=str(backup_dir),
+            )
+            result = service.generar_reporte(config)
+
+        out_dir = result.ruta_archivo.parent
+        assert result.diff_report_paths is not None
+        assert (out_dir / "diff_acciones_comerciales.json").exists()
+        assert (out_dir / "diff_acciones_comerciales.xlsx").exists()
+        assert (out_dir / "diff_acciones_comerciales.txt").exists()
+
+    def test_run_report_handler_passes_backup_dir_through(self, tmp_path, monkeypatch):
+        """main._run_acciones_comerciales_report forwards backup_dir/aexcel_path
+        from the merged filtros into the service config."""
+        import main as main_module
+
+        input_dir = _default_gold_and_wapi(tmp_path, monkeypatch)
+        backup_dir = tmp_path / "backups"
+        backup_dir.mkdir()
+        _write_backup_pivot_workbook(backup_dir / "backup.xlsx")
+
+        report = type("Report", (), {"nombre": "BASE control TEST"})()
+        merged = {
+            "fecha_desde": "2026-07-01",
+            "fecha_hasta": "2026-07-31",
+            "input_dir": str(input_dir),
+            "backup_dir": str(backup_dir),
+            "aexcel_path": None,
+        }
+
+        with patch("config.settings.DATA_OUTPUT", tmp_path / "out"):
+            artifacts = main_module._run_acciones_comerciales_report(report, merged)
+
+        path, _meta = artifacts[0]
+        assert (path.parent / "diff_acciones_comerciales.json").exists()

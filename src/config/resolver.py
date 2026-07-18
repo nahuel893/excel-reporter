@@ -259,6 +259,8 @@ def merge_filters(
         "informe_path": global_f.informe_path,
         "esperar_wapi_fresco": global_f.esperar_wapi_fresco,
         "wapi_cobertura_requerida": global_f.wapi_cobertura_requerida,
+        "backup_dir": global_f.backup_dir,
+        "aexcel_path": global_f.aexcel_path,
         # Per-client report filters (only meaningful per-report; no global fallback)
         "clientes": None,
         "articulos": None,

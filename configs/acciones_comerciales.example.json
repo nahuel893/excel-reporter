@@ -4,6 +4,8 @@
         "fecha_desde": "2026-07-01",
         "fecha_hasta": "2026-07-31",
         "input_dir": "/home/nahuel/VM shared/archivos_diarios/acciones/",
+        "backup_dir": null,
+        "aexcel_path": null,
         "escribir_informe": false,
         "informe_path": "/home/nahuel/VM shared/informes/INFO - ACCIONES BADIE {MES} {AÑO}.xlsm",
         "esperar_wapi_fresco": true,
