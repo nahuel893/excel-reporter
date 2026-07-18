@@ -65,6 +65,17 @@ class TestGetAexcelEquivalentSQL:
         sql, _ = loader.execute_query.call_args[0]
         assert "bonificacion / 100.0" in sql
 
+    def test_precio_is_absolute_value(self):
+        """Decision 14: gold signs credits/returns on the price while the
+        aexcel export keeps price positive (sign on the quantity). abs()
+        reconciles the conventions — verified 100% vs the manual aexcel."""
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_aexcel_equivalent("2026-07-01", "2026-07-31")
+
+        sql, _ = loader.execute_query.call_args[0]
+        assert "abs(fv.precio_unitario_bruto)" in sql
+        assert 'abs(fv.precio_unitario_bruto)               AS "Precio"' in sql
+
     def test_anulado_false_filter(self):
         loader = _make_loader_with_mock_engine(pd.DataFrame())
         loader.get_aexcel_equivalent("2026-07-01", "2026-07-31")

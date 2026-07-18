@@ -2689,6 +2689,12 @@ class DataLoader:
         fraction-scale (/100.0) directly in SQL — an exact scale
         conversion, never a rounding operation (RF-23).
 
+        Precio uses abs(precio_unitario_bruto): gold signs credits/returns
+        on the price, whereas the aexcel export keeps the price positive and
+        carries the sign on the quantity. abs() reconciles the two
+        conventions and was verified to match the manual aexcel at 100%
+        (79,885/79,900 ternas, Jul 2026) — Decision 14 empirical adjudication.
+
         Read-only SELECT — issues no DDL against gold (RF-25).
         """
         return self.execute_query(
@@ -2703,7 +2709,7 @@ class DataLoader:
                 da.des_articulo                             AS "Descripción_2",
                 da.marca                                    AS "Descripción_3",
                 da.unidad_negocio                           AS "Descripción_12",
-                fv.precio_unitario_bruto                    AS "Precio",
+                abs(fv.precio_unitario_bruto)               AS "Precio",
                 fv.bonificacion / 100.0                     AS "Bonific",
                 fv.cantidades_total                         AS "Cantidades Totales",
                 fv.facturacion_neta                         AS "Facturacion Neta",
