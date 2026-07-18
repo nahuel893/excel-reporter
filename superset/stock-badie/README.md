@@ -24,9 +24,11 @@ Backed by the materialized view `gold.mv_stock_quiebre` (see
 `scripts/sql/v_stock_quiebre.sql`), refreshed daily by `scripts/run_daily.py`.
 
 - **KPIs**: count of articles in each semáforo band (ROJO / AMARILLO / VERDE).
-- **Semáforo table**: one row per (sucursal, artículo) with Venta mes, Stock hoy,
-  Días de alcance, Pedido sugerido (15d), ordered by pedido desc, with conditional
-  formatting on **Días de alcance** (<15 red, 15-30 yellow, >30 green) and a totals row.
+- **Pivot table** (mirrors the xlsm STOCK sheet): artículos as rows, **sucursales as
+  column blocks** — under each sucursal four metrics: Stock hoy, Venta mes, Pedido
+  sugerido (15d), Días de alcance — with conditional formatting on **Días de alcance**
+  (<15 red, 15-30 yellow, >30 green) and row/column totals. ~14 sucursales × 4 = wide;
+  narrow it with the Sucursal filter.
 - **Native filters**: Genérico, Marca, Sucursal (multi-select).
 
 ### The one metric that must stay a metric
