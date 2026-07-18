@@ -254,6 +254,11 @@ def merge_filters(
         "genericos_sin_prvta": global_f.genericos_sin_prvta,
         "marca_splits": global_f.marca_splits,
         "cupos_manuales": global_f.cupos_manuales,
+        "input_dir": global_f.input_dir,
+        "escribir_informe": global_f.escribir_informe,
+        "informe_path": global_f.informe_path,
+        "esperar_wapi_fresco": global_f.esperar_wapi_fresco,
+        "wapi_cobertura_requerida": global_f.wapi_cobertura_requerida,
         # Per-client report filters (only meaningful per-report; no global fallback)
         "clientes": None,
         "articulos": None,

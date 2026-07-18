@@ -2658,6 +2658,66 @@ class DataLoader:
             params[f"gen_{i}"] = g
         return self.execute_query(query, params)
 
+    # ──────────────────────────────────────────────────────────────
+    # Acciones Comerciales — aexcel-equivalent gold extraction (RF-01)
+    # ──────────────────────────────────────────────────────────────
+
+    def get_aexcel_equivalent(
+        self, fecha_desde: str, fecha_hasta: str
+    ) -> pd.DataFrame:
+        """Line-level gold extraction backing the acciones-comerciales
+        aexcel-equivalent dataset (RF-01).
+
+        Returns ONE ROW PER fact_ventas LINE (NOT pre-aggregated), joined
+        with dim_cliente/dim_articulo/dim_sucursal and labeled with the
+        aexcel-equivalent column names. The (fecha, cliente, articulo) terna
+        grain-collapse — additive SUMs + a deterministic ACTUAL-value pick
+        for Precio/Bonific — is performed downstream in
+        ``src.services.acciones_comerciales.gold_source`` (Decision 14), NOT
+        here — this method's only job is the composite-key, read-only fetch.
+
+        Composite-key rule (project GOLDEN RULE): dim_cliente is joined on
+        (id_cliente AND id_sucursal) — id_cliente is reused across
+        sucursales, so a single-column join would fan-out matches. This
+        method intentionally does NOT join dim_vendedor: none of the
+        aexcel-equivalent columns require it (design Decision), so no
+        id_fuerza_ventas scoping is needed either.
+
+        bonificacion is converted from DB percent-scale to aexcel
+        fraction-scale (/100.0) directly in SQL — an exact scale
+        conversion, never a rounding operation (RF-23).
+
+        Read-only SELECT — issues no DDL against gold (RF-25).
+        """
+        return self.execute_query(
+            """
+            SELECT
+                fv.id                                     AS "_id_linea",
+                fv.fecha_comprobante                       AS "Descripción Período",
+                fv.id_cliente                               AS "Cod. Cliente",
+                dc.razon_social                             AS "Descripción",
+                ds.id_sucursal || ' - ' || ds.descripcion   AS "Sucursal",
+                fv.id_articulo                              AS "Código",
+                da.des_articulo                             AS "Descripción_2",
+                da.marca                                    AS "Descripción_3",
+                da.unidad_negocio                           AS "Descripción_12",
+                fv.precio_unitario_bruto                    AS "Precio",
+                fv.bonificacion / 100.0                     AS "Bonific",
+                fv.cantidades_total                         AS "Cantidades Totales",
+                fv.facturacion_neta                         AS "Facturacion Neta",
+                fv.descuentos                                AS "Descuentos"
+            FROM gold.fact_ventas fv
+            LEFT JOIN gold.dim_cliente dc
+              ON fv.id_cliente = dc.id_cliente
+             AND fv.id_sucursal = dc.id_sucursal
+            LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+            LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+            WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+              AND fv.anulado = false
+            """,
+            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
+
 
 # Instancia por defecto para compatibilidad
 _default_loader = None

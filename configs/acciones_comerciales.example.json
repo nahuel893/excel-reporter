@@ -1,0 +1,19 @@
+{
+    "tipo": "acciones-comerciales",
+    "filtros": {
+        "fecha_desde": "2026-07-01",
+        "fecha_hasta": "2026-07-31",
+        "input_dir": "/home/nahuel/VM shared/archivos_diarios/acciones/",
+        "escribir_informe": false,
+        "informe_path": "/home/nahuel/VM shared/informes/INFO - ACCIONES BADIE {MES} {AÑO}.xlsm",
+        "esperar_wapi_fresco": true,
+        "wapi_cobertura_requerida": "habil_anterior",
+        "enviar_email": false,
+        "enviar_whatsapp": false
+    },
+    "reportes": [
+        {
+            "nombre": "BASE control Acciones Comerciales - {MES} {AÑO}"
+        }
+    ]
+}

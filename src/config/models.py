@@ -92,6 +92,19 @@ class GlobalFilters(BaseModel):
     # avances: si True, el daily solo entrega el reporte cuando los cupos
     # (objetivo) del mes ya están cargados en gold. Ver run_daily _objetivo_gate.
     esperar_objetivo: bool = False
+    # acciones-comerciales: directorio con wapi.xlsx + compras.xls (RF-02/RF-03)
+    input_dir: str | None = None
+    # acciones-comerciales: master gate para CUALQUIER escritura en el INFORME
+    # externo (Fase 2). Debe arrancar en False (RF-13) hasta el sign-off
+    # (Decision 7) de S1-S4.
+    escribir_informe: bool = False
+    # acciones-comerciales: ruta al INFORME externo .xlsm/.xlsx (nunca tocado
+    # mientras escribir_informe sea False)
+    informe_path: str | None = None
+    # acciones-comerciales: opt-in al gate de frescura de wapi en run_daily (RF-20)
+    esperar_wapi_fresco: bool = False
+    # acciones-comerciales: umbral de frescura configurable (RF-20, Decision 16)
+    wapi_cobertura_requerida: str | None = None
 
 
 class ReportFilters(BaseModel):
@@ -136,7 +149,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "ventas-marca", "ventas-cober-preventista-marca"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "ventas-marca", "ventas-cober-preventista-marca", "acciones-comerciales"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 
