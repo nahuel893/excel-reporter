@@ -172,3 +172,11 @@ def load_aexcel_equivalent(
     terna grain (RF-01). Read-only — issues no DDL against gold (RF-25)."""
     df_lineas = data_loader.get_aexcel_equivalent(fecha_desde, fecha_hasta)
     return collapse_to_terna_grain(df_lineas)
+
+
+def load_sucursal_por_cliente(data_loader: DataLoader) -> dict[Any, str]:
+    """Fresh ``Cod. Cliente -> Sucursal`` map for the RF-04 wapi SUCURSAL
+    lookup (S3 wiring). Thin wrapper around
+    ``DataLoader.get_clientes_sucursal()`` — read-only, zero DDL (RF-25)."""
+    df = data_loader.get_clientes_sucursal()
+    return dict(zip(df["Cod. Cliente"], df["Sucursal"]))

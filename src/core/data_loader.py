@@ -2363,6 +2363,7 @@ class DataLoader:
         FROM gold.fact_ventas fv
         JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
         JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+                                  AND fv.id_sucursal   = dc.id_sucursal
         WHERE fv.id_sucursal = 1
           AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
           AND da.generico IN ({placeholders})
@@ -2398,6 +2399,7 @@ class DataLoader:
         FROM gold.fact_ventas fv
         JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
         JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+                                  AND fv.id_sucursal   = dc.id_sucursal
         WHERE fv.id_sucursal = 1
           AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
           AND da.generico IN ({placeholders})
@@ -2716,6 +2718,41 @@ class DataLoader:
               AND fv.anulado = false
             """,
             {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
+
+    def get_clientes_sucursal(self) -> pd.DataFrame:
+        """Fresh Cod. Cliente -> Sucursal label map (RF-04) — replaces the
+        engine's stale BG:BH snapshot.
+
+        ``dim_cliente`` is a DIMENSION table (not period-scoped), so this
+        gives live coverage of every client the ERP knows about right now,
+        independent of whether they transacted in the reporting period —
+        exactly the freshness guarantee RF-04 requires. Uses dim_cliente's
+        own denormalized ``des_sucursal`` as a BARE name (NO ``"{id} - "``
+        prefix) — RF-07's own spec scenario keys ZONA off a bare
+        ``SUCURSAL = "CASA CENTRAL"``, matching
+        ``configs/acciones_comerciales_zonas.json``'s bare keys. This is a
+        DIFFERENT convention from aexcel's own ``"{id} - {DESC}"`` Sucursal
+        field (FACT_NET row field, ``get_aexcel_equivalent``) — the two
+        SUCURSAL/Sucursal fields are independent contracts and must NOT be
+        conflated.
+
+        When ``id_cliente`` repeats across sucursales (same reused-id risk
+        class as ``id_vendedor``/``id_ruta``, project GOLDEN RULE), the
+        LOWEST ``id_sucursal`` wins deterministically — wapi rows carry no
+        sucursal context of their own to disambiguate further.
+
+        Read-only SELECT — issues no DDL against gold (RF-25).
+        """
+        return self.execute_query(
+            """
+            SELECT DISTINCT ON (dc.id_cliente)
+                dc.id_cliente     AS "Cod. Cliente",
+                dc.des_sucursal   AS "Sucursal"
+            FROM gold.dim_cliente dc
+            WHERE dc.anulado = false
+            ORDER BY dc.id_cliente, dc.id_sucursal
+            """
         )
 
 

@@ -24,6 +24,7 @@ from src.services.acciones_comerciales.gold_source import (
     AexcelEquivalentResult,
     collapse_to_terna_grain,
     load_aexcel_equivalent,
+    load_sucursal_por_cliente,
 )
 
 
@@ -354,3 +355,76 @@ class TestLoadAexcelEquivalent:
 
     def test_terna_cols_constant_matches_grain(self):
         assert TERNA_COLS == ["Descripción Período", "Cod. Cliente", "Código"]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# S3 — DataLoader.get_clientes_sucursal() — fresh SUCURSAL lookup (RF-04)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestGetClientesSucursalSQL:
+    def test_selects_distinct_on_id_cliente(self):
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_clientes_sucursal()
+
+        sql = loader.execute_query.call_args[0][0]
+        assert "DISTINCT ON (dc.id_cliente)" in sql
+
+    def test_anulado_false_filter(self):
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_clientes_sucursal()
+
+        sql = loader.execute_query.call_args[0][0]
+        assert "anulado = false" in sql
+
+    def test_sucursal_label_is_bare_name_matching_zonas_config(self):
+        """RF-07's own scenario keys ZONA off a BARE sucursal name
+        (``SUCURSAL = "CASA CENTRAL"``, no id prefix) — matching
+        ``configs/acciones_comerciales_zonas.json``'s bare keys. This is a
+        DIFFERENT convention from aexcel's own '{id} - {DESC}' Sucursal
+        field (FACT_NET row field) — the two are independent contracts."""
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_clientes_sucursal()
+
+        sql = loader.execute_query.call_args[0][0]
+        assert 'dc.des_sucursal' in sql and 'AS "Sucursal"' in sql
+        assert "id_sucursal || ' - '" not in sql
+
+    def test_no_ddl_keywords_in_sql(self):
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_clientes_sucursal()
+
+        sql = loader.execute_query.call_args[0][0]
+        upper = sql.upper()
+        for forbidden in ("CREATE ", "ALTER ", "DROP ", "TRUNCATE ", "INSERT ", "UPDATE ", "DELETE "):
+            assert forbidden not in upper
+
+    def test_returns_execute_query_result(self):
+        expected = pd.DataFrame({"Cod. Cliente": [1], "Sucursal": ["1 - CASA CENTRAL"]})
+        loader = _make_loader_with_mock_engine(expected)
+
+        result = loader.get_clientes_sucursal()
+
+        assert result is expected
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# S3 — gold_source.load_sucursal_por_cliente() — orchestration wrapper
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestLoadSucursalPorCliente:
+    def test_builds_dict_from_loader_result(self):
+        df = pd.DataFrame(
+            {
+                "Cod. Cliente": [100, 101],
+                "Sucursal": ["1 - CASA CENTRAL", "2 - SUCURSAL CAFAYATE"],
+            }
+        )
+        loader = MagicMock(spec=DataLoader)
+        loader.get_clientes_sucursal.return_value = df
+
+        mapping = load_sucursal_por_cliente(loader)
+
+        loader.get_clientes_sucursal.assert_called_once_with()
+        assert mapping == {100: "1 - CASA CENTRAL", 101: "2 - SUCURSAL CAFAYATE"}

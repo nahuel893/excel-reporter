@@ -1,20 +1,31 @@
-"""AccionesComercialesService — Phase-1 skeleton (RF-22).
+"""AccionesComercialesService — Phase-1 full orchestration (RF-22).
 
-Generates the BASE control workbook for acciones-comerciales into
+Generates the 6-sheet BASE control workbook for acciones-comerciales into
 ``data/output/acciones-comerciales/{YYYY-MM}/`` (service_output_dir
-convention). This slice (S1) is intentionally a SKELETON: it proves the
-config -> service -> CLI plumbing end-to-end (output path convention, the
-Phase-2 escribir_informe flag defaulting OFF, zero external-file writes)
-without yet wiring the gold datasource / wapi / compras / pivots pipeline.
+convention): gold aexcel-equivalent extraction (RF-01) -> wapi ingestion
+(RF-02) -> derived-column enrichment (RF-04..RF-08) -> the 4 pivots (RF-09)
+-> the BASE control + reconciliation writer (RF-10, RF-11).
 
-S3 ("Wire full Phase-1 orchestration into service.py") replaces the
-placeholder sheet built here with the real 6-sheet BASE control workbook
-(4 pivots + wapi-derived table + reconciliation, per RF-10/RF-11) once
-gold_source (S1, done), processor (S2) and pivots (S2) exist.
+Phase-1 scope note (spec-grounded): ``compras.xls`` (RF-03) is NOT read
+here. Every RF that names a Phase-1 artifact — the 4 pivots (RF-09), the
+BASE control workbook's 6 sheets (RF-10), and the reconciliation sheet
+(RF-11) — sources exclusively from the aexcel-equivalent (gold) and wapi
+data. compras only appears in RF-17 (the Phase-2 informe faithful paste,
+flag-gated) and the future RF-12 diff harness. Wiring compras into Phase-1
+here would be scope creep with no consuming sheet; ``readers/compras.py``
+(S1, already implemented + tested standalone) stays ready for S5/S4.
 
 Phase 2 (informe write, captures, delivery) stays behind
-``config.escribir_informe`` (default False, RF-13) — this skeleton never
+``config.escribir_informe`` (default False, RF-13) — this service never
 touches ``config.informe_path``.
+
+CRITICAL WIRING NOTE (Decision 14 / RF-05): ``processor.build_precio_lookup``
+keys on the RAW aexcel ``(Descripción Período, Cod. Cliente, Código)`` and
+``processor.enrich_wapi`` looks up the RAW wapi ``(Fecha, Cod. Cliente,
+Artículo Distribuidora)``. Both date columns are normalized to the SAME
+``YYYY-MM-DD`` string form (``_normalize_fecha_col``) before either lookup
+is built/used — otherwise a Timestamp-vs-string dtype mismatch would make
+every terna miss and PRECIO FINAL universally blank.
 """
 from __future__ import annotations
 
@@ -23,17 +34,37 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
-from openpyxl.styles import Font, PatternFill
 
-from src.core.excel_writer import ExcelWriter
 from src.services.acciones_comerciales.config import AccionesComercialesConfig
+from src.services.acciones_comerciales.constants import (
+    ZONA_CONFIG_PATH,
+)
+from src.services.acciones_comerciales.gold_source import (
+    load_aexcel_equivalent,
+    load_sucursal_por_cliente,
+)
+from src.services.acciones_comerciales.pivots import (
+    build_acc_gen,
+    build_art_accion,
+    build_cliente_fecha,
+    build_fact_net,
+)
+from src.services.acciones_comerciales.processor import (
+    build_precio_lookup,
+    enrich_wapi,
+    load_supervisor_por_sucursal,
+)
+from src.services.acciones_comerciales.readers.wapi import read_wapi
+from src.services.acciones_comerciales.writers.base_control import (
+    ReconciliationInputs,
+    build_base_control_workbook,
+)
 from src.services.base_service import BaseService
 
 logger = logging.getLogger(__name__)
 
-# Distinct styling for the TOTAL GENERAL row (project convention — matches
-# the amber fill used across other services, e.g. ventas_marca/service.py).
-_TOTAL_FILL = "FFE08A"
+_AEXCEL_FECHA_COL = "Descripción Período"
+_WAPI_FECHA_COL = "Fecha"
 
 
 @dataclass
@@ -44,14 +75,11 @@ class AccionesComercialesResult:
     registros_procesados: int
 
 
-def _style_total_general_row(ws, row: int, num_cols: int) -> None:
-    """Apply distinct bold+fill styling to a TOTAL GENERAL row (project
-    rule: every generated sheet ends with a distinctly-styled totals row)."""
-    fill = PatternFill(start_color=_TOTAL_FILL, end_color=_TOTAL_FILL, fill_type="solid")
-    for col in range(1, num_cols + 1):
-        cell = ws.cell(row=row, column=col)
-        cell.font = Font(bold=True)
-        cell.fill = fill
+def _normalize_fecha_col(series: pd.Series) -> pd.Series:
+    """Normalize a date-ish column (date / Timestamp / string) to ISO
+    ``YYYY-MM-DD`` strings so the aexcel/wapi terna keys match regardless
+    of their original dtype (S3 wiring note, RF-05)."""
+    return pd.to_datetime(series).dt.strftime("%Y-%m-%d")
 
 
 class AccionesComercialesService(BaseService):
@@ -73,23 +101,62 @@ class AccionesComercialesService(BaseService):
 
         nombre = config.nombre_archivo or "BASE control Acciones Comerciales"
 
-        # Placeholder BASE control sheet — replaced by the real 6-sheet
-        # writer (writers/base_control.py) in S3. Honest zero-row content
-        # (no gold/wapi/compras data is read at this slice) with a
-        # TOTAL GENERAL row so the project's totals-row rule holds even in
-        # skeleton form.
-        df = pd.DataFrame(
-            [
-                {"Periodo": f"{config.fecha_desde} a {config.fecha_hasta}", "Registros": 0},
-                {"Periodo": "TOTAL GENERAL", "Registros": 0},
-            ]
+        # 1. Gold aexcel-equivalent extraction + deterministic grain-collapse
+        #    (RF-01, Decision 14).
+        aexcel_result = load_aexcel_equivalent(
+            self.data_loader, config.fecha_desde, config.fecha_hasta
+        )
+        aexcel_data = aexcel_result.data.copy()
+        if not aexcel_data.empty:
+            aexcel_data[_AEXCEL_FECHA_COL] = _normalize_fecha_col(aexcel_data[_AEXCEL_FECHA_COL])
+
+        # 2. wapi ingestion (RF-02).
+        wapi_raw = read_wapi(config.wapi_path).copy()
+        if not wapi_raw.empty:
+            wapi_raw[_WAPI_FECHA_COL] = _normalize_fecha_col(wapi_raw[_WAPI_FECHA_COL])
+
+        # 3. Fresh lookups (RF-04, RF-05, RF-07).
+        sucursal_por_cliente = load_sucursal_por_cliente(self.data_loader)
+        supervisor_por_sucursal = load_supervisor_por_sucursal(ZONA_CONFIG_PATH)
+        precio_por_terna = build_precio_lookup(aexcel_data)
+
+        # 4. Derived wapi columns (RF-04..RF-08).
+        enriched = enrich_wapi(
+            wapi_raw,
+            sucursal_por_cliente=sucursal_por_cliente,
+            precio_por_terna=precio_por_terna,
+            supervisor_por_sucursal=supervisor_por_sucursal,
         )
 
-        writer = ExcelWriter(nombre, output_dir=output_dir)
-        ws = writer.add_sheet(df, sheet_name="BASE control")
-        _style_total_general_row(ws, row=ws.max_row, num_cols=len(df.columns))
-        ruta = writer.save()
+        # 5. The 4 pivots (RF-09).
+        fact_net = build_fact_net(aexcel_data)
+        art_accion = build_art_accion(enriched.data)
+        cliente_fecha = build_cliente_fecha(enriched.data)
+        acc_gen = build_acc_gen(enriched.data)
+
+        # 6. BASE control workbook + reconciliation (RF-10, RF-11).
+        reconciliation = ReconciliationInputs(
+            aexcel_data=aexcel_data,
+            wapi_enriched=enriched.data,
+            multi_price_ternas=aexcel_result.multi_price_ternas,
+            unresolved_sucursal=enriched.unresolved_sucursal,
+            unresolved_precio=enriched.unresolved_precio,
+            fecha_desde=config.fecha_desde,
+            fecha_hasta=config.fecha_hasta,
+        )
+        ruta = build_base_control_workbook(
+            nombre_archivo=nombre,
+            output_dir=output_dir,
+            fact_net=fact_net,
+            art_accion=art_accion,
+            cliente_fecha=cliente_fecha,
+            acc_gen=acc_gen,
+            wapi_enriched=enriched.data,
+            reconciliation=reconciliation,
+        )
 
         logger.info("Acciones Comerciales BASE control generado: %s", ruta)
 
-        return AccionesComercialesResult(ruta_archivo=ruta, registros_procesados=0)
+        return AccionesComercialesResult(
+            ruta_archivo=ruta, registros_procesados=len(aexcel_data)
+        )

@@ -1,8 +1,10 @@
-"""RED tests — S1.7: Phase-1 CLI/service skeleton (RF-22).
+"""RED tests — S1.7/S3.3-S3.5: Phase-1 CLI/service end-to-end (RF-22).
 
 Covers:
   - AccionesComercialesConfig defaults (escribir_informe=False — RF-13).
-  - AccionesComercialesService writes ONLY under
+  - AccionesComercialesService's FULL Phase-1 orchestration (S3): gold
+    aexcel-equivalent -> wapi ingestion -> derived-column enrichment -> the
+    4 pivots -> the 6-sheet BASE control workbook. Writes ONLY under
     data/output/acciones-comerciales/{YYYY-MM}/ (service_output_dir
     convention) and never touches any external file (informe_path) when
     escribir_informe is False (default).
@@ -11,6 +13,17 @@ Covers:
     through, and the full `python main.py --config <file>` path (global
     --config, RF-22's literal scenario) dispatches end-to-end with zero
     external-file writes.
+  - S3.5: the full CLI run against a FAKE DataLoader (fixture aexcel/
+    sucursal data, no real gold) + a real fixture wapi.xlsx, producing a
+    real xlsx in a tmp dir — asserts 6-sheet structure, TOTAL GENERAL
+    placement, and that PRECIO FINAL actually resolves through the terna
+    wiring (the S3 "CRITICAL WIRING GOTCHA": Fecha/Descripción Período
+    dtype normalization).
+
+Gold/DataLoader access is ALWAYS faked via ``monkeypatch.setattr(DataLoader,
+...)`` at the class level — no test in this module ever touches a real
+database connection (S1.10/RF-25 CI discipline: zero ``@integration``-marked
+tests, zero live DB dependency).
 """
 from __future__ import annotations
 
@@ -19,14 +32,122 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pandas as pd
 import pytest
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
+from src.core.data_loader import DataLoader
 from src.services.acciones_comerciales.config import AccionesComercialesConfig
+from src.services.acciones_comerciales.readers.wapi import WAPI_RAW_COLUMNS, WAPI_SHEET_NAME
 from src.services.acciones_comerciales.service import (
     AccionesComercialesResult,
     AccionesComercialesService,
 )
+
+_BANNER_ROWS = 7  # wapi.xlsx: 7 banner rows above the real header (Excel row 8)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# shared fixture builders — fake gold + real wapi.xlsx (no live DB, ever)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _write_wapi_fixture(path: Path, rows: list[list]) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = WAPI_SHEET_NAME
+    for r in range(1, _BANNER_ROWS + 1):
+        ws.cell(row=r, column=1, value=f"banner row {r}")
+    header_row = _BANNER_ROWS + 1
+    for c, h in enumerate(WAPI_RAW_COLUMNS, 1):
+        ws.cell(row=header_row, column=c, value=h)
+    for r_offset, row in enumerate(rows, 1):
+        for c, v in enumerate(row, 1):
+            ws.cell(row=header_row + r_offset, column=c, value=v)
+    wb.save(path)
+
+
+def _wapi_row(
+    fecha="2026-07-01",
+    cod_cliente=100,
+    razon="CLIENTE UNO",
+    calibre="CERVEZAS",
+    cantidad=10.0,
+    cantidad_sin_cargo=0.0,
+    descuento_pct=10.0,
+    accion="ACC1",
+    descripcion_accion="MVB PROMO",
+    articulo_distribuidora=900,
+) -> list:
+    return [
+        fecha, "FC-1", "", cod_cliente, razon, "", "CMQ1", "ART UNO",
+        "MARCA UNO", calibre, cantidad, 45.0, 450.0, cantidad_sin_cargo,
+        descuento_pct, 0.0, 0.0, 0.0, accion, descripcion_accion,
+        articulo_distribuidora,
+    ]
+
+
+def _aexcel_line(
+    fecha="2026-07-01",
+    cliente=100,
+    articulo=900,
+    precio=50.0,
+    bonific=0.1,
+    cantidad=10.0,
+    facturacion=450.0,
+    descuentos=45.0,
+    id_linea=1,
+    sucursal="1 - CASA CENTRAL",
+) -> dict:
+    return {
+        "_id_linea": id_linea,
+        "Descripción Período": fecha,
+        "Cod. Cliente": cliente,
+        "Descripción": "CLIENTE UNO",
+        "Sucursal": sucursal,
+        "Código": articulo,
+        "Descripción_2": "ART UNO",
+        "Descripción_3": "MARCA UNO",
+        "Descripción_12": "CERVEZAS",
+        "Precio": precio,
+        "Bonific": bonific,
+        "Cantidades Totales": cantidad,
+        "Facturacion Neta": facturacion,
+        "Descuentos": descuentos,
+    }
+
+
+def _patch_gold(monkeypatch, aexcel_lines: list[dict], sucursal_rows: list[tuple]) -> None:
+    """Patch DataLoader.get_aexcel_equivalent/get_clientes_sucursal at the
+    CLASS level — the service's default (uninjected) DataLoader never
+    touches a real engine/connection, satisfying the zero-live-DB rule."""
+    aexcel_df = pd.DataFrame(aexcel_lines)
+    sucursal_df = pd.DataFrame(sucursal_rows, columns=["Cod. Cliente", "Sucursal"])
+
+    def _fake_aexcel(self, fecha_desde, fecha_hasta):
+        return aexcel_df.copy()
+
+    def _fake_sucursal(self):
+        return sucursal_df.copy()
+
+    monkeypatch.setattr(DataLoader, "get_aexcel_equivalent", _fake_aexcel)
+    monkeypatch.setattr(DataLoader, "get_clientes_sucursal", _fake_sucursal)
+
+
+def _default_gold_and_wapi(tmp_path, monkeypatch) -> Path:
+    """Wire the common happy-path fixture: one aexcel terna, one matching
+    wapi row (same fecha/cliente/articulo terna, so PRECIO FINAL resolves),
+    SUCURSAL fresh lookup mapping client 100 -> bare 'CASA CENTRAL' (RF-04
+    format, matching configs/acciones_comerciales_zonas.json)."""
+    _patch_gold(
+        monkeypatch,
+        aexcel_lines=[_aexcel_line()],
+        sucursal_rows=[(100, "CASA CENTRAL")],
+    )
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _write_wapi_fixture(input_dir / "wapi.xlsx", [_wapi_row()])
+    return input_dir
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -56,22 +177,24 @@ class TestAccionesComercialesConfig:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# service.py — AccionesComercialesService skeleton
+# service.py — AccionesComercialesService full Phase-1 orchestration (S3)
 # ─────────────────────────────────────────────────────────────────────────
 
 
-class TestAccionesComercialesServiceSkeleton:
+class TestAccionesComercialesServiceFullPipeline:
     def test_service_slug_and_granularity(self):
         assert AccionesComercialesService.SERVICE_SLUG == "acciones-comerciales"
         assert AccionesComercialesService.GRANULARITY == "month"
 
-    def test_writes_base_control_under_conventional_output_dir(self, tmp_path):
+    def test_writes_base_control_under_conventional_output_dir(self, tmp_path, monkeypatch):
+        input_dir = _default_gold_and_wapi(tmp_path, monkeypatch)
+
         with patch("config.settings.DATA_OUTPUT", tmp_path / "out"):
             service = AccionesComercialesService()
             config = AccionesComercialesConfig(
                 fecha_desde="2026-07-01",
                 fecha_hasta="2026-07-31",
-                input_dir=str(tmp_path / "input"),
+                input_dir=str(input_dir),
                 nombre_archivo="BASE control TEST",
             )
             result = service.generar_reporte(config)
@@ -81,9 +204,10 @@ class TestAccionesComercialesServiceSkeleton:
         assert result.ruta_archivo.exists()
         assert isinstance(result, AccionesComercialesResult)
 
-    def test_zero_external_file_writes_when_escribir_informe_false(self, tmp_path):
+    def test_zero_external_file_writes_when_escribir_informe_false(self, tmp_path, monkeypatch):
         """RF-13/RF-22: default run (flag OFF) touches nothing outside
         data/output — the informe_path is never created/modified."""
+        input_dir = _default_gold_and_wapi(tmp_path, monkeypatch)
         informe_path = tmp_path / "INFO - ACCIONES BADIE JULIO 2026.xlsm"
 
         with patch("config.settings.DATA_OUTPUT", tmp_path / "out"):
@@ -91,7 +215,7 @@ class TestAccionesComercialesServiceSkeleton:
             config = AccionesComercialesConfig(
                 fecha_desde="2026-07-01",
                 fecha_hasta="2026-07-31",
-                input_dir=str(tmp_path / "input"),
+                input_dir=str(input_dir),
                 nombre_archivo="BASE control TEST",
                 escribir_informe=False,
                 informe_path=str(informe_path),
@@ -99,23 +223,124 @@ class TestAccionesComercialesServiceSkeleton:
             service.generar_reporte(config)
 
         assert not informe_path.exists()
+        # source input files remain byte-identical (RF-24) — untouched here.
+        assert (input_dir / "wapi.xlsx").exists()
 
-    def test_output_sheet_has_total_general_row(self, tmp_path):
-        """Project rule: every generated sheet ends with a TOTAL GENERAL row."""
+    def test_output_has_six_sheets_each_ending_in_total_general(self, tmp_path, monkeypatch):
+        """RF-10: 6 sheets, every sheet ends with a TOTAL GENERAL row."""
+        input_dir = _default_gold_and_wapi(tmp_path, monkeypatch)
+
         with patch("config.settings.DATA_OUTPUT", tmp_path / "out"):
             service = AccionesComercialesService()
             config = AccionesComercialesConfig(
                 fecha_desde="2026-07-01",
                 fecha_hasta="2026-07-31",
-                input_dir=str(tmp_path / "input"),
+                input_dir=str(input_dir),
                 nombre_archivo="BASE control TEST",
             )
             result = service.generar_reporte(config)
 
         wb = load_workbook(str(result.ruta_archivo))
-        ws = wb.active
-        values_col_a = [ws.cell(r, 1).value for r in range(1, ws.max_row + 1)]
-        assert "TOTAL GENERAL" in values_col_a
+        assert wb.sheetnames == [
+            "FACT_NET",
+            "ART-ACCION",
+            "CLIENTE-FECHA",
+            "ACC-GEN",
+            "wapi",
+            "Reconciliacion",
+        ]
+        for name in wb.sheetnames:
+            ws = wb[name]
+            values_col_a = [ws.cell(r, 1).value for r in range(1, ws.max_row + 1)]
+            assert "TOTAL GENERAL" in values_col_a
+
+    def test_missing_wapi_file_aborts_with_no_partial_output(self, tmp_path, monkeypatch):
+        """RF-02 scenario: missing wapi.xlsx aborts before any write."""
+        _patch_gold(monkeypatch, aexcel_lines=[_aexcel_line()], sucursal_rows=[(100, "CASA CENTRAL")])
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()  # wapi.xlsx deliberately NOT created
+
+        with patch("config.settings.DATA_OUTPUT", tmp_path / "out"):
+            service = AccionesComercialesService()
+            config = AccionesComercialesConfig(
+                fecha_desde="2026-07-01",
+                fecha_hasta="2026-07-31",
+                input_dir=str(input_dir),
+                nombre_archivo="BASE control TEST",
+            )
+            with pytest.raises(FileNotFoundError):
+                service.generar_reporte(config)
+
+        # no partial xlsx output — the output dir may exist as scaffolding
+        # (mkdir is safe/idempotent) but must contain no written file.
+        out_dir = tmp_path / "out"
+        assert not list(out_dir.rglob("*.xlsx"))
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# S3.5 — full pipeline wiring: PRECIO FINAL actually resolves through the
+# terna dtype-normalization gotcha
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestFullPipelineWiring:
+    def test_precio_final_resolves_via_terna_match_across_dtype_forms(self, tmp_path, monkeypatch):
+        """The S3 CRITICAL WIRING GOTCHA: aexcel's 'Descripción Período' and
+        wapi's 'Fecha' must be normalized to the SAME form before the terna
+        lookup, or every row lands in unresolved_precio. This fixture uses
+        a python ``date`` object on the wapi side and a plain ISO string on
+        the aexcel side to prove the normalization actually happens."""
+        from datetime import date
+
+        _patch_gold(
+            monkeypatch,
+            aexcel_lines=[_aexcel_line(fecha="2026-07-01", cliente=100, articulo=900, precio=73.33)],
+            sucursal_rows=[(100, "CASA CENTRAL")],
+        )
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        _write_wapi_fixture(
+            input_dir / "wapi.xlsx",
+            [_wapi_row(fecha=date(2026, 7, 1), cod_cliente=100, articulo_distribuidora=900)],
+        )
+
+        with patch("config.settings.DATA_OUTPUT", tmp_path / "out"):
+            service = AccionesComercialesService()
+            config = AccionesComercialesConfig(
+                fecha_desde="2026-07-01",
+                fecha_hasta="2026-07-31",
+                input_dir=str(input_dir),
+                nombre_archivo="BASE control TEST",
+            )
+            result = service.generar_reporte(config)
+
+        wb = load_workbook(str(result.ruta_archivo))
+        ws = wb["wapi"]
+        headers = [c.value for c in ws[1]]
+        precio_col = headers.index("PRECIO FINAL ") + 1
+        # row 2 = the single data row (row 1 = headers)
+        assert ws.cell(2, precio_col).value == 73.33
+
+    def test_reconciliation_sheet_reflects_wired_totals(self, tmp_path, monkeypatch):
+        input_dir = _default_gold_and_wapi(tmp_path, monkeypatch)
+
+        with patch("config.settings.DATA_OUTPUT", tmp_path / "out"):
+            service = AccionesComercialesService()
+            config = AccionesComercialesConfig(
+                fecha_desde="2026-07-01",
+                fecha_hasta="2026-07-31",
+                input_dir=str(input_dir),
+                nombre_archivo="BASE control TEST",
+            )
+            result = service.generar_reporte(config)
+
+        wb = load_workbook(str(result.ruta_archivo))
+        ws = wb["Reconciliacion"]
+        col_a_values = [ws.cell(r, 1).value for r in range(1, ws.max_row + 1)]
+        assert "CASA CENTRAL" in col_a_values  # aexcel prefix stripped to match wapi's bare SUCURSAL
+        assert "TOTAL GENERAL" in col_a_values
+        # the sheet ends with the reconciliation's own TOTAL GENERAL row.
+        assert ws.cell(ws.max_row, 1).value == "TOTAL GENERAL"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -172,14 +397,16 @@ class TestMainWiring:
         assert merged["esperar_wapi_fresco"] is True
         assert merged["wapi_cobertura_requerida"] == "habil_anterior"
 
-    def test_run_acciones_comerciales_report_returns_path_and_meta(self, tmp_path):
+    def test_run_acciones_comerciales_report_returns_path_and_meta(self, tmp_path, monkeypatch):
         import main as main_module
+
+        input_dir = _default_gold_and_wapi(tmp_path, monkeypatch)
 
         report = type("Report", (), {"nombre": "BASE control TEST"})()
         merged = {
             "fecha_desde": "2026-07-01",
             "fecha_hasta": "2026-07-31",
-            "input_dir": str(tmp_path / "input"),
+            "input_dir": str(input_dir),
             "escribir_informe": False,
             "informe_path": None,
             "esperar_wapi_fresco": False,
@@ -199,8 +426,7 @@ class TestMainWiring:
         """RF-22 literal scenario: `python main.py --config <file>` with
         Phase-2 flag OFF writes BASE control under data/output and touches
         nothing else."""
-        input_dir = tmp_path / "input"
-        input_dir.mkdir()
+        input_dir = _default_gold_and_wapi(tmp_path, monkeypatch)
         informe_path = tmp_path / "INFO - ACCIONES BADIE JULIO 2026.xlsm"
 
         config_path = tmp_path / "acciones_comerciales.json"
