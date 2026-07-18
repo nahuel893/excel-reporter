@@ -198,6 +198,40 @@ def test_oracle_zero_stock_with_sales_shows_rojo(db_engine, refreshed_mv):
 
 
 # ---------------------------------------------------------------------------
+# T-ORACLE-03b: dormant stock (stock>0, no sales this month) is present and VERDE
+# Locks the LEFT-JOIN universe fix: an INNER join would drop these rows entirely.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_oracle_dormant_stock_present_and_verde(db_engine, refreshed_mv):
+    """An article with physical stock but zero current-month sales must appear
+    (not be dropped) and be VERDE (no quiebre risk without demand)."""
+    from sqlalchemy import text
+    with _conn(db_engine) as conn:
+        total = conn.execute(text("""
+            SELECT count(*) FROM gold.mv_stock_quiebre
+            WHERE stock_hoy_bultos > 0 AND venta_mes_bultos = 0
+        """)).scalar()
+        row = conn.execute(text("""
+            SELECT sucursal, id_articulo, estado_semaforo, pedido_sugerido_15d_bultos
+            FROM gold.mv_stock_quiebre
+            WHERE stock_hoy_bultos > 0 AND venta_mes_bultos = 0
+            LIMIT 1
+        """)).fetchone()
+
+    assert total > 0, (
+        "No dormant-stock rows (stock>0, no sales) in the MV — the LEFT-JOIN universe "
+        "regressed to INNER and is dropping dormant stock"
+    )
+    assert row[2] == "VERDE", (
+        f"Dormant stock {row[0]}/{row[1]} must be VERDE, got {row[2]!r}"
+    )
+    assert float(row[3]) == 0.0, (
+        f"Dormant stock should suggest pedido 0, got {row[3]}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # T-ORACLE-04: pedido formula cross-check on the same sample row
 # ---------------------------------------------------------------------------
 

@@ -153,14 +153,23 @@ def test_view_sql_contains_nullif_guard():
     assert "NULLIF" in content.upper(), "Expected NULLIF guard against zero division"
 
 
-def test_view_sql_contains_inner_join():
-    """Locked decision (universe validation): stock->ventas is an INNER JOIN, not LEFT/FULL."""
+def test_view_sql_left_joins_ventas_onto_stock():
+    """Universe: venta_mes is LEFT-JOINed onto stock_hoy so dormant stock (stock>0,
+    no current-month sales) surfaces as VERDE instead of being dropped, guarded by a
+    WHERE keeping only rows with physical stock OR a sales row. NOT a FULL OUTER JOIN
+    (an article selling with zero stock still has a zero stock_hoy row)."""
     content = _strip_sql_comments(SQL_VIEW_FILE.read_text(encoding="utf-8"))
-    assert re.search(r"\bINNER\s+JOIN\b", content, re.IGNORECASE), (
-        "Expected an explicit INNER JOIN between stock_hoy and venta_mes"
+    assert re.search(r"\bLEFT\s+(OUTER\s+)?JOIN\s+venta_mes\b", content, re.IGNORECASE), (
+        "Expected a LEFT JOIN of venta_mes onto stock_hoy (dormant stock must not be dropped)"
+    )
+    assert not re.search(r"\bINNER\s+JOIN\s+venta_mes\b", content, re.IGNORECASE), (
+        "venta_mes must NOT be INNER-joined — that drops dormant stock and contradicts the design"
     )
     assert not re.search(r"\bFULL\s+(OUTER\s+)?JOIN\b", content, re.IGNORECASE), (
-        "No FULL OUTER JOIN expected (locked decision: INNER is sufficient)"
+        "No FULL OUTER JOIN expected (a selling article always has a zero stock_hoy row)"
+    )
+    assert re.search(r"stock_bultos\s*<>\s*0\s+OR", content, re.IGNORECASE), (
+        "Expected the universe guard (stock_bultos <> 0 OR sales row) to drop zero-stock/zero-sale noise"
     )
 
 

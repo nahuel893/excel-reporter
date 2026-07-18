@@ -61,13 +61,18 @@
 -- universe-validation discovery):
 --   gold.fact_stock emits a row per (article, deposito) EVERY day, including
 --   zero-stock rows (verified: 34245 rows = 2283 articulos x 15 depositos on a
---   representative snapshot; 91% of rows are zero bultos). Because of this,
---   quiebres (stock=0 while still selling) are captured correctly with a plain
---   INNER JOIN between stock_hoy and venta_mes — no FULL OUTER JOIN is needed.
---   This intentionally scopes the monthly quiebre view to articles with actual
---   sales activity THIS month at THIS sucursal (the operational replenishment
---   question this dashboard answers); articles with historical-but-not-current-
---   month activity are out of scope for Vista 1 by design.
+--   representative snapshot; 91% of rows are zero bultos).
+--   The universe is (sucursal, articulo) pairs that either HAVE physical stock
+--   today (stock <> 0) OR have current-month sales — a LEFT JOIN of venta_mes
+--   onto stock_hoy, kept when (stock <> 0 OR the sales row exists). This is what
+--   the xlsm reference shows and what the design locked:
+--     * stock > 0, sales this month  -> colored by coverage (ROJO/AMARILLO/VERDE)
+--     * stock = 0, sales this month  -> hard quiebre -> ROJO (visible because
+--                                       fact_stock emits the zero-stock row)
+--     * stock > 0, NO sales          -> dormant stock -> VERDE (no quiebre risk)
+--     * stock = 0, NO sales          -> nothing to show -> excluded (the 91% noise)
+--   No FULL OUTER JOIN is needed: an article selling with zero stock still has a
+--   (zero) stock_hoy row, so LEFT-joining sales onto stock covers every case.
 -- =============================================================================
 
 -- Step 1: Drop the materialized view if it already exists (idempotent re-run)
@@ -179,10 +184,11 @@ articulos_activos AS (
 ),
 
 -- ---------------------------------------------------------------------------
--- grano: universe = (sucursal, articulo) pairs with BOTH a stock row AND
--- current-month sales (locked INNER JOIN — see header note), restricted to
--- articles active in the last 3 years, with dim labels + working-day constants
--- attached.
+-- grano: universe = (sucursal, articulo) pairs that have physical stock today
+-- (stock <> 0) OR current-month sales (LEFT JOIN venta_mes onto stock_hoy — see
+-- header note), restricted to articles active in the last 3 years, with dim
+-- labels + working-day constants attached. venta is COALESCE'd to 0 so dormant
+-- stock (no sales this month) surfaces as VERDE instead of being dropped.
 -- ---------------------------------------------------------------------------
 grano AS (
     SELECT
@@ -193,18 +199,19 @@ grano AS (
         da.marca,
         s.stock_bultos,
         s.stock_htls,
-        v.venta_bultos,
-        v.venta_htls,
+        COALESCE(v.venta_bultos, 0)  AS venta_bultos,
+        COALESCE(v.venta_htls, 0)    AS venta_htls,
         d.habiles_transcurridos,
         d.habiles_mes
     FROM stock_hoy s
-    INNER JOIN venta_mes v
+    LEFT JOIN venta_mes v
         ON  v.id_sucursal = s.id_sucursal
         AND v.id_articulo = s.id_articulo
     JOIN gold.dim_sucursal ds ON ds.id_sucursal = s.id_sucursal
     JOIN gold.dim_articulo da ON da.id_articulo  = s.id_articulo
     CROSS JOIN dias d
     WHERE s.id_articulo IN (SELECT id_articulo FROM articulos_activos)
+      AND (s.stock_bultos <> 0 OR v.id_articulo IS NOT NULL)
 ),
 
 -- ---------------------------------------------------------------------------
@@ -264,9 +271,10 @@ FROM computed;
 -- Step 3: Unique index on the RF-01 grain (required for REFRESH ... CONCURRENTLY)
 --
 -- Grain: (sucursal, id_articulo). Neither column is nullable in this MV — every
--- row comes from an INNER JOIN through dim_sucursal (sucursal always resolves)
--- and gold.fact_stock/fact_ventas (id_articulo always populated) — so no
--- NULLS NOT DISTINCT clause is needed (unlike mv_resumen_mensual's marca key).
+-- row comes from stock_hoy (grouped by id_sucursal, id_articulo — so at most one
+-- row per pair; the LEFT JOIN to venta_mes, itself grouped by the same key, never
+-- fans out) through dim_sucursal (sucursal always resolves), so no NULLS NOT
+-- DISTINCT clause is needed (unlike mv_resumen_mensual's marca key).
 -- =============================================================================
 CREATE UNIQUE INDEX uix_mv_stock_quiebre_pk
     ON gold.mv_stock_quiebre (sucursal, id_articulo);
