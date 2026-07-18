@@ -1,0 +1,10 @@
+{
+  "_note": "Business-owned sucursal -> supervisor mapping for the acciones-comerciales ZONA column (RF-07). ZONA holds a SUPERVISOR name, not a geographic zone (legacy field-name quirk kept for contract stability). Keys MUST match the exact SUCURSAL label produced by the RF-04 fresh dim_cliente lookup (S3 wiring). PLACEHOLDER VALUES pending confirmation from Nahuel against the engine 'suc' sheet / informe 'Hoja1' equivalent; verify before Phase-2 sign-off.",
+  "sucursal_supervisor": {
+    "CASA CENTRAL": "Antonio Cabrerizo",
+    "SUCURSAL CAFAYATE": "Adrian Garcia",
+    "SUCURSAL METAN": "Adrian Garcia",
+    "SUCURSAL ABRA PAMPA": "Walter Vilte",
+    "SUCURSAL PERICO": "Hernan Yapura"
+  }
+}
