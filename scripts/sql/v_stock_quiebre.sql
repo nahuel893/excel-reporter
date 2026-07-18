@@ -256,8 +256,12 @@ SELECT
     tendencia_bultos,
     GREATEST(venta_diaria_bultos * 15 - stock_hoy_bultos, 0)                 AS pedido_sugerido_15d_bultos,
     CASE
-        WHEN venta_diaria_bultos IS NULL OR venta_diaria_bultos = 0
-            THEN 'VERDE'  -- dormant stock (no sales this month, or net-zero returns) -> no quiebre risk
+        WHEN venta_diaria_bultos IS NULL OR venta_diaria_bultos <= 0
+            THEN 'VERDE'  -- dormant (no sales) OR net-negative sales (returns > sales):
+                          -- no quiebre risk. <= 0 keeps this consistent with the
+                          -- pedido floor GREATEST(..., 0); a bare "= 0" would leave
+                          -- net-negative velocity dividing into a negative alcance and
+                          -- falsely flagging over-stocked articles as ROJO.
         WHEN stock_hoy_bultos / venta_diaria_bultos < 15
             THEN 'ROJO'
         WHEN stock_hoy_bultos / venta_diaria_bultos <= 30

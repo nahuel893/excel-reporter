@@ -453,14 +453,15 @@ def test_recently_sold_article_present_even_with_zero_stock(db_engine, refreshed
 @pytest.mark.integration
 def test_semaforo_band_boundaries(db_engine, refreshed_mv):
     """
-    estado_semaforo bands: alcance = stock_hoy_bultos / venta_diaria_bultos
-      < 15 -> ROJO, 15..30 -> AMARILLO, > 30 or venta_diaria NULL/0 -> VERDE.
+    estado_semaforo bands (positive velocity only): alcance = stock_hoy / venta_diaria
+      < 15 -> ROJO, 15..30 -> AMARILLO, > 30 -> VERDE.
+    Non-positive velocity (NULL / 0 / net-negative) is VERDE — see the dedicated test.
     """
     from sqlalchemy import text
     with _conn(db_engine) as conn:
         result = conn.execute(text(f"""
             SELECT COUNT(*) FROM {MV_RELATION}
-            WHERE venta_diaria_bultos IS NOT NULL AND venta_diaria_bultos != 0
+            WHERE venta_diaria_bultos > 0
               AND (
                 (stock_hoy_bultos / venta_diaria_bultos < 15 AND estado_semaforo != 'ROJO')
                 OR (stock_hoy_bultos / venta_diaria_bultos >= 15
@@ -474,17 +475,19 @@ def test_semaforo_band_boundaries(db_engine, refreshed_mv):
 
 
 @pytest.mark.integration
-def test_semaforo_verde_when_no_venta_diaria(db_engine, refreshed_mv):
-    """Dormant stock (venta_diaria NULL or 0) must render VERDE, never a missing-data error state."""
+def test_semaforo_verde_when_no_positive_venta_diaria(db_engine, refreshed_mv):
+    """Non-positive velocity must render VERDE: dormant stock (venta_diaria NULL/0) AND
+    net-negative sales (returns > sales -> venta_diaria < 0). A net-negative article is
+    over-stocked, not a quiebre; classifying it ROJO would inflate the quiebre KPI."""
     from sqlalchemy import text
     with _conn(db_engine) as conn:
         result = conn.execute(text(f"""
             SELECT COUNT(*) FROM {MV_RELATION}
-            WHERE (venta_diaria_bultos IS NULL OR venta_diaria_bultos = 0)
+            WHERE (venta_diaria_bultos IS NULL OR venta_diaria_bultos <= 0)
               AND estado_semaforo != 'VERDE'
         """))
         row = result.fetchone()
-    assert row[0] == 0, "Dormant rows (venta_diaria NULL/0) must be classified VERDE"
+    assert row[0] == 0, "Non-positive velocity rows (NULL/0/negative) must be classified VERDE"
 
 
 @pytest.mark.integration
