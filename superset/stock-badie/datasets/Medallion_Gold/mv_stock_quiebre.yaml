@@ -1,0 +1,243 @@
+table_name: mv_stock_quiebre
+main_dttm_col: null
+description: null
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: medallion_db
+schema: gold
+sql: null
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+uuid: 6b1c34b7-564d-4dc2-88a7-2c1fb69a90df
+metrics:
+- metric_name: alcance_dias
+  verbose_name: "D\xEDas de alcance"
+  metric_type: null
+  expression: SUM(stock_hoy_bultos) / NULLIF(SUM(venta_diaria_bultos), 0)
+  description: null
+  d3format: ',.1f'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: sum_pedido_sugerido_15d
+  verbose_name: Pedido sugerido (15d)
+  metric_type: null
+  expression: SUM(pedido_sugerido_15d_bultos)
+  description: null
+  d3format: ',.1f'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: sum_stock_hoy_bultos
+  verbose_name: Stock hoy (bultos)
+  metric_type: null
+  expression: SUM(stock_hoy_bultos)
+  description: null
+  d3format: ',.1f'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: sum_venta_mes_bultos
+  verbose_name: Venta mes (bultos)
+  metric_type: null
+  expression: SUM(venta_mes_bultos)
+  description: null
+  d3format: ',.1f'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: sum_venta_diaria_bultos
+  verbose_name: Venta diaria (bultos)
+  metric_type: null
+  expression: SUM(venta_diaria_bultos)
+  description: null
+  d3format: ',.2f'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: count_articulos
+  verbose_name: "Art\xEDculos"
+  metric_type: null
+  expression: COUNT(*)
+  description: null
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+columns:
+- column_name: sucursal
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: VARCHAR(100)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: des_articulo
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: VARCHAR(200)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: marca
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: VARCHAR(150)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: generico
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: VARCHAR(150)
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: pedido_sugerido_15d_bultos
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: dias_habiles_transcurridos
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: venta_diaria_bultos
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: venta_mes_bultos
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: venta_mes_htls
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: stock_hoy_bultos
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: stock_hoy_htls
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: tendencia_bultos
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: id_articulo
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: estado_semaforo
+  verbose_name: null
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+version: 1.0.0
+database_uuid: a842c321-6955-4eea-9c30-01824a8d0039

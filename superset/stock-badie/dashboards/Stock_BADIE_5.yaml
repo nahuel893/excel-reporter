@@ -1,0 +1,282 @@
+dashboard_title: Stock BADIE
+description: null
+css: null
+slug: stock-badie
+certified_by: null
+certification_details: null
+published: true
+uuid: 026f21a4-4158-4866-853b-148ad6ee2acc
+position:
+  DASHBOARD_VERSION_KEY: v2
+  ROOT_ID:
+    type: ROOT
+    id: ROOT_ID
+    children:
+    - GRID_ID
+  GRID_ID:
+    type: GRID
+    id: GRID_ID
+    children:
+    - TABS-stk
+    - ROW-N-DUTWTXC8
+    parents:
+    - ROOT_ID
+  TABS-stk:
+    type: TABS
+    id: TABS-stk
+    children:
+    - TAB-mensual
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    meta: {}
+  TAB-mensual:
+    type: TAB
+    id: TAB-mensual
+    meta:
+      text: Mensual (Quiebre)
+    children:
+    - ROW-kpi
+    - ROW-tab
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - TABS-stk
+  ROW-kpi:
+    type: ROW
+    id: ROW-kpi
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    children:
+    - CHART-rojo
+    - CHART-amar
+    - CHART-verde
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - TABS-stk
+    - TAB-mensual
+  CHART-rojo:
+    type: CHART
+    id: CHART-rojo
+    meta:
+      chartId: 20
+      width: 4
+      height: 50
+      sliceName: Quiebre (ROJO)
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - TABS-stk
+    - TAB-mensual
+    - ROW-rojo
+  CHART-amar:
+    type: CHART
+    id: CHART-amar
+    meta:
+      chartId: 21
+      width: 4
+      height: 50
+      sliceName: Vigilar (AMARILLO)
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - TABS-stk
+    - TAB-mensual
+    - ROW-amar
+  CHART-verde:
+    type: CHART
+    id: CHART-verde
+    meta:
+      chartId: 22
+      width: 4
+      height: 50
+      sliceName: Cubierto (VERDE)
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - TABS-stk
+    - TAB-mensual
+    - ROW-verde
+  ROW-tab:
+    type: ROW
+    id: ROW-tab
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    children:
+    - CHART-table
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - TABS-stk
+    - TAB-mensual
+  CHART-table:
+    type: CHART
+    id: CHART-table
+    meta:
+      chartId: 23
+      width: 12
+      height: 80
+      sliceName: "Stock \xB7 Quiebre"
+    children: []
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - TABS-stk
+    - TAB-mensual
+    - ROW-tab
+  ROW-N-DUTWTXC8:
+    children:
+    - CHART-5DAB5EWR
+    - CHART-78YMBCUB
+    - CHART-TM0MVPOS
+    - CHART-Q15V1A25
+    id: ROW-N-DUTWTXC8
+    meta:
+      '0': ROOT_ID
+      background: BACKGROUND_TRANSPARENT
+    type: ROW
+    parents:
+    - ROOT_ID
+    - GRID_ID
+  CHART-5DAB5EWR:
+    children: []
+    id: CHART-5DAB5EWR
+    meta:
+      chartId: 22
+      height: 50
+      sliceName: "\U0001F7E2 Cubierto (VERDE \xB7 >30 d\xEDas)"
+      uuid: fb9bdbfd-8930-48e5-b946-55e682e2acdf
+      width: 4
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-N-DUTWTXC8
+  CHART-78YMBCUB:
+    children: []
+    id: CHART-78YMBCUB
+    meta:
+      chartId: 23
+      height: 50
+      sliceName: "Stock \xB7 Quiebre por sucursal / art\xEDculo"
+      uuid: 22dafe7a-70f1-4588-9f22-35e670d27723
+      width: 4
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-N-DUTWTXC8
+  CHART-TM0MVPOS:
+    children: []
+    id: CHART-TM0MVPOS
+    meta:
+      chartId: 21
+      height: 50
+      sliceName: "\U0001F7E1 Vigilar (AMARILLO \xB7 15-30 d\xEDas)"
+      uuid: 1d56b760-5c49-4f51-91e7-562e8634d566
+      width: 4
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-N-DUTWTXC8
+  CHART-Q15V1A25:
+    children: []
+    id: CHART-Q15V1A25
+    meta:
+      chartId: 20
+      height: 50
+      sliceName: "\U0001F534 Quiebre (ROJO \xB7 <15 d\xEDas)"
+      uuid: f042e1a5-4e8c-491b-93eb-aa48982813ac
+      width: 4
+    type: CHART
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-N-DUTWTXC8
+metadata:
+  native_filter_configuration:
+  - id: NATIVE_FILTER-stk-gen
+    name: "Gen\xE9rico"
+    filterType: filter_select
+    type: NATIVE_FILTER
+    targets:
+    - column:
+        name: generico
+      datasetUuid: 6b1c34b7-564d-4dc2-88a7-2c1fb69a90df
+    controlValues:
+      multiSelect: true
+      enableEmptyFilter: false
+      searchAllOptions: true
+    defaultDataMask:
+      filterState: {}
+      extraFormData: {}
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    chartsInScope:
+    - 20
+    - 21
+    - 22
+    - 23
+    tabsInScope:
+    - TAB-mensual
+  - id: NATIVE_FILTER-stk-mar
+    name: Marca
+    filterType: filter_select
+    type: NATIVE_FILTER
+    targets:
+    - column:
+        name: marca
+      datasetUuid: 6b1c34b7-564d-4dc2-88a7-2c1fb69a90df
+    controlValues:
+      multiSelect: true
+      enableEmptyFilter: false
+      searchAllOptions: true
+    defaultDataMask:
+      filterState: {}
+      extraFormData: {}
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    chartsInScope:
+    - 20
+    - 21
+    - 22
+    - 23
+    tabsInScope:
+    - TAB-mensual
+  - id: NATIVE_FILTER-stk-suc
+    name: Sucursal
+    filterType: filter_select
+    type: NATIVE_FILTER
+    targets:
+    - column:
+        name: sucursal
+      datasetUuid: 6b1c34b7-564d-4dc2-88a7-2c1fb69a90df
+    controlValues:
+      multiSelect: true
+      enableEmptyFilter: false
+      searchAllOptions: true
+    defaultDataMask:
+      filterState: {}
+      extraFormData: {}
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    chartsInScope:
+    - 20
+    - 21
+    - 22
+    - 23
+    tabsInScope:
+    - TAB-mensual
+  color_scheme: supersetColors
+version: 1.0.0

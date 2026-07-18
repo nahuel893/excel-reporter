@@ -1,0 +1,43 @@
+slice_name: "Stock \xB7 Quiebre por sucursal / art\xEDculo"
+description: null
+certified_by: null
+certification_details: null
+viz_type: table
+params:
+  datasource: 3__table
+  viz_type: table
+  query_mode: aggregate
+  groupby:
+  - sucursal
+  - des_articulo
+  - generico
+  - marca
+  - estado_semaforo
+  metrics:
+  - sum_venta_mes_bultos
+  - sum_stock_hoy_bultos
+  - alcance_dias
+  - sum_pedido_sugerido_15d
+  row_limit: 10000
+  order_desc: true
+  timeseries_limit_metric: sum_pedido_sugerido_15d
+  show_totals: true
+  conditional_formatting:
+  - column: alcance_dias
+    operator: <
+    targetValue: 15
+    colorScheme: '#e04355'
+  - column: alcance_dias
+    operator: "\u2264 x \u2264"
+    targetValueLeft: 15
+    targetValueRight: 30
+    colorScheme: '#fcc700'
+  - column: alcance_dias
+    operator: '>'
+    targetValue: 30
+    colorScheme: '#59c189'
+query_context: null
+cache_timeout: null
+uuid: 22dafe7a-70f1-4588-9f22-35e670d27723
+version: 1.0.0
+dataset_uuid: 6b1c34b7-564d-4dc2-88a7-2c1fb69a90df
