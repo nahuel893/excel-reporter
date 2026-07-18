@@ -92,6 +92,9 @@ class GlobalFilters(BaseModel):
     # avances: si True, el daily solo entrega el reporte cuando los cupos
     # (objetivo) del mes ya están cargados en gold. Ver run_daily _objetivo_gate.
     esperar_objetivo: bool = False
+    # stock-suria: si True, ignora la lista JSON de match y trae TODOS los
+    # articulos de SURIA con registro de stock (reporte completo).
+    todos_los_articulos: bool = False
 
 
 class ReportFilters(BaseModel):

@@ -219,6 +219,80 @@ def _build_sin_match_sheet(ws, config_data: dict, stock_data: dict) -> None:
         ws.column_dimensions[get_column_letter(col_idx)].width = 10
 
 
+def build_excel_todos(articulos: list[dict], fecha_str: str, output_dir: Path) -> Path:
+    """Build the all-articles Stock SURIA Excel (single sheet, no provider match).
+
+    Same BULTOS/HTLs × sucursal layout as the matched 'Stock SURIA' sheet, but the
+    descriptor columns come straight from SURIA dim_articulo (no cod_prov/desc_prov)
+    and every article with a stock record is included (unfiltered by the JSON list).
+
+    Args:
+        articulos: list of {id_articulo, des_suria, marca, generico,
+                   suc: {sucursal_short: {"bultos": float, "htls": float}}}.
+        fecha_str: date label (YYYY-MM-DD) used in the filename.
+        output_dir: directory where the file is written.
+
+    Returns:
+        Path to the generated Excel file.
+    """
+    import pandas as pd
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    wb = Workbook()
+    wb.remove(wb.active)
+    ws = wb.create_sheet("Stock SURIA (todos)")
+
+    n_desc = 4
+    n_suc = len(SUCURSALES)
+    bultos_start = n_desc + 1        # col 5
+    bultos_end = n_desc + n_suc      # col 10
+    htls_start = bultos_end + 1      # col 11
+    htls_end = bultos_end + n_suc    # col 16
+
+    _write_banner(ws, bultos_start, bultos_end, 1, "BULTOS", _BULTOS_FILL)
+    _write_banner(ws, htls_start, htls_end, 1, "HTLs", _HTLS_FILL)
+
+    for col_idx, label in enumerate(["Cod SURIA", "Desc SURIA", "Marca", "Generico"], 1):
+        _apply_header_style(ws.cell(row=2, column=col_idx, value=label))
+    for i, suc in enumerate(SUCURSALES):
+        _apply_header_style(ws.cell(row=2, column=bultos_start + i, value=suc))
+        _apply_header_style(ws.cell(row=2, column=htls_start + i, value=suc))
+
+    sorted_articles = sorted(
+        articulos, key=lambda a: (a.get("marca") or "", a.get("des_suria") or "")
+    )
+    for r_idx, art in enumerate(sorted_articles, 3):
+        ws.cell(row=r_idx, column=1, value=art["id_articulo"])
+        ws.cell(row=r_idx, column=2, value=art.get("des_suria"))
+        ws.cell(row=r_idx, column=3, value=art.get("marca"))
+        ws.cell(row=r_idx, column=4, value=art.get("generico"))
+
+        suc_data = art.get("suc", {})
+        for s_idx, suc in enumerate(SUCURSALES):
+            entry = suc_data.get(suc, {})
+            bultos_val = entry.get("bultos", 0) if entry else 0
+            htls_raw = entry.get("htls", 0) if entry else 0
+
+            cell_b = ws.cell(row=r_idx, column=bultos_start + s_idx, value=bultos_val)
+            cell_b.number_format = _FMT_BULTOS
+            htls_val = htls_raw if htls_raw else None
+            cell_h = ws.cell(row=r_idx, column=htls_start + s_idx, value=htls_val)
+            if htls_val is not None:
+                cell_h.number_format = _FMT_HTLS
+
+    ws.freeze_panes = "E3"
+    for col_idx, width in {1: 9, 2: 34, 3: 16, 4: 16}.items():
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    for col_idx in range(bultos_start, htls_end + 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = 10
+
+    fecha_fmt = pd.to_datetime(fecha_str).strftime("%d-%m-%Y")
+    output_path = output_dir / f"Stock SURIA completo - {fecha_fmt}.xlsx"
+    wb.save(output_path)
+    logger.info("Stock SURIA completo guardado: %s (%d articulos)", output_path, len(sorted_articles))
+    return output_path
+
+
 def build_excel(
     config_data: dict,
     stock_data: dict,

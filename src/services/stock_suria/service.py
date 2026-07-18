@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, text
 
 from src.services.base_service import BaseService
-from src.services.stock_suria.processor import build_excel
+from src.services.stock_suria.processor import build_excel, build_excel_todos
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,9 @@ class StockSuriaConfig:
 
     fecha: str  # YYYY-MM-DD — used only for output dir; actual stock date = latest in DB
     nombre_archivo: str | None = None
+    # When True: ignore the frozen JSON match list and include ALL SURIA articles
+    # that have a stock record on the latest date (single-sheet report).
+    todos_los_articulos: bool = False
 
 
 @dataclass
@@ -73,6 +76,9 @@ class StockSuriaService(BaseService):
 
     def generar_reporte(self, config: StockSuriaConfig) -> StockSuriaResult:
         """Generate the Stock SURIA Excel and return a result with path + metadata."""
+        if config.todos_los_articulos:
+            return self._generar_todos(config)
+
         config_data = self._load_config_data()
 
         # Collect all article IDs to query
@@ -155,4 +161,53 @@ class StockSuriaService(BaseService):
             ruta_archivo=out_path,
             fecha_stock=fecha_stock,
             articulos_con_stock=articulos_con_stock,
+        )
+
+    def _generar_todos(self, config: StockSuriaConfig) -> StockSuriaResult:
+        """All-articles variant: every SURIA article with a stock record, unfiltered."""
+        engine = self._build_suria_engine()
+        with engine.connect() as conn:
+            row = conn.execute(text("SELECT MAX(date_stock) FROM gold.fact_stock")).fetchone()
+            fecha_stock = row[0].isoformat() if row and row[0] else config.fecha
+
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT f.id_articulo, a.des_articulo, a.marca, a.generico,
+                           d.des_sucursal,
+                           SUM(f.cant_bultos)         AS cant_bultos,
+                           SUM(f.cantidad_total_htls) AS htls
+                    FROM   gold.fact_stock f
+                    JOIN   gold.dim_deposito d ON d.id_deposito = f.id_deposito
+                    JOIN   gold.dim_articulo a ON a.id_articulo = f.id_articulo
+                    WHERE  f.date_stock = :date
+                    GROUP BY f.id_articulo, a.des_articulo, a.marca, a.generico, d.des_sucursal
+                    """
+                ),
+                {"date": fecha_stock},
+            ).fetchall()
+
+        arts: dict = {}
+        for r in rows:
+            id_art, desc, marca, generico, suc_raw, bultos, htls = r
+            suc = _normalize_sucursal(suc_raw)
+            if id_art not in arts:
+                arts[id_art] = {
+                    "id_articulo": id_art, "des_suria": desc,
+                    "marca": marca, "generico": generico, "suc": {},
+                }
+            arts[id_art]["suc"][suc] = {"bultos": bultos, "htls": htls}
+
+        out_dir = self._output_dir(config.fecha)
+        out_path = build_excel_todos(list(arts.values()), fecha_stock, out_dir)
+
+        con_stock = sum(
+            1 for a in arts.values()
+            if any((e or {}).get("bultos", 0) for e in a["suc"].values())
+        )
+        logger.info("Stock SURIA (todos): %d articulos, %d con stock", len(arts), con_stock)
+        return StockSuriaResult(
+            ruta_archivo=out_path,
+            fecha_stock=fecha_stock,
+            articulos_con_stock=con_stock,
         )

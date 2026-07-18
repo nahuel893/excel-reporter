@@ -1176,7 +1176,11 @@ def _run_stock_suria_report(report, merged: dict) -> list[tuple[Path, dict]]:
         return []
 
     print(f"Generando: {report.nombre}")
-    config = StockSuriaConfig(fecha=fecha, nombre_archivo=report.nombre)
+    config = StockSuriaConfig(
+        fecha=fecha,
+        nombre_archivo=report.nombre,
+        todos_los_articulos=merged.get("todos_los_articulos", False),
+    )
     service = StockSuriaService()
     result = service.generar_reporte(config)
     print(f"Stock SURIA '{report.nombre}' generado exitosamente:")

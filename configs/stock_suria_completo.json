@@ -1,0 +1,23 @@
+{
+    "_note": "Stock SURIA COMPLETO — TODOS los articulos de SURIA con registro de stock, sin filtrar por la lista de proveedor (stock_suria_articulos.json). Modo todos_los_articulos=true.",
+    "tipo": "stock-suria",
+    "filtros": {
+        "fecha_desde": "2026-07-17",
+        "fecha_hasta": "2026-07-17",
+        "todos_los_articulos": true,
+        "enviar_email": true,
+        "enviar_whatsapp": false
+    },
+    "reportes": [
+        {
+            "nombre": "Stock SURIA completo",
+            "asunto_email": "Stock SURIA - todos los articulos",
+            "cuerpo_email": "Adjunto el reporte de stock SURIA con TODOS los articulos (sin filtrar por la lista de proveedor).",
+            "filtros": {},
+            "enviar_a": {
+                "Fabian Gallardo": { "via": ["email"] },
+                "Nahuel Aguirre": { "via": ["email_cc"] }
+            }
+        }
+    ]
+}

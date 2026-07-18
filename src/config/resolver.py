@@ -254,6 +254,7 @@ def merge_filters(
         "genericos_sin_prvta": global_f.genericos_sin_prvta,
         "marca_splits": global_f.marca_splits,
         "cupos_manuales": global_f.cupos_manuales,
+        "todos_los_articulos": global_f.todos_los_articulos,
         # Per-client report filters (only meaningful per-report; no global fallback)
         "clientes": None,
         "articulos": None,
