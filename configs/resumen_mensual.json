@@ -76,6 +76,11 @@
                     "hoja": "JUGOS",
                     "rango": "A1:J30",
                     "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "PERNOD RICARD",
+                    "rango": "A1:J30",
+                    "renderer": "libreoffice"
                 }
             ],
             "enviar_a": {
