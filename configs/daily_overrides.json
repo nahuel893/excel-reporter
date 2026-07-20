@@ -6,7 +6,7 @@
     "avance-badie": {
         "ejecutar": true,
         "enviar": true,
-        "razon": "Activado (Nivel 1): envia el Excel por email a los 5 supervisores (CC Nahuel) en cada corrida del daily. Imagenes por WhatsApp al grupo Preventa Salta pendientes (PR4)."
+        "razon": "GO-LIVE (2026-07-20): envia el Excel por email a los 5 supervisores (CC Nahuel) Y las 25 imagenes por WhatsApp al grupo Preventa Salta, en cada corrida del daily (07:00). enviar_whatsapp:true en configs/avances_badie.json. Columna S de Multicategoria ocultada en el output (persiste in-place)."
     },
     "avance-branca": {
         "ejecutar": true,
