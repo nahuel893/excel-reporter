@@ -276,11 +276,11 @@ _SUCURSAL_PREFIX_RE = re.compile(r"^\d+\s*-\s*")
 
 
 def _strip_sucursal_prefix(label: Any) -> Any:
-    """Normalize aexcel's ``"{id} - {DESC}"`` Sucursal label (FACT_NET row
-    field, ``get_aexcel_equivalent``) to the bare description so it
-    compares like-for-like against wapi's SUCURSAL (RF-04), which is
-    ALREADY a bare name — the two are independent contracts (RF-07's own
-    scenario keys ZONA off ``SUCURSAL = "CASA CENTRAL"``, no id prefix)."""
+    """Normalize a ``"{id} - {DESC}"`` Sucursal label to the bare
+    description for like-for-like reconciliation. Both the aexcel-side
+    Sucursal (FACT_NET, ``get_aexcel_equivalent``) and the wapi-side
+    SUCURSAL (RF-04) now carry the id prefix, so both are stripped to the
+    bare name before their per-sucursal totals are compared."""
     if not isinstance(label, str):
         return label
     return _SUCURSAL_PREFIX_RE.sub("", label).strip()
@@ -301,9 +301,13 @@ def _build_reconciliacion_rows_and_total(
             _strip_sucursal_prefix
         )
 
+    wapi_normalized = inputs.wapi_enriched.copy()
+    if not wapi_normalized.empty and COL_SUCURSAL in wapi_normalized.columns:
+        wapi_normalized[COL_SUCURSAL] = wapi_normalized[COL_SUCURSAL].map(_strip_sucursal_prefix)
+
     fn_by_suc = _group_sum(aexcel_normalized, _AEXCEL_SUCURSAL_COL, FACT_NET_FACT_NETA_SRC)
     desc_ax_by_suc = _group_sum(aexcel_normalized, _AEXCEL_SUCURSAL_COL, FACT_NET_DESCUENTOS_SRC)
-    desc_wapi_by_suc = _group_sum(inputs.wapi_enriched, COL_SUCURSAL, COL_DESCUENTO)
+    desc_wapi_by_suc = _group_sum(wapi_normalized, COL_SUCURSAL, COL_DESCUENTO)
 
     sucursales = sorted(set(fn_by_suc) | set(desc_ax_by_suc) | set(desc_wapi_by_suc), key=str)
 

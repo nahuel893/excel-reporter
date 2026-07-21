@@ -265,6 +265,26 @@ class TestZonaDerivation:
         )
         assert pd.isna(result.data.iloc[0][COL_ZONA])
 
+    def test_zona_resolves_id_prefixed_sucursal_against_bare_map(self):
+        """SUCURSAL now carries the "{id} - DESC" prefix; the supervisor map
+        may still be keyed bare — the lookup strips the prefix and resolves."""
+        result = _enrich(
+            [_wapi_row(cod_cliente=100)],
+            sucursal_por_cliente={100: "1 - CASA CENTRAL"},
+            supervisor_por_sucursal={"CASA CENTRAL": "Antonio Cabrerizo"},
+        )
+        assert result.data.iloc[0][COL_SUCURSAL] == "1 - CASA CENTRAL"
+        assert result.data.iloc[0][COL_ZONA] == "Antonio Cabrerizo"
+
+    def test_zona_resolves_id_prefixed_sucursal_against_prefixed_map(self):
+        """A prefixed-keyed map also resolves (full-label match wins first)."""
+        result = _enrich(
+            [_wapi_row(cod_cliente=100)],
+            sucursal_por_cliente={100: "1 - CASA CENTRAL"},
+            supervisor_por_sucursal={"1 - CASA CENTRAL": "Antonio Cabrerizo"},
+        )
+        assert result.data.iloc[0][COL_ZONA] == "Antonio Cabrerizo"
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # RF-08 — Total2, Descuento, Tipo Descuento

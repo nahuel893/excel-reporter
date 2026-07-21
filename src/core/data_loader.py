@@ -2733,15 +2733,14 @@ class DataLoader:
         ``dim_cliente`` is a DIMENSION table (not period-scoped), so this
         gives live coverage of every client the ERP knows about right now,
         independent of whether they transacted in the reporting period —
-        exactly the freshness guarantee RF-04 requires. Uses dim_cliente's
-        own denormalized ``des_sucursal`` as a BARE name (NO ``"{id} - "``
-        prefix) — RF-07's own spec scenario keys ZONA off a bare
-        ``SUCURSAL = "CASA CENTRAL"``, matching
-        ``configs/acciones_comerciales_zonas.json``'s bare keys. This is a
-        DIFFERENT convention from aexcel's own ``"{id} - {DESC}"`` Sucursal
-        field (FACT_NET row field, ``get_aexcel_equivalent``) — the two
-        SUCURSAL/Sucursal fields are independent contracts and must NOT be
-        conflated.
+        exactly the freshness guarantee RF-04 requires. Emits the
+        ``"{id_sucursal} - {DESCRIPCION}"`` label (e.g. ``"1 - CASA CENTRAL"``)
+        to match BOTH the original manual engine's wapi SUCURSAL (the BG:BH
+        snapshot format) and FACT_NET's ``get_aexcel_equivalent`` Sucursal —
+        verified identical text (``dim_cliente.des_sucursal`` ==
+        ``dim_sucursal.descripcion`` for all 14 sucursales). The ZONA lookup
+        (RF-07) matches this label prefix-tolerantly, so a bare-keyed
+        ``configs/acciones_comerciales_zonas.json`` still resolves.
 
         When ``id_cliente`` repeats across sucursales (same reused-id risk
         class as ``id_vendedor``/``id_ruta``, project GOLDEN RULE), the
@@ -2753,8 +2752,8 @@ class DataLoader:
         return self.execute_query(
             """
             SELECT DISTINCT ON (dc.id_cliente)
-                dc.id_cliente     AS "Cod. Cliente",
-                dc.des_sucursal   AS "Sucursal"
+                dc.id_cliente                                  AS "Cod. Cliente",
+                dc.id_sucursal || ' - ' || dc.des_sucursal     AS "Sucursal"
             FROM gold.dim_cliente dc
             WHERE dc.anulado = false
             ORDER BY dc.id_cliente, dc.id_sucursal

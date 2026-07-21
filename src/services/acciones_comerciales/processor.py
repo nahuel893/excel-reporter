@@ -44,6 +44,7 @@ date, or both the same string form) before calling, or every terna misses.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -166,6 +167,25 @@ def load_supervisor_por_sucursal(path: str | Path) -> dict[str, str]:
     return dict(payload[ZONA_CONFIG_KEY])
 
 
+# Matches a leading ``"<id> - "`` sucursal-label prefix (e.g. "1 - ").
+_SUCURSAL_PREFIX_RE = re.compile(r"^\s*\d+\s*-\s*")
+
+
+def _resolve_supervisor(sucursal: Any, supervisor_map: Mapping[str, str]) -> Any:
+    """ZONA lookup that tolerates the ``"{id} - DESC"`` SUCURSAL label.
+
+    SUCURSAL now carries the id prefix (to match the original engine and
+    FACT_NET), while the business-owned supervisor map may be keyed by the
+    bare name. Try the full label first, then the prefix-stripped name, so
+    either key convention resolves. Unmatched -> NaN (blank ZONA)."""
+    if not isinstance(sucursal, str):
+        return float("nan")
+    if sucursal in supervisor_map:
+        return supervisor_map[sucursal]
+    bare = _SUCURSAL_PREFIX_RE.sub("", sucursal)
+    return supervisor_map.get(bare, float("nan"))
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # RF-04..RF-08 — the enrichment
 # ─────────────────────────────────────────────────────────────────────────
@@ -208,8 +228,9 @@ def enrich_wapi(
     # RF-06 mvb.
     enriched[COL_MVB] = [classify_mvb(v) for v in enriched["Descripción Acción"]]
 
-    # RF-07 ZONA (supervisor keyed by SUCURSAL).
-    enriched[COL_ZONA] = enriched[COL_SUCURSAL].map(dict(supervisor_por_sucursal))
+    # RF-07 ZONA (supervisor keyed by SUCURSAL, prefix-tolerant).
+    sup_map = dict(supervisor_por_sucursal)
+    enriched[COL_ZONA] = [_resolve_supervisor(s, sup_map) for s in enriched[COL_SUCURSAL]]
 
     # RF-08 Total2 + Descuento (row-wise so IFERROR/blank semantics are exact).
     total2_vals: list[float] = []

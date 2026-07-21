@@ -388,18 +388,18 @@ class TestGetClientesSucursalSQL:
         sql = loader.execute_query.call_args[0][0]
         assert "anulado = false" in sql
 
-    def test_sucursal_label_is_bare_name_matching_zonas_config(self):
-        """RF-07's own scenario keys ZONA off a BARE sucursal name
-        (``SUCURSAL = "CASA CENTRAL"``, no id prefix) — matching
-        ``configs/acciones_comerciales_zonas.json``'s bare keys. This is a
-        DIFFERENT convention from aexcel's own '{id} - {DESC}' Sucursal
-        field (FACT_NET row field) — the two are independent contracts."""
+    def test_sucursal_label_is_id_prefixed_matching_original(self):
+        """SUCURSAL must carry the ``"{id} - DESC"`` prefix (e.g.
+        "1 - CASA CENTRAL") to match the original manual engine's wapi
+        SUCURSAL (BG:BH snapshot format) and FACT_NET. The ZONA lookup
+        matches this label prefix-tolerantly, so a bare-keyed zonas.json
+        still resolves."""
         loader = _make_loader_with_mock_engine(pd.DataFrame())
         loader.get_clientes_sucursal()
 
         sql = loader.execute_query.call_args[0][0]
-        assert 'dc.des_sucursal' in sql and 'AS "Sucursal"' in sql
-        assert "id_sucursal || ' - '" not in sql
+        assert "dc.id_sucursal || ' - ' || dc.des_sucursal" in sql
+        assert 'AS "Sucursal"' in sql
 
     def test_no_ddl_keywords_in_sql(self):
         loader = _make_loader_with_mock_engine(pd.DataFrame())
