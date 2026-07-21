@@ -76,6 +76,16 @@ class TestGetAexcelEquivalentSQL:
         assert "abs(fv.precio_unitario_bruto)" in sql
         assert 'abs(fv.precio_unitario_bruto)               AS "Precio"' in sql
 
+    def test_descripcion_12_sourced_from_generico(self):
+        """Decision 18: FACT_NET's Descripción_12 groups by da.generico (not
+        unidad_negocio) for consistency with the acción side."""
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_aexcel_equivalent("2026-07-01", "2026-07-31")
+
+        sql, _ = loader.execute_query.call_args[0]
+        assert 'da.generico' in sql and 'AS "Descripción_12"' in sql
+        assert 'da.unidad_negocio' not in sql
+
     def test_anulado_false_filter(self):
         loader = _make_loader_with_mock_engine(pd.DataFrame())
         loader.get_aexcel_equivalent("2026-07-01", "2026-07-31")

@@ -2695,6 +2695,14 @@ class DataLoader:
         conventions and was verified to match the manual aexcel at 100%
         (79,885/79,900 ternas, Jul 2026) — Decision 14 empirical adjudication.
 
+        Descripción_12 = da.generico (NOT unidad_negocio): the user chose the
+        genérico grouping for the ventas/FACT_NET side so it stays consistent
+        with the acción side (ACC-GEN, keyed by the wapi Calibre = genérico).
+        This intentionally diverges from the original manual engine (whose
+        Descripción_12 mirrored aexcel's unidad_negocio), e.g. AGUA DANONE ->
+        AGUAS DANONE, PERNOD RICARD 1 -> PERNOD RICARD, FERNET -> FRATELLI B —
+        expected divergences, not diff bugs (Decision 18).
+
         Read-only SELECT — issues no DDL against gold (RF-25).
         """
         return self.execute_query(
@@ -2708,7 +2716,7 @@ class DataLoader:
                 fv.id_articulo                              AS "Código",
                 da.des_articulo                             AS "Descripción_2",
                 da.marca                                    AS "Descripción_3",
-                da.unidad_negocio                           AS "Descripción_12",
+                da.generico                                 AS "Descripción_12",
                 abs(fv.precio_unitario_bruto)               AS "Precio",
                 fv.bonificacion / 100.0                     AS "Bonific",
                 fv.cantidades_total                         AS "Cantidades Totales",
