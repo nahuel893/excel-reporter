@@ -116,6 +116,7 @@ class ReportFilters(BaseModel):
     agrupar_por_generico: bool | None = None  # historico-cliente: all marcas grouped by generico
     marcas_completas: bool | None = None      # historico-cliente: fill full marca universe (0 if not bought)
     genericos_universo: list[str] | None = None  # genericos whose full marca set defines the universe
+    con_lista_precio: bool | None = None      # descuentos: si False, no genera la hoja "lista_precio"
 
 
 class ReportEntry(BaseModel):

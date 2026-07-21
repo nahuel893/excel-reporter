@@ -14,6 +14,18 @@
                     "via": ["whatsapp", "email"]
                 }
             }
+        },
+        {
+            "nombre": "Descuentos CCU - WV",
+            "asunto_email": "Descuentos CCU",
+            "filtros": {
+                "con_lista_precio": false
+            },
+            "enviar_a": {
+                "Walter Vilte": {
+                    "via": ["email"]
+                }
+            }
         }
     ]
 }

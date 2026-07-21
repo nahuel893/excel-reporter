@@ -1089,6 +1089,7 @@ def _run_descuentos_report(report, merged: dict) -> list[tuple[Path, dict]]:
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
         nombre_archivo=report.nombre,
+        con_lista_precio=merged.get("con_lista_precio", True),
     )
     result = DescuentosService().generar_reporte(config)
     print(f"Descuentos '{report.nombre}' generado exitosamente:")

@@ -65,6 +65,8 @@ class DescuentosConfig:
     fecha_hasta: str
     nombre_archivo: str | None = None
     genericos: list[str] = field(default_factory=lambda: list(GENERICOS_CCU))
+    # Si es False, NO se genera la hoja "lista_precio" (solo la hoja "normal").
+    con_lista_precio: bool = True
 
 
 @dataclass
@@ -190,7 +192,9 @@ class DescuentosService:
             length = max((len(str(c.value)) for c in col_cells if c.value is not None), default=10)
             ws.column_dimensions[get_column_letter(col_cells[0].column)].width = min(max(length + 2, 10), 40)
 
-    def _build_workbook(self, df: pd.DataFrame, output_path: Path, periodo: str) -> None:
+    def _build_workbook(
+        self, df: pd.DataFrame, output_path: Path, periodo: str, con_lista_precio: bool = True
+    ) -> None:
         wb = Workbook()
         wb.remove(wb.active)
 
@@ -204,15 +208,17 @@ class DescuentosService:
         nxt = self._write_table(ws_n, nxt, "Por Sucursal, Genérico y Marca", df, ["sucursal", "generico", "marca"])
         self._autosize(ws_n)
 
-        # Hoja "lista_precio": mismas aperturas + Lista de Precio como nivel adicional
-        ws_l = wb.create_sheet("lista_precio")
-        ws_l.cell(row=1, column=1, value="Descuentos CCU — apertura por Lista de Precio").font = Font(bold=True, size=14)
-        ws_l.cell(row=2, column=1, value=f"Período: {periodo}").font = _SUBTITLE_FONT
-        nxt = 4
-        nxt = self._write_table(ws_l, nxt, "Por Sucursal y Lista de Precio", df, ["sucursal", "lista_precio"])
-        nxt = self._write_table(ws_l, nxt, "Por Sucursal, Lista de Precio y Genérico", df, ["sucursal", "lista_precio", "generico"])
-        nxt = self._write_table(ws_l, nxt, "Por Sucursal, Lista de Precio, Genérico y Marca", df, ["sucursal", "lista_precio", "generico", "marca"])
-        self._autosize(ws_l)
+        # Hoja "lista_precio": mismas aperturas + Lista de Precio como nivel adicional.
+        # Se omite cuando con_lista_precio=False (ej. reporte de Walter Vilte).
+        if con_lista_precio:
+            ws_l = wb.create_sheet("lista_precio")
+            ws_l.cell(row=1, column=1, value="Descuentos CCU — apertura por Lista de Precio").font = Font(bold=True, size=14)
+            ws_l.cell(row=2, column=1, value=f"Período: {periodo}").font = _SUBTITLE_FONT
+            nxt = 4
+            nxt = self._write_table(ws_l, nxt, "Por Sucursal y Lista de Precio", df, ["sucursal", "lista_precio"])
+            nxt = self._write_table(ws_l, nxt, "Por Sucursal, Lista de Precio y Genérico", df, ["sucursal", "lista_precio", "generico"])
+            nxt = self._write_table(ws_l, nxt, "Por Sucursal, Lista de Precio, Genérico y Marca", df, ["sucursal", "lista_precio", "generico", "marca"])
+            self._autosize(ws_l)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         wb.save(str(output_path))
@@ -224,7 +230,7 @@ class DescuentosService:
         out_dir = service_output_dir("descuentos-ccu", config.fecha_desde, "month")
         output_path = out_dir / f"{nombre}.xlsx"
         periodo = f"{config.fecha_desde} a {config.fecha_hasta}"
-        self._build_workbook(df, output_path, periodo)
+        self._build_workbook(df, output_path, periodo, con_lista_precio=config.con_lista_precio)
         logger.info("Descuentos CCU generado: %s (%d filas)", output_path.name, len(df))
         return DescuentosResult(
             ruta_archivo=output_path,
