@@ -26,7 +26,14 @@ Reconciliation sheet section order (RF-11), TOP to BOTTOM:
      already-closed day that need real investigation ("REVISAR (dia
      cerrado)"). Rows are sorted so the "REVISAR" (closed-day) rows come
      first, then the same-day-lag rows.
-  5. RECONCILIACION FACTURACION / DESCUENTOS — per-SUCURSAL comparison of
+  5. COMPARACION PRECIO: TERNA vs COMPROBANTE — Decision 19 diagnostic,
+     BASE-control-ONLY parallel-run comparison. Lists ONLY the wapi rows
+     where BOTH the terna-based PRECIO FINAL and the comprobante-based
+     diagnostic price (``processor.enrich_wapi``'s optional
+     ``precio_comprobante_por_clave`` wiring) are present AND differ by
+     more than the $0.01 tolerance. Never touches the authoritative terna
+     PRECIO FINAL/Total2/Descuento/pivots.
+  6. RECONCILIACION FACTURACION / DESCUENTOS — per-SUCURSAL comparison of
      the aexcel-side ``Facturacion Neta``/``Descuentos`` sums against the
      wapi-side ``Descuento`` sum, by their CORRECT named pandas columns
      (never a column-letter/AZ-AX-style drift bug — there IS no column
@@ -54,6 +61,8 @@ from openpyxl.worksheet.worksheet import Worksheet
 from src.core.excel_writer import ExcelWriter
 from src.services.acciones_comerciales.constants import (
     COL_DESCUENTO,
+    COL_PRECIO_FINAL,
+    COL_PRECIO_FINAL_COMPROBANTE,
     COL_SUCURSAL,
     FACT_NET_DESCUENTOS_SRC,
     FACT_NET_FACT_NETA_SRC,
@@ -130,6 +139,24 @@ _UNRESOLVED_PRECIO_HEADERS = _UNRESOLVED_PRECIO_SOURCE_COLUMNS + ["Clasificacion
 
 _CLASIFICACION_DESFASAJE = "Desfasaje de carga (dia en curso)"
 _CLASIFICACION_REVISAR = "REVISAR (dia cerrado)"
+
+# COMPARACION PRECIO: TERNA vs COMPROBANTE (Decision 19) — diagnostic,
+# BASE-control-ONLY parallel-run comparison section.
+_PRECIO_COMPARISON_HEADERS = [
+    "Comprobante",
+    "Cod. Cliente",
+    "Artículo Distribuidora",
+    "PRECIO FINAL (terna)",
+    COL_PRECIO_FINAL_COMPROBANTE,
+    "Delta",
+]
+_PRECIO_COMPARISON_REQUIRED_COLUMNS = [
+    "Comprobante",
+    "Cod. Cliente",
+    "Artículo Distribuidora",
+    COL_PRECIO_FINAL,
+    COL_PRECIO_FINAL_COMPROBANTE,
+]
 
 _FECHA_RANGO_HEADERS = [
     "Fuente",
@@ -361,6 +388,48 @@ def _build_unresolved_precio_rows(df: pd.DataFrame, fecha_hasta: Any) -> list[li
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# reconciliation — COMPARACION PRECIO: TERNA vs COMPROBANTE (Decision 19)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _build_precio_comparison_rows(
+    wapi_enriched: pd.DataFrame, tolerance: float
+) -> tuple[list[list[Any]], int]:
+    """COMPARACION PRECIO: TERNA vs COMPROBANTE (Decision 19) — lists ONLY
+    the rows where BOTH the terna PRECIO FINAL and the diagnostic
+    comprobante-based price are present and differ by more than
+    ``tolerance``. Returns ``(rows, both_present_count)`` — the count feeds
+    the section title's "N filas difieren de M con ambos precios" summary.
+
+    Diagnostic/comparison output ONLY (Decision 19, BASE-control-ONLY) —
+    never mutates, rounds, or fabricates a stored price (RF-23); never
+    touches the authoritative terna PRECIO FINAL/Total2/Descuento/pivots."""
+    if wapi_enriched.empty or not all(
+        c in wapi_enriched.columns for c in _PRECIO_COMPARISON_REQUIRED_COLUMNS
+    ):
+        return [], 0
+
+    both_present = wapi_enriched.dropna(subset=[COL_PRECIO_FINAL, COL_PRECIO_FINAL_COMPROBANTE])
+    rows: list[list[Any]] = []
+    for _, row in both_present.iterrows():
+        terna = row[COL_PRECIO_FINAL]
+        comprobante = row[COL_PRECIO_FINAL_COMPROBANTE]
+        delta = terna - comprobante
+        if abs(delta) > tolerance:
+            rows.append(
+                [
+                    row["Comprobante"],
+                    row["Cod. Cliente"],
+                    row["Artículo Distribuidora"],
+                    terna,
+                    comprobante,
+                    delta,
+                ]
+            )
+    return rows, len(both_present)
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # reconciliation — FACTURACION/DESCUENTOS delta section (RF-11, ends sheet)
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -481,6 +550,18 @@ def _write_reconciliation_sheet(wb: Workbook, inputs: ReconciliationInputs) -> W
         _UNRESOLVED_PRECIO_HEADERS,
         _build_unresolved_precio_rows(inputs.unresolved_precio, inputs.fecha_hasta),
     )
+
+    # Decision 19 — diagnostic parallel-run comparison. Placed BEFORE the
+    # final FACTURACION/DESCUENTOS block so that block's TOTAL GENERAL row
+    # stays the sheet's LAST row (RF-10).
+    comparison_rows, both_present_count = _build_precio_comparison_rows(
+        inputs.wapi_enriched, inputs.tolerance
+    )
+    comparison_title = (
+        "COMPARACION PRECIO: TERNA vs COMPROBANTE "
+        f"({len(comparison_rows)} filas difieren de {both_present_count} con ambos precios)"
+    )
+    row = _write_block(ws, row, comparison_title, _PRECIO_COMPARISON_HEADERS, comparison_rows)
 
     # Last section: the sheet MUST end with the TOTAL GENERAL row (RF-10).
     ws.cell(row, 1, "RECONCILIACION FACTURACION / DESCUENTOS (RF-11)")

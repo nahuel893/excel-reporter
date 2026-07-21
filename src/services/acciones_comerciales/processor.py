@@ -56,6 +56,7 @@ from src.services.acciones_comerciales.constants import (
     COL_DESCUENTO,
     COL_MVB,
     COL_PRECIO_FINAL,
+    COL_PRECIO_FINAL_COMPROBANTE,
     COL_SUCURSAL,
     COL_TIPO_DESCUENTO,
     COL_TOTAL2,
@@ -152,6 +153,40 @@ def build_precio_lookup(aexcel_data: pd.DataFrame) -> dict[tuple, Any]:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Decision 19 — comprobante-keyed diagnostic price lookup (BASE-control
+# ONLY parallel-run comparison; never feeds the authoritative PRECIO FINAL)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def build_precio_comprobante_lookup(df_lineas: pd.DataFrame) -> dict[tuple, Any]:
+    """Build the exact-match ``(Comprobante, Código) -> Precio`` diagnostic
+    lookup from the comprobante-keyed gold line extraction
+    (``DataLoader.get_comprobante_precio``, Decision 19).
+
+    3.41% of (Comprobante, Código) keys span more than one fact_ventas line
+    (measured 2026-07-21) — SAME deterministic-pick discipline as the terna
+    grain-collapse (Decision 14, ``gold_source.collapse_to_terna_grain``):
+    the ACTUAL value of the line with the greatest ``Cantidades Totales``
+    wins; ties break on the greatest ``Precio``. NEVER a blended/averaged
+    value.
+
+    Parallel-run comparison artifact ONLY (Decision 19) — this lookup never
+    feeds the authoritative terna-based PRECIO FINAL (RF-05)."""
+    if df_lineas.empty:
+        return {}
+    sort_cols = ["Comprobante", "Código", "Cantidades Totales", "Precio"]
+    ascending = [True, True, False, False]
+    ordered = df_lineas.sort_values(by=sort_cols, ascending=ascending, kind="mergesort")
+    picked = ordered.groupby(["Comprobante", "Código"], sort=False).head(1)
+    return {
+        (comprobante, codigo): precio
+        for comprobante, codigo, precio in zip(
+            picked["Comprobante"], picked["Código"], picked["Precio"]
+        )
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # RF-07 — sucursal -> supervisor mapping loader (config-owned)
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -197,11 +232,25 @@ def enrich_wapi(
     sucursal_por_cliente: Mapping[Any, str],
     precio_por_terna: Mapping[tuple, Any],
     supervisor_por_sucursal: Mapping[str, str],
+    precio_comprobante_por_clave: Mapping[tuple, Any] | None = None,
 ) -> EnrichedWapiResult:
     """Append the derived V:AD columns to the raw wapi frame (RF-04..RF-08).
 
-    All three lookups are passed in as plain mappings so the transform is a
-    pure, database-free pandas operation (S3 wires the live sources)."""
+    All three required lookups are passed in as plain mappings so the
+    transform is a pure, database-free pandas operation (S3 wires the live
+    sources).
+
+    ``precio_comprobante_por_clave`` (Decision 19, optional, default None) —
+    the comprobante-keyed diagnostic price lookup
+    (``build_precio_comprobante_lookup``). When provided, appends a TRAILING
+    ``PRECIO FINAL (comprobante)`` column (AFTER every RF-04..RF-08 derived
+    column, never inserted among them) via an exact ``(Comprobante,
+    Artículo Distribuidora)`` match — same 1:1-no-fabrication rule as the
+    terna PRECIO FINAL (NaN when absent, never a blend). When ``None``, the
+    column is still present but all-NaN, so downstream consumers (the BASE
+    control wapi sheet / reconciliation comparison section) never need to
+    branch on its absence. BASE-control-ONLY diagnostic — this NEVER
+    disturbs the authoritative terna PRECIO FINAL/Total2/Descuento."""
     enriched = wapi.copy()
 
     # RF-04 SUCURSAL — fresh lookup; unmatched client -> NaN.
@@ -275,6 +324,22 @@ def enrich_wapi(
         TIPO_DESCUENTO_SIN_CARGO if _is_blank(v) else TIPO_DESCUENTO_DESCUENTOS
         for v in enriched["Descuento %"]
     ]
+
+    # Decision 19 — diagnostic-only PRECIO FINAL (comprobante). TRAILING
+    # column, appended AFTER every RF-04..RF-08 derived column so it never
+    # shifts the Phase-2 V:AD informe layout (DERIVED_WAPI_COLUMNS stays
+    # untouched). Exact (Comprobante, Artículo Distribuidora) match; no
+    # match -> NaN (same 1:1-no-fabrication rule as the terna PRECIO FINAL).
+    if precio_comprobante_por_clave is not None:
+        comp_lookup = dict(precio_comprobante_por_clave)
+        enriched[COL_PRECIO_FINAL_COMPROBANTE] = [
+            comp_lookup.get((str(comprobante).strip(), articulo), float("nan"))
+            for comprobante, articulo in zip(
+                enriched["Comprobante"], enriched["Artículo Distribuidora"]
+            )
+        ]
+    else:
+        enriched[COL_PRECIO_FINAL_COMPROBANTE] = float("nan")
 
     unresolved_sucursal = enriched[enriched[COL_SUCURSAL].isna()].copy()
     unresolved_precio = enriched[enriched[COL_PRECIO_FINAL].isna()].copy()

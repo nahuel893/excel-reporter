@@ -30,13 +30,16 @@ from src.services.acciones_comerciales.constants import (
     COL_DESCUENTO,
     COL_MVB,
     COL_PRECIO_FINAL,
+    COL_PRECIO_FINAL_COMPROBANTE,
     COL_SUCURSAL,
     COL_TIPO_DESCUENTO,
     COL_TOTAL2,
     COL_ZONA,
+    DERIVED_WAPI_COLUMNS,
 )
 from src.services.acciones_comerciales.processor import (
     EnrichedWapiResult,
+    build_precio_comprobante_lookup,
     build_precio_lookup,
     classify_mvb,
     enrich_wapi,
@@ -120,6 +123,7 @@ def _enrich(
     sucursal_por_cliente=None,
     precio_por_terna=None,
     supervisor_por_sucursal=None,
+    precio_comprobante_por_clave=None,
 ) -> EnrichedWapiResult:
     if sucursal_por_cliente is None:
         sucursal_por_cliente = {100: "CASA CENTRAL"}
@@ -132,6 +136,7 @@ def _enrich(
         sucursal_por_cliente=sucursal_por_cliente,
         precio_por_terna=precio_por_terna,
         supervisor_por_sucursal=supervisor_por_sucursal,
+        precio_comprobante_por_clave=precio_comprobante_por_clave,
     )
 
 
@@ -395,3 +400,138 @@ class TestSupervisorMappingLoader:
         assert "CASA CENTRAL" in mapping
         assert isinstance(mapping["CASA CENTRAL"], str)
         assert mapping["CASA CENTRAL"]  # non-empty supervisor name
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Decision 19 — build_precio_comprobante_lookup: comprobante-keyed
+# diagnostic price lookup (BASE-control-ONLY parallel-run comparison).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _comp_line(comprobante="FCVTAA000300850740", codigo=900, precio=50.0, cantidad=5.0) -> dict:
+    return {
+        "Comprobante": comprobante,
+        "Código": codigo,
+        "Precio": precio,
+        "Cantidades Totales": cantidad,
+    }
+
+
+class TestBuildPrecioComprobanteLookup:
+    def test_single_line_exact_match(self):
+        df = pd.DataFrame([_comp_line(comprobante="A-1", codigo=900, precio=50.0)])
+        lookup = build_precio_comprobante_lookup(df)
+        assert lookup[("A-1", 900)] == 50.0
+
+    def test_multi_line_key_picks_greatest_cantidad_never_averaged(self):
+        """3.41% of (Comprobante, Código) keys span >1 line (Decision 19) —
+        SAME discipline as the terna pick: the ACTUAL value of the greatest
+        Cantidades Totales line wins, never a blend/average."""
+        df = pd.DataFrame(
+            [
+                _comp_line(comprobante="A-1", codigo=900, precio=10.0, cantidad=2.0),
+                _comp_line(comprobante="A-1", codigo=900, precio=20.0, cantidad=8.0),
+            ]
+        )
+        lookup = build_precio_comprobante_lookup(df)
+        assert lookup[("A-1", 900)] == 20.0
+        assert lookup[("A-1", 900)] != 15.0  # never an average
+
+    def test_tie_break_greatest_precio_when_cantidad_tied(self):
+        df = pd.DataFrame(
+            [
+                _comp_line(comprobante="A-1", codigo=900, precio=10.0, cantidad=5.0),
+                _comp_line(comprobante="A-1", codigo=900, precio=25.0, cantidad=5.0),
+            ]
+        )
+        lookup = build_precio_comprobante_lookup(df)
+        assert lookup[("A-1", 900)] == 25.0
+
+    def test_distinct_keys_kept_separate(self):
+        df = pd.DataFrame(
+            [
+                _comp_line(comprobante="A-1", codigo=900, precio=10.0),
+                _comp_line(comprobante="A-1", codigo=901, precio=20.0),
+                _comp_line(comprobante="B-2", codigo=900, precio=30.0),
+            ]
+        )
+        lookup = build_precio_comprobante_lookup(df)
+        assert lookup[("A-1", 900)] == 10.0
+        assert lookup[("A-1", 901)] == 20.0
+        assert lookup[("B-2", 900)] == 30.0
+
+    def test_empty_dataframe_returns_empty_dict(self):
+        df = pd.DataFrame(columns=["Comprobante", "Código", "Precio", "Cantidades Totales"])
+        assert build_precio_comprobante_lookup(df) == {}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Decision 19 — enrich_wapi's diagnostic PRECIO FINAL (comprobante) column
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestPrecioFinalComprobanteDiagnosticColumn:
+    def test_populated_by_exact_comprobante_articulo_match(self):
+        result = _enrich(
+            [_wapi_row(articulo_distribuidora=900)],
+            precio_comprobante_por_clave={("FC-1", 900): 55.0},
+        )
+        assert result.data.iloc[0][COL_PRECIO_FINAL_COMPROBANTE] == 55.0
+
+    def test_nan_when_no_comprobante_match(self):
+        result = _enrich(
+            [_wapi_row(articulo_distribuidora=900)],
+            precio_comprobante_por_clave={("FC-1", 901): 55.0},  # different articulo
+        )
+        assert pd.isna(result.data.iloc[0][COL_PRECIO_FINAL_COMPROBANTE])
+
+    def test_column_all_nan_when_param_not_provided(self):
+        result = _enrich([_wapi_row(articulo_distribuidora=900)])
+        assert pd.isna(result.data.iloc[0][COL_PRECIO_FINAL_COMPROBANTE])
+
+    def test_whitespace_in_wapi_comprobante_normalized_for_match(self):
+        """Decision 19 S3 wiring note: Comprobante is normalized (str/strip)
+        for the match — this is defensive on the enrich_wapi side even when
+        the service layer already normalizes upstream."""
+        rows = [_wapi_row(articulo_distribuidora=900)]
+        rows[0]["Comprobante"] = "  FC-1  "
+        result = enrich_wapi(
+            _wapi_df(rows),
+            sucursal_por_cliente={100: "CASA CENTRAL"},
+            precio_por_terna={("2026-07-01", 100, 900): 50.0},
+            supervisor_por_sucursal={"CASA CENTRAL": "Antonio Cabrerizo"},
+            precio_comprobante_por_clave={("FC-1", 900): 55.0},
+        )
+        assert result.data.iloc[0][COL_PRECIO_FINAL_COMPROBANTE] == 55.0
+
+    def test_never_blended_actual_value_only(self):
+        result = _enrich(
+            [_wapi_row(articulo_distribuidora=900)],
+            precio_comprobante_por_clave={("FC-1", 900): 73.33},
+        )
+        assert result.data.iloc[0][COL_PRECIO_FINAL_COMPROBANTE] == 73.33
+
+    def test_terna_precio_final_descuento_and_column_order_unchanged(self):
+        """Providing the new param must NOT disturb the existing terna
+        PRECIO FINAL / Descuento values, nor the DERIVED_WAPI_COLUMNS order
+        (the diagnostic column is a TRAILING addition, never inserted)."""
+        baseline = _enrich([_wapi_row(cantidad=20.0, descuento_pct=10.0)])
+        with_comp = _enrich(
+            [_wapi_row(cantidad=20.0, descuento_pct=10.0)],
+            precio_comprobante_por_clave={("FC-1", 900): 999.0},
+        )
+
+        baseline_row = baseline.data.iloc[0]
+        comp_row = with_comp.data.iloc[0]
+        assert comp_row[COL_PRECIO_FINAL] == baseline_row[COL_PRECIO_FINAL]
+        assert comp_row[COL_DESCUENTO] == baseline_row[COL_DESCUENTO]
+        assert comp_row[COL_TOTAL2] == baseline_row[COL_TOTAL2]
+
+        # every DERIVED_WAPI_COLUMNS entry keeps its relative position; the
+        # diagnostic column is appended strictly AFTER all of them.
+        cols = list(with_comp.data.columns)
+        derived_positions = [cols.index(c) for c in DERIVED_WAPI_COLUMNS]
+        assert derived_positions == sorted(derived_positions)
+        comp_col_pos = cols.index(COL_PRECIO_FINAL_COMPROBANTE)
+        assert comp_col_pos > max(derived_positions)
+        assert COL_PRECIO_FINAL_COMPROBANTE not in DERIVED_WAPI_COLUMNS

@@ -29,6 +29,10 @@ import pandas as pd
 import pytest
 from openpyxl import load_workbook
 
+from src.services.acciones_comerciales.constants import (
+    COL_PRECIO_FINAL,
+    COL_PRECIO_FINAL_COMPROBANTE,
+)
 from src.services.acciones_comerciales.gold_source import MultiPriceTerna
 from src.services.acciones_comerciales.writers.base_control import (
     SHEET_ACC_GEN,
@@ -40,7 +44,9 @@ from src.services.acciones_comerciales.writers.base_control import (
     TOTAL_GENERAL_LABEL,
     _CLASIFICACION_DESFASAJE,
     _CLASIFICACION_REVISAR,
+    _PRECIO_COMPARISON_HEADERS,
     _UNRESOLVED_PRECIO_HEADERS,
+    _build_precio_comparison_rows,
     _build_unresolved_precio_rows,
     ReconciliationInputs,
     build_base_control_workbook,
@@ -149,6 +155,12 @@ def _wapi_enriched_df() -> pd.DataFrame:
     # RF-04's SUCURSAL is a BARE name (spec scenario: SUCURSAL = "CASA
     # CENTRAL", no id prefix) — a DIFFERENT convention from aexcel's own
     # "{id} - {DESC}" Sucursal field used above.
+    #
+    # Decision 19: both diagnostic price columns are also present here.
+    # Row 1 (CASA CENTRAL) has matching terna/comprobante prices (within
+    # tolerance) — excluded from the COMPARACION PRECIO section. Row 2
+    # (SUCURSAL CAFAYATE) DIFFERS by 5.0 — the one row that section must
+    # surface.
     return pd.DataFrame(
         [
             {
@@ -157,6 +169,11 @@ def _wapi_enriched_df() -> pd.DataFrame:
                 "Cantidad": 10.0,
                 "Total2": 500.0,
                 "Descuento": 90.0,
+                "Comprobante": "FCVTAA000300850740",
+                "Cod. Cliente": 100,
+                "Artículo Distribuidora": 900,
+                COL_PRECIO_FINAL: 50.0,
+                COL_PRECIO_FINAL_COMPROBANTE: 50.0,
             },
             {
                 "Fecha": "2026-07-20",
@@ -164,6 +181,11 @@ def _wapi_enriched_df() -> pd.DataFrame:
                 "Cantidad": 5.0,
                 "Total2": 250.0,
                 "Descuento": 60.0,
+                "Comprobante": "FCVTAA000300850999",
+                "Cod. Cliente": 101,
+                "Artículo Distribuidora": 901,
+                COL_PRECIO_FINAL: 60.0,
+                COL_PRECIO_FINAL_COMPROBANTE: 65.0,
             },
         ]
     )
@@ -437,6 +459,140 @@ class TestReconciliationUnresolvedSections:
             903,
             "PROMO DOS",
             "Desfasaje de carga (dia en curso)",
+        ]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Decision 19 — COMPARACION PRECIO: TERNA vs COMPROBANTE section
+# (BASE-control-ONLY parallel-run comparison; placed BEFORE the final
+# FACTURACION/DESCUENTOS block, which must remain the sheet's last section).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestReconciliationPrecioComparisonSection:
+    def test_comparison_section_lists_only_the_differing_row_with_count(self, tmp_path):
+        path = _build_workbook_path(tmp_path)
+        wb = load_workbook(str(path))
+        ws = wb[SHEET_RECONCILIACION]
+
+        title_row = None
+        for r in range(1, ws.max_row + 1):
+            value = ws.cell(r, 1).value
+            if isinstance(value, str) and value.startswith("COMPARACION PRECIO"):
+                title_row = r
+                break
+        assert title_row is not None, "COMPARACION PRECIO section title not found"
+        assert "1 filas difieren de 2 con ambos precios" in ws.cell(title_row, 1).value
+
+        header_row = title_row + 1
+        headers = [ws.cell(header_row, c).value for c in range(1, 7)]
+        assert headers == _PRECIO_COMPARISON_HEADERS
+        assert headers == [
+            "Comprobante",
+            "Cod. Cliente",
+            "Artículo Distribuidora",
+            "PRECIO FINAL (terna)",
+            "PRECIO FINAL (comprobante)",
+            "Delta",
+        ]
+
+        data_row = header_row + 1
+        values = [ws.cell(data_row, c).value for c in range(1, 7)]
+        assert values[0] == "FCVTAA000300850999"
+        assert values[1] == 101
+        assert values[2] == 901
+        assert values[3] == 60.0
+        assert values[4] == 65.0
+        assert values[5] == pytest.approx(-5.0)
+
+    def test_section_sits_before_the_final_facturacion_descuentos_block(self, tmp_path):
+        path = _build_workbook_path(tmp_path)
+        wb = load_workbook(str(path))
+        ws = wb[SHEET_RECONCILIACION]
+
+        comparison_title_row = None
+        for r in range(1, ws.max_row + 1):
+            value = ws.cell(r, 1).value
+            if isinstance(value, str) and value.startswith("COMPARACION PRECIO"):
+                comparison_title_row = r
+                break
+        facturacion_title_row = _find_row(ws, "RECONCILIACION FACTURACION / DESCUENTOS (RF-11)")
+
+        assert comparison_title_row < facturacion_title_row
+        # RF-10: the sheet's LAST row must still be the FACTURACION/DESCUENTOS
+        # TOTAL GENERAL row — the new section must never displace it.
+        assert ws.cell(ws.max_row, 1).value == TOTAL_GENERAL_LABEL
+        assert facturacion_title_row < ws.max_row
+
+
+class TestBuildPrecioComparisonRows:
+    def test_only_rows_with_both_prices_and_delta_over_tolerance_are_listed(self):
+        df = pd.DataFrame(
+            [
+                {
+                    "Comprobante": "A",
+                    "Cod. Cliente": 1,
+                    "Artículo Distribuidora": 900,
+                    COL_PRECIO_FINAL: 50.0,
+                    COL_PRECIO_FINAL_COMPROBANTE: 50.0,
+                },
+                {
+                    "Comprobante": "B",
+                    "Cod. Cliente": 2,
+                    "Artículo Distribuidora": 901,
+                    COL_PRECIO_FINAL: 60.0,
+                    COL_PRECIO_FINAL_COMPROBANTE: 65.0,
+                },
+                {
+                    "Comprobante": "C",
+                    "Cod. Cliente": 3,
+                    "Artículo Distribuidora": 902,
+                    COL_PRECIO_FINAL: float("nan"),
+                    COL_PRECIO_FINAL_COMPROBANTE: 10.0,
+                },
+            ]
+        )
+        rows, both_present = _build_precio_comparison_rows(df, 0.01)
+        assert both_present == 2  # A and B have both prices; C is excluded (NaN terna)
+        assert len(rows) == 1
+        assert rows[0][0] == "B"
+        assert rows[0][-1] == pytest.approx(-5.0)
+
+    def test_within_tolerance_excluded(self):
+        df = pd.DataFrame(
+            [
+                {
+                    "Comprobante": "A",
+                    "Cod. Cliente": 1,
+                    "Artículo Distribuidora": 900,
+                    COL_PRECIO_FINAL: 50.0,
+                    COL_PRECIO_FINAL_COMPROBANTE: 50.005,
+                }
+            ]
+        )
+        rows, both_present = _build_precio_comparison_rows(df, 0.01)
+        assert both_present == 1
+        assert rows == []
+
+    def test_missing_required_columns_returns_empty(self):
+        df = pd.DataFrame([{"Fecha": "2026-07-01"}])
+        rows, both_present = _build_precio_comparison_rows(df, 0.01)
+        assert rows == []
+        assert both_present == 0
+
+    def test_empty_dataframe_returns_empty(self):
+        rows, both_present = _build_precio_comparison_rows(pd.DataFrame(), 0.01)
+        assert rows == []
+        assert both_present == 0
+
+    def test_headers_constant_matches_expected_order(self):
+        assert _PRECIO_COMPARISON_HEADERS == [
+            "Comprobante",
+            "Cod. Cliente",
+            "Artículo Distribuidora",
+            "PRECIO FINAL (terna)",
+            "PRECIO FINAL (comprobante)",
+            "Delta",
         ]
 
 

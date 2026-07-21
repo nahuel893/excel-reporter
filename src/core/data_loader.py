@@ -2734,6 +2734,51 @@ class DataLoader:
             {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
         )
 
+    def get_comprobante_precio(
+        self, fecha_desde: str, fecha_hasta: str
+    ) -> pd.DataFrame:
+        """Line-level gold extraction backing the comprobante-keyed
+        diagnostic price lookup (Decision 19 — parallel-run comparison,
+        BASE-control-ONLY; never feeds the authoritative terna-based
+        PRECIO FINAL).
+
+        Returns ONE ROW PER fact_ventas LINE (NOT pre-aggregated), carrying
+        a reconstructed ``Comprobante`` key + article + abs price + cantidad.
+        The (Comprobante, Código) grain-collapse — a deterministic pick,
+        SAME discipline as the terna grain-collapse (Decision 14) — is
+        performed downstream in
+        ``src.services.acciones_comerciales.processor.build_precio_comprobante_lookup``,
+        NOT here — this method's only job is the read-only fetch.
+
+        Comprobante decomposition (verified 2026-07-21 against the real
+        wapi export): wapi ``Comprobante`` e.g. ``"FCVTAA000300850740"`` =
+        ``id_documento`` (5 chars, e.g. ``"FCVTA"``) + ``letra`` (1 char,
+        e.g. ``"A"``) + ``serie`` (4 digits, zero-padded) + ``nro_doc`` (8
+        digits, zero-padded). Prefixes seen: FCVTAA/FCVTAB/DVVTAA/DVVTAB.
+        This decomposition reproduces the wapi Comprobante string exactly.
+
+        Precio uses ``abs(precio_unitario_bruto)`` — same sign convention
+        as ``get_aexcel_equivalent`` (Decision 14): gold signs
+        credits/returns on the price, the wapi/aexcel side keeps price
+        positive.
+
+        Read-only SELECT — issues no DDL against gold (RF-25).
+        """
+        return self.execute_query(
+            """
+            SELECT
+                fv.id_documento || fv.letra || lpad(fv.serie::text, 4, '0')
+                    || lpad(fv.nro_doc::text, 8, '0')   AS "Comprobante",
+                fv.id_articulo                          AS "Código",
+                abs(fv.precio_unitario_bruto)            AS "Precio",
+                fv.cantidades_total                      AS "Cantidades Totales"
+            FROM gold.fact_ventas fv
+            WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+              AND fv.anulado = false
+            """,
+            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
+
     def get_clientes_sucursal(self) -> pd.DataFrame:
         """Fresh Cod. Cliente -> Sucursal label map (RF-04) — replaces the
         engine's stale BG:BH snapshot.

@@ -41,6 +41,13 @@ DERIVED_WAPI_COLUMNS: list[str] = [
     COL_TIPO_DESCUENTO,
 ]
 
+# ── diagnostic-only comprobante-based price (Decision 19) ──
+# BASE-control-ONLY parallel-run comparison artifact — deliberately NOT part
+# of DERIVED_WAPI_COLUMNS/the Phase-2 V:AD informe contract above. enrich_wapi
+# appends this as a TRAILING column (after every RF-04..RF-08 derived column)
+# so it never shifts the informe's byte-for-byte positional paste.
+COL_PRECIO_FINAL_COMPROBANTE = "PRECIO FINAL (comprobante)"
+
 # ── mvb 3-tier classifier (RF-06) — case-sensitive FIND substrings ──
 # Order matters: first matching tier wins.
 MVB_TIERS: list[tuple[str, str]] = [

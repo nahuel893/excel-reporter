@@ -430,6 +430,68 @@ class TestGetClientesSucursalSQL:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Decision 19 — DataLoader.get_comprobante_precio() — comprobante-keyed
+# diagnostic price extraction (parallel-run comparison, BASE-control ONLY).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestGetComprobantePrecioSQL:
+    def test_comprobante_is_decomposed_from_id_documento_letra_serie_nro_doc(self):
+        """Verified decomposition (Decision 19): wapi Comprobante
+        "FCVTAA000300850740" = id_documento(5) + letra(1) + serie(4, lpad'0')
+        + nro_doc(8, lpad'0'). Reproduces the wapi Comprobante string exactly."""
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_comprobante_precio("2026-07-01", "2026-07-31")
+
+        sql, _ = loader.execute_query.call_args[0]
+        assert "fv.id_documento || fv.letra" in sql
+        assert "lpad(fv.serie::text, 4, '0')" in sql
+        assert "lpad(fv.nro_doc::text, 8, '0')" in sql
+        assert 'AS "Comprobante"' in sql
+
+    def test_selects_codigo_abs_precio_and_cantidad(self):
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_comprobante_precio("2026-07-01", "2026-07-31")
+
+        sql, _ = loader.execute_query.call_args[0]
+        assert 'fv.id_articulo' in sql and 'AS "Código"' in sql
+        assert 'abs(fv.precio_unitario_bruto)' in sql and 'AS "Precio"' in sql
+        assert 'fv.cantidades_total' in sql and 'AS "Cantidades Totales"' in sql
+
+    def test_anulado_false_filter(self):
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_comprobante_precio("2026-07-01", "2026-07-31")
+
+        sql, _ = loader.execute_query.call_args[0]
+        assert "anulado = false" in sql
+
+    def test_params_are_the_date_range(self):
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_comprobante_precio("2026-07-01", "2026-07-31")
+
+        _, params = loader.execute_query.call_args[0]
+        assert params == {"fecha_desde": "2026-07-01", "fecha_hasta": "2026-07-31"}
+
+    def test_no_ddl_keywords_in_sql(self):
+        """RF-25: zero DDL against production gold."""
+        loader = _make_loader_with_mock_engine(pd.DataFrame())
+        loader.get_comprobante_precio("2026-07-01", "2026-07-31")
+
+        sql, _ = loader.execute_query.call_args[0]
+        upper = sql.upper()
+        for forbidden in ("CREATE ", "ALTER ", "DROP ", "TRUNCATE ", "INSERT ", "UPDATE ", "DELETE "):
+            assert forbidden not in upper, f"DDL/DML keyword {forbidden!r} found in comprobante-precio SQL"
+
+    def test_returns_execute_query_result(self):
+        expected = pd.DataFrame({"Comprobante": ["FCVTAA000300850740"]})
+        loader = _make_loader_with_mock_engine(expected)
+
+        result = loader.get_comprobante_precio("2026-07-01", "2026-07-31")
+
+        assert result is expected
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # S3 — gold_source.load_sucursal_por_cliente() — orchestration wrapper
 # ─────────────────────────────────────────────────────────────────────────
 

@@ -142,12 +142,26 @@ def _aexcel_line(
     }
 
 
-def _patch_gold(monkeypatch, aexcel_lines: list[dict], sucursal_rows: list[tuple]) -> None:
-    """Patch DataLoader.get_aexcel_equivalent/get_clientes_sucursal at the
-    CLASS level — the service's default (uninjected) DataLoader never
-    touches a real engine/connection, satisfying the zero-live-DB rule."""
+def _patch_gold(
+    monkeypatch,
+    aexcel_lines: list[dict],
+    sucursal_rows: list[tuple],
+    comprobante_lines: list[dict] | None = None,
+) -> None:
+    """Patch DataLoader.get_aexcel_equivalent/get_clientes_sucursal/
+    get_comprobante_precio at the CLASS level — the service's default
+    (uninjected) DataLoader never touches a real engine/connection,
+    satisfying the zero-live-DB rule.
+
+    ``comprobante_lines`` (Decision 19, optional) — fake rows for the
+    comprobante-keyed diagnostic price lookup. Defaults to empty (no
+    diagnostic matches), which is a no-op for every pre-existing test."""
     aexcel_df = pd.DataFrame(aexcel_lines)
     sucursal_df = pd.DataFrame(sucursal_rows, columns=["Cod. Cliente", "Sucursal"])
+    comprobante_df = pd.DataFrame(
+        comprobante_lines or [],
+        columns=["Comprobante", "Código", "Precio", "Cantidades Totales"],
+    )
 
     def _fake_aexcel(self, fecha_desde, fecha_hasta):
         return aexcel_df.copy()
@@ -155,8 +169,12 @@ def _patch_gold(monkeypatch, aexcel_lines: list[dict], sucursal_rows: list[tuple
     def _fake_sucursal(self):
         return sucursal_df.copy()
 
+    def _fake_comprobante(self, fecha_desde, fecha_hasta):
+        return comprobante_df.copy()
+
     monkeypatch.setattr(DataLoader, "get_aexcel_equivalent", _fake_aexcel)
     monkeypatch.setattr(DataLoader, "get_clientes_sucursal", _fake_sucursal)
+    monkeypatch.setattr(DataLoader, "get_comprobante_precio", _fake_comprobante)
 
 
 def _default_gold_and_wapi(tmp_path, monkeypatch) -> Path:
@@ -366,6 +384,86 @@ class TestFullPipelineWiring:
         assert "TOTAL GENERAL" in col_a_values
         # the sheet ends with the reconciliation's own TOTAL GENERAL row.
         assert ws.cell(ws.max_row, 1).value == "TOTAL GENERAL"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Decision 19 — comprobante-based diagnostic price, wired end-to-end
+# through the service (BASE-control ONLY parallel-run comparison).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestPrecioComprobanteDiagnosticWiring:
+    def test_diagnostic_column_populates_and_terna_precio_final_stays_authoritative(
+        self, tmp_path, monkeypatch
+    ):
+        """The comprobante lookup feeds a TRAILING diagnostic column without
+        disturbing the terna-based PRECIO FINAL (the wapi row's Comprobante
+        is "FC-1"/Artículo Distribuidora 900, matching the fake comprobante
+        line; its diagnostic price DIFFERS from the terna price, exercising
+        the COMPARACION PRECIO section too)."""
+        _patch_gold(
+            monkeypatch,
+            aexcel_lines=[_aexcel_line(precio=73.33)],
+            sucursal_rows=[(100, "CASA CENTRAL")],
+            comprobante_lines=[
+                {"Comprobante": "FC-1", "Código": 900, "Precio": 80.0, "Cantidades Totales": 10.0}
+            ],
+        )
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        _write_wapi_fixture(input_dir / "wapi.xlsx", [_wapi_row(articulo_distribuidora=900)])
+
+        with patch("config.settings.DATA_OUTPUT", tmp_path / "out"):
+            service = AccionesComercialesService()
+            config = AccionesComercialesConfig(
+                fecha_desde="2026-07-01",
+                fecha_hasta="2026-07-31",
+                input_dir=str(input_dir),
+                nombre_archivo="BASE control TEST",
+            )
+            result = service.generar_reporte(config)
+
+        wb = load_workbook(str(result.ruta_archivo))
+        ws = wb["wapi"]
+        headers = [c.value for c in ws[1]]
+        precio_terna_col = headers.index("PRECIO FINAL ") + 1
+        precio_comp_col = headers.index("PRECIO FINAL (comprobante)") + 1
+        assert ws.cell(2, precio_terna_col).value == 73.33  # terna value UNCHANGED
+        assert ws.cell(2, precio_comp_col).value == 80.0
+
+        recon_ws = wb["Reconciliacion"]
+        title_row = None
+        for r in range(1, recon_ws.max_row + 1):
+            value = recon_ws.cell(r, 1).value
+            if isinstance(value, str) and value.startswith("COMPARACION PRECIO"):
+                title_row = r
+                break
+        assert title_row is not None
+        assert "1 filas difieren de 1 con ambos precios" in recon_ws.cell(title_row, 1).value
+        # the sheet still ends with the FACTURACION/DESCUENTOS TOTAL GENERAL.
+        assert recon_ws.cell(recon_ws.max_row, 1).value == "TOTAL GENERAL"
+
+    def test_empty_comprobante_data_leaves_diagnostic_column_all_blank(self, tmp_path, monkeypatch):
+        """Default fixture (no comprobante_lines) — the diagnostic column
+        must still exist (all-NaN) and never crash the pipeline."""
+        input_dir = _default_gold_and_wapi(tmp_path, monkeypatch)
+
+        with patch("config.settings.DATA_OUTPUT", tmp_path / "out"):
+            service = AccionesComercialesService()
+            config = AccionesComercialesConfig(
+                fecha_desde="2026-07-01",
+                fecha_hasta="2026-07-31",
+                input_dir=str(input_dir),
+                nombre_archivo="BASE control TEST",
+            )
+            result = service.generar_reporte(config)
+
+        wb = load_workbook(str(result.ruta_archivo))
+        ws = wb["wapi"]
+        headers = [c.value for c in ws[1]]
+        assert "PRECIO FINAL (comprobante)" in headers
+        precio_comp_col = headers.index("PRECIO FINAL (comprobante)") + 1
+        assert ws.cell(2, precio_comp_col).value in (None, "")
 
 
 # ─────────────────────────────────────────────────────────────────────────

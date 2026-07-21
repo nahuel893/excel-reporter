@@ -26,6 +26,16 @@ Artículo Distribuidora)``. Both date columns are normalized to the SAME
 ``YYYY-MM-DD`` string form (``_normalize_fecha_col``) before either lookup
 is built/used — otherwise a Timestamp-vs-string dtype mismatch would make
 every terna miss and PRECIO FINAL universally blank.
+
+Decision 19 (parallel-run comparison, BASE-control ONLY): alongside the
+authoritative terna-based PRECIO FINAL above, this service also loads a
+comprobante-keyed diagnostic price (``DataLoader.get_comprobante_precio`` +
+``processor.build_precio_comprobante_lookup``) and passes it into
+``enrich_wapi`` as the optional ``precio_comprobante_por_clave`` — it never
+replaces or influences the terna PRECIO FINAL/Total2/Descuento/pivots, it
+only feeds an extra diagnostic column + a BASE-control reconciliation
+comparison section. Both sides' ``Comprobante`` are normalized
+(``astype(str).str.strip()``) before the exact-match lookup is built.
 """
 from __future__ import annotations
 
@@ -51,6 +61,7 @@ from src.services.acciones_comerciales.pivots import (
     build_fact_net,
 )
 from src.services.acciones_comerciales.processor import (
+    build_precio_comprobante_lookup,
     build_precio_lookup,
     enrich_wapi,
     load_supervisor_por_sucursal,
@@ -121,18 +132,31 @@ class AccionesComercialesService(BaseService):
         wapi_raw = read_wapi(config.wapi_path).copy()
         if not wapi_raw.empty:
             wapi_raw[_WAPI_FECHA_COL] = _normalize_fecha_col(wapi_raw[_WAPI_FECHA_COL])
+            wapi_raw["Comprobante"] = wapi_raw["Comprobante"].astype(str).str.strip()
 
         # 3. Fresh lookups (RF-04, RF-05, RF-07).
         sucursal_por_cliente = load_sucursal_por_cliente(self.data_loader)
         supervisor_por_sucursal = load_supervisor_por_sucursal(ZONA_CONFIG_PATH)
         precio_por_terna = build_precio_lookup(aexcel_data)
 
-        # 4. Derived wapi columns (RF-04..RF-08).
+        # 3b. Decision 19 — comprobante-based diagnostic price (BASE-control
+        #     ONLY parallel-run comparison; never feeds the authoritative
+        #     terna-based PRECIO FINAL above).
+        comprobante_data = self.data_loader.get_comprobante_precio(
+            config.fecha_desde, config.fecha_hasta
+        )
+        if not comprobante_data.empty:
+            comprobante_data = comprobante_data.copy()
+            comprobante_data["Comprobante"] = comprobante_data["Comprobante"].astype(str).str.strip()
+        precio_comprobante_por_clave = build_precio_comprobante_lookup(comprobante_data)
+
+        # 4. Derived wapi columns (RF-04..RF-08 + Decision 19 diagnostic).
         enriched = enrich_wapi(
             wapi_raw,
             sucursal_por_cliente=sucursal_por_cliente,
             precio_por_terna=precio_por_terna,
             supervisor_por_sucursal=supervisor_por_sucursal,
+            precio_comprobante_por_clave=precio_comprobante_por_clave,
         )
 
         # 5. The 4 pivots (RF-09).
