@@ -6,7 +6,7 @@
     "avance-badie": {
         "ejecutar": true,
         "enviar": true,
-        "razon": "GO-LIVE (2026-07-20): envia el Excel por email a los 5 supervisores (CC Nahuel) Y las 25 imagenes por WhatsApp al grupo Preventa Salta, en cada corrida del daily (07:00). enviar_whatsapp:true en configs/avances_badie.json. Columna S de Multicategoria ocultada en el output (persiste in-place)."
+        "razon": "GO-LIVE PAUSADO (2026-07-21): enviar_whatsapp:false — envio de imagenes al grupo Preventa Salta SUSPENDIDO mientras se revisa un bug de cupo (ROBLES ORLANDO/FGUANTAY da 0 cupo por desajuste ruta->nombre en AvanceR; cupos huerfanos). Email a los 5 supervisores sigue activo. Reactivar tras validar cupos."
     },
     "avance-branca": {
         "ejecutar": true,
