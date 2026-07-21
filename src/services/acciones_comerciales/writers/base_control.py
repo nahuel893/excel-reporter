@@ -297,9 +297,10 @@ def _normalize_to_date(value: Any) -> dt.date | None:
     ``date`` / string) to a plain ``date`` for COMPARISON ONLY. Returns
     ``None`` when the value is missing/unparseable. Never mutates or
     reformats the original cell value (RF-23)."""
-    if value is None:
-        return None
-    if isinstance(value, float) and pd.isna(value):
+    if pd.isna(value):
+        # covers None, float NaN, and pandas NaT (NaT is itself a
+        # dt.datetime subclass whose own .date() returns NaT again, not a
+        # real date, so it MUST be caught here before the isinstance checks)
         return None
     if isinstance(value, dt.datetime):
         return value.date()
