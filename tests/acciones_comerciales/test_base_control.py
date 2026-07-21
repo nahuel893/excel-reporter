@@ -23,6 +23,8 @@ RED).
 """
 from __future__ import annotations
 
+import datetime as dt
+
 import pandas as pd
 import pytest
 from openpyxl import load_workbook
@@ -36,6 +38,10 @@ from src.services.acciones_comerciales.writers.base_control import (
     SHEET_RECONCILIACION,
     SHEET_WAPI,
     TOTAL_GENERAL_LABEL,
+    _CLASIFICACION_DESFASAJE,
+    _CLASIFICACION_REVISAR,
+    _UNRESOLVED_PRECIO_HEADERS,
+    _build_unresolved_precio_rows,
     ReconciliationInputs,
     build_base_control_workbook,
 )
@@ -183,7 +189,30 @@ def _unresolved_sucursal_df() -> pd.DataFrame:
 
 
 def _unresolved_precio_df() -> pd.DataFrame:
-    return pd.DataFrame([{"Cod. Cliente": 100, "Fecha": "2026-07-04", "Artículo Distribuidora": 902}])
+    # Row 1: Fecha == fecha_hasta ("2026-07-31") -> "dia en curso" (expected lag).
+    # Row 2: Fecha < fecha_hasta ("2026-07-04") -> "dia cerrado" (real problem).
+    # Deliberately ordered en-curso-first in the source to prove the writer
+    # SORTS dia-cerrado rows first, not merely preserves insertion order.
+    return pd.DataFrame(
+        [
+            {
+                "Fecha": "2026-07-31",
+                "Comprobante": "B-002",
+                "Cod. Cliente": 200,
+                "Razón Social": "CLIENTE DOS SA",
+                "Artículo Distribuidora": 903,
+                "Descripción Acción": "PROMO DOS",
+            },
+            {
+                "Fecha": "2026-07-04",
+                "Comprobante": "A-001",
+                "Cod. Cliente": 100,
+                "Razón Social": "CLIENTE UNO SA",
+                "Artículo Distribuidora": 902,
+                "Descripción Acción": "PROMO UNO",
+            },
+        ]
+    )
 
 
 def _build_workbook_path(tmp_path):
@@ -357,13 +386,138 @@ class TestReconciliationUnresolvedSections:
         row = _find_row(ws, 999, col=1)
         assert ws.cell(row, 2).value == "2026-07-03"
 
-    def test_unresolved_precio_rows_present(self, tmp_path):
+    def test_unresolved_precio_section_has_seven_column_header(self, tmp_path):
         path = _build_workbook_path(tmp_path)
         wb = load_workbook(str(path))
         ws = wb[SHEET_RECONCILIACION]
 
-        # both unresolved sections key on Cod. Cliente in col 1 — the precio
-        # section's flagged client is 100, distinct from the sucursal
-        # section's flagged client 999.
-        row = _find_row(ws, 100, col=1)
-        assert ws.cell(row, 2).value == "2026-07-04"
+        title_row = _find_row(ws, "FILAS NO RESUELTAS - PRECIO (RF-05)")
+        header_row = title_row + 1
+        headers = [ws.cell(header_row, c).value for c in range(1, 8)]
+        assert headers == [
+            "Fecha",
+            "Comprobante",
+            "Cod. Cliente",
+            "Razón Social",
+            "Artículo Distribuidora",
+            "Descripción Acción",
+            "Clasificacion",
+        ]
+
+    def test_unresolved_precio_rows_present_richer_columns_and_classified(self, tmp_path):
+        path = _build_workbook_path(tmp_path)
+        wb = load_workbook(str(path))
+        ws = wb[SHEET_RECONCILIACION]
+
+        title_row = _find_row(ws, "FILAS NO RESUELTAS - PRECIO (RF-05)")
+        header_row = title_row + 1
+
+        # dia-cerrado row (Fecha "2026-07-04" < fecha_hasta "2026-07-31") is
+        # sorted FIRST even though it was the SECOND row in the source df.
+        first_data_row = header_row + 1
+        values = [ws.cell(first_data_row, c).value for c in range(1, 8)]
+        assert values == [
+            "2026-07-04",
+            "A-001",
+            100,
+            "CLIENTE UNO SA",
+            902,
+            "PROMO UNO",
+            "REVISAR (dia cerrado)",
+        ]
+
+        # dia-en-curso row (Fecha "2026-07-31" == fecha_hasta) sorts SECOND.
+        second_data_row = header_row + 2
+        values = [ws.cell(second_data_row, c).value for c in range(1, 8)]
+        assert values == [
+            "2026-07-31",
+            "B-002",
+            200,
+            "CLIENTE DOS SA",
+            903,
+            "PROMO DOS",
+            "Desfasaje de carga (dia en curso)",
+        ]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# _build_unresolved_precio_rows — direct unit coverage of the classifier
+# and the row builder (Fecha/fecha_hasta type handling, sort order,
+# defensive missing-column handling).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _precio_row(**overrides) -> dict:
+    base = {
+        "Fecha": "2026-07-04",
+        "Comprobante": "A-001",
+        "Cod. Cliente": 100,
+        "Razón Social": "CLIENTE UNO SA",
+        "Artículo Distribuidora": 902,
+        "Descripción Acción": "PROMO UNO",
+    }
+    base.update(overrides)
+    return base
+
+
+class TestBuildUnresolvedPrecioRowsClassification:
+    def test_fecha_equals_fecha_hasta_string_is_dia_en_curso(self):
+        df = pd.DataFrame([_precio_row(Fecha="2026-07-31")])
+        rows = _build_unresolved_precio_rows(df, "2026-07-31")
+        assert rows[0][-1] == _CLASIFICACION_DESFASAJE
+
+    def test_fecha_before_fecha_hasta_string_is_dia_cerrado(self):
+        df = pd.DataFrame([_precio_row(Fecha="2026-07-04")])
+        rows = _build_unresolved_precio_rows(df, "2026-07-31")
+        assert rows[0][-1] == _CLASIFICACION_REVISAR
+
+    def test_fecha_hasta_none_classifies_everything_revisar(self):
+        df = pd.DataFrame([_precio_row(Fecha="2026-07-31")])
+        rows = _build_unresolved_precio_rows(df, None)
+        assert rows[0][-1] == _CLASIFICACION_REVISAR
+
+    def test_pandas_timestamp_fecha_compares_on_date_only(self):
+        df = pd.DataFrame([_precio_row(Fecha=pd.Timestamp("2026-07-31 08:30:00"))])
+        rows = _build_unresolved_precio_rows(df, "2026-07-31")
+        assert rows[0][-1] == _CLASIFICACION_DESFASAJE
+        # the Fecha CELL VALUE itself stays unchanged (RF-23 — no reformatting)
+        assert rows[0][0] == pd.Timestamp("2026-07-31 08:30:00")
+
+    def test_python_datetime_fecha_vs_date_fecha_hasta(self):
+        df = pd.DataFrame([_precio_row(Fecha=dt.datetime(2026, 7, 31, 23, 59))])
+        rows = _build_unresolved_precio_rows(df, dt.date(2026, 7, 31))
+        assert rows[0][-1] == _CLASIFICACION_DESFASAJE
+
+    def test_missing_columns_default_to_none_defensively(self):
+        df = pd.DataFrame([{"Fecha": "2026-07-04"}])
+        rows = _build_unresolved_precio_rows(df, "2026-07-31")
+        row = rows[0]
+        assert row[0] == "2026-07-04"
+        assert row[1] is None  # Comprobante missing
+        assert row[2] is None  # Cod. Cliente missing
+        assert row[-1] == _CLASIFICACION_REVISAR
+
+    def test_empty_dataframe_returns_no_rows(self):
+        assert _build_unresolved_precio_rows(pd.DataFrame(), "2026-07-31") == []
+
+    def test_sort_puts_dia_cerrado_before_dia_en_curso(self):
+        df = pd.DataFrame(
+            [
+                _precio_row(Fecha="2026-07-31", Comprobante="B-002"),  # dia en curso
+                _precio_row(Fecha="2026-07-04", Comprobante="A-001"),  # dia cerrado
+            ]
+        )
+        rows = _build_unresolved_precio_rows(df, "2026-07-31")
+        assert rows[0][-1] == _CLASIFICACION_REVISAR
+        assert rows[1][-1] == _CLASIFICACION_DESFASAJE
+
+    def test_headers_constant_matches_expected_order(self):
+        assert _UNRESOLVED_PRECIO_HEADERS == [
+            "Fecha",
+            "Comprobante",
+            "Cod. Cliente",
+            "Razón Social",
+            "Artículo Distribuidora",
+            "Descripción Acción",
+            "Clasificacion",
+        ]

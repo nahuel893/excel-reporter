@@ -17,7 +17,15 @@ Reconciliation sheet section order (RF-11), TOP to BOTTOM:
      candidate prices/Bonific, the picked value, the pick reason) that the
      RF-12 diff harness compares against the real aexcel file.
   3. FILAS NO RESUELTAS — SUCURSAL (RF-04) — unresolved dim_cliente lookups.
-  4. FILAS NO RESUELTAS — PRECIO (RF-05) — unresolved terna price lookups.
+  4. FILAS NO RESUELTAS — PRECIO (RF-05) — unresolved terna price lookups,
+     enriched with identifying columns (Comprobante, Razón Social,
+     Descripción Acción) and a "Clasificacion" column that separates
+     EXPECTED same-day lag ("Desfasaje de carga (dia en curso)", when the
+     row's Fecha equals the configured ``fecha_hasta``, since gold loads
+     throughout the day while wapi is exported later) from rows on an
+     already-closed day that need real investigation ("REVISAR (dia
+     cerrado)"). Rows are sorted so the "REVISAR" (closed-day) rows come
+     first, then the same-day-lag rows.
   5. RECONCILIACION FACTURACION / DESCUENTOS — per-SUCURSAL comparison of
      the aexcel-side ``Facturacion Neta``/``Descuentos`` sums against the
      wapi-side ``Descuento`` sum, by their CORRECT named pandas columns
@@ -32,6 +40,7 @@ value transform.
 """
 from __future__ import annotations
 
+import datetime as dt
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -105,6 +114,22 @@ _MULTI_PRECIO_HEADERS = [
 ]
 
 _UNRESOLVED_COLUMNS = ["Cod. Cliente", "Fecha", "Artículo Distribuidora"]
+
+# FILAS NO RESUELTAS - PRECIO (RF-05) — richer identifying columns + the
+# timing classification (dedicated headers/builder — NOT the generic
+# _UNRESOLVED_COLUMNS/_build_unresolved_rows used by the SUCURSAL section).
+_UNRESOLVED_PRECIO_SOURCE_COLUMNS = [
+    "Fecha",
+    "Comprobante",
+    "Cod. Cliente",
+    "Razón Social",
+    "Artículo Distribuidora",
+    "Descripción Acción",
+]
+_UNRESOLVED_PRECIO_HEADERS = _UNRESOLVED_PRECIO_SOURCE_COLUMNS + ["Clasificacion"]
+
+_CLASIFICACION_DESFASAJE = "Desfasaje de carga (dia en curso)"
+_CLASIFICACION_REVISAR = "REVISAR (dia cerrado)"
 
 _FECHA_RANGO_HEADERS = [
     "Fuente",
@@ -267,6 +292,73 @@ def _build_unresolved_rows(df: pd.DataFrame) -> list[list[Any]]:
     return df[present].reindex(columns=_UNRESOLVED_COLUMNS).values.tolist()
 
 
+def _normalize_to_date(value: Any) -> dt.date | None:
+    """Normalize a Fecha-like value (pandas ``Timestamp`` / ``datetime`` /
+    ``date`` / string) to a plain ``date`` for COMPARISON ONLY. Returns
+    ``None`` when the value is missing/unparseable. Never mutates or
+    reformats the original cell value (RF-23)."""
+    if value is None:
+        return None
+    if isinstance(value, float) and pd.isna(value):
+        return None
+    if isinstance(value, dt.datetime):
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return parsed.date()
+
+
+def _classify_unresolved_precio_row(fecha_value: Any, fecha_hasta: Any) -> str:
+    """RF-05 timing classification for a sin-cruce (unresolved PRECIO FINAL)
+    row: same-day as the configured window's last day is an EXPECTED
+    load-timing lag (gold loads throughout the day, wapi is exported
+    later); anything on an already-closed day is a real problem to
+    investigate. Compares on DATE only. When ``fecha_hasta`` is unknown
+    (``None``) every row is conservatively classified as needing review —
+    the current day cannot be identified."""
+    if fecha_hasta is None:
+        return _CLASIFICACION_REVISAR
+    row_date = _normalize_to_date(fecha_value)
+    hasta_date = _normalize_to_date(fecha_hasta)
+    if row_date is not None and hasta_date is not None and row_date == hasta_date:
+        return _CLASIFICACION_DESFASAJE
+    return _CLASIFICACION_REVISAR
+
+
+def _build_unresolved_precio_rows(df: pd.DataFrame, fecha_hasta: Any) -> list[list[Any]]:
+    """Build the FILAS NO RESUELTAS - PRECIO (RF-05) section rows: richer
+    identifying columns (Fecha, Comprobante, Cod. Cliente, Razón Social,
+    Artículo Distribuidora, Descripción Acción) pulled UNCHANGED from the
+    unresolved-precio wapi subset (blank/None when a column is missing,
+    defensively), plus a "Clasificacion" column. Sorted so "REVISAR (dia
+    cerrado)" rows come first, then "Desfasaje de carga (dia en curso)"
+    rows; stable within each group by Fecha then Comprobante."""
+    if df.empty:
+        return []
+
+    def _get(row: "pd.Series", col: str) -> Any:
+        return row[col] if col in df.columns else None
+
+    entries: list[tuple[int, str, str, int, list[Any]]] = []
+    for position, (_, row) in enumerate(df.iterrows()):
+        fecha_value = _get(row, "Fecha")
+        clasificacion = _classify_unresolved_precio_row(fecha_value, fecha_hasta)
+        data_row = [_get(row, col) for col in _UNRESOLVED_PRECIO_SOURCE_COLUMNS]
+        data_row.append(clasificacion)
+
+        priority = 0 if clasificacion == _CLASIFICACION_REVISAR else 1
+        normalized_fecha = _normalize_to_date(fecha_value)
+        sort_fecha = normalized_fecha.isoformat() if normalized_fecha is not None else str(fecha_value or "")
+        sort_comprobante = str(_get(row, "Comprobante") or "")
+        entries.append((priority, sort_fecha, sort_comprobante, position, data_row))
+
+    entries.sort(key=lambda entry: entry[:4])
+    return [entry[4] for entry in entries]
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # reconciliation — FACTURACION/DESCUENTOS delta section (RF-11, ends sheet)
 # ─────────────────────────────────────────────────────────────────────────
@@ -385,8 +477,8 @@ def _write_reconciliation_sheet(wb: Workbook, inputs: ReconciliationInputs) -> W
         ws,
         row,
         "FILAS NO RESUELTAS - PRECIO (RF-05)",
-        _UNRESOLVED_COLUMNS,
-        _build_unresolved_rows(inputs.unresolved_precio),
+        _UNRESOLVED_PRECIO_HEADERS,
+        _build_unresolved_precio_rows(inputs.unresolved_precio, inputs.fecha_hasta),
     )
 
     # Last section: the sheet MUST end with the TOTAL GENERAL row (RF-10).
