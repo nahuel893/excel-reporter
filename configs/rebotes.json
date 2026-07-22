@@ -14,6 +14,9 @@
                 {"hoja": "% Rebotes x Generico", "rango": "A1:K40", "renderer": "libreoffice"}
             ],
             "enviar_a": {
+                "Preventa Salta": {
+                    "via": ["whatsapp"]
+                },
                 "Gonzalo Farah": {
                     "via": ["whatsapp"]
                 },
