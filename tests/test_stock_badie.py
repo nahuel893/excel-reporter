@@ -26,10 +26,27 @@ from src.services.stock_badie.processor import (
     pivot_wide,
 )
 from src.services.stock_badie.workbook import (
-    DATA_START_ROW,
-    HEADER_ROW,
+    NUMBER_FORMAT,
+    _generico_labels,
     build_workbook,
+    compute_layout,
 )
+
+
+def _layout_for(wide_df: pd.DataFrame):
+    """Derive the SheetLayout a given wide_df will produce, the same way
+    build_workbook() does internally (n_genericos = distinct GENERICO
+    labels present, n_articulos = row count) — tests must never hardcode
+    row numbers, since the per-generico band (RF-08) shifts the
+    header/data/TOTAL GENERAL rows depending on wide_df's shape."""
+    # Reuse the production band-label logic so this test-derived layout can
+    # never disagree with build_workbook on the band-row count — notably for
+    # blank GENERICO rows, which _generico_labels excludes ("") but a plain
+    # nunique() would count as a distinct band row (off-by-one landmine).
+    return compute_layout(
+        n_genericos=len(_generico_labels(wide_df)),
+        n_articulos=len(wide_df),
+    )
 
 
 # ── RF-01: get_venta_mes ─────────────────────────────────────────────────────
@@ -395,11 +412,11 @@ class TestBuildUniverse:
 # Strict TDD — Phase 2, Task 2.3 (RED) / 2.4 (GREEN) of sdd/stock-badie PR2.
 
 
-def _universe_row(id_articulo, sucursal, stock_bultos, venta_bultos, estado="normal"):
+def _universe_row(id_articulo, sucursal, stock_bultos, venta_bultos, estado="normal", generico="CERVEZAS"):
     return {
         "id_articulo": id_articulo,
         "des_articulo": f"ARTICULO {id_articulo}",
-        "generico": "CERVEZAS",
+        "generico": generico,
         "marca": "QUILMES",
         "sucursal": sucursal,
         "stock_bultos": stock_bultos,
@@ -641,21 +658,22 @@ class TestBuildWorkbookFormulas:
 
         wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
         ws = wb["STOCK"]
+        header_row = _layout_for(wide_df).header_row
 
-        assert ws.cell(row=HEADER_ROW, column=1).value == "idArticulo"
-        assert ws.cell(row=HEADER_ROW, column=2).value == "dsArticulo"
-        assert ws.cell(row=HEADER_ROW, column=3).value == "GENERICO"
-        assert ws.cell(row=HEADER_ROW, column=4).value == "MARCA"
+        assert ws.cell(row=header_row, column=1).value == "idArticulo"
+        assert ws.cell(row=header_row, column=2).value == "dsArticulo"
+        assert ws.cell(row=header_row, column=3).value == "GENERICO"
+        assert ws.cell(row=header_row, column=4).value == "MARCA"
         # CASA CENTRAL block = col 5 (E): Stock header = sucursal name.
-        assert ws.cell(row=HEADER_ROW, column=5).value == "CASA CENTRAL"
-        assert ws.cell(row=HEADER_ROW, column=6).value == "VENTA"
-        assert ws.cell(row=HEADER_ROW, column=7).value == "PEDIDO"
-        assert ws.cell(row=HEADER_ROW, column=8).value == "ALCANCE"
+        assert ws.cell(row=header_row, column=5).value == "CASA CENTRAL"
+        assert ws.cell(row=header_row, column=6).value == "VENTA"
+        assert ws.cell(row=header_row, column=7).value == "PEDIDO"
+        assert ws.cell(row=header_row, column=8).value == "ALCANCE"
         # Total block = cols 61-64 (BI-BL).
-        assert ws.cell(row=HEADER_ROW, column=61).value == "Total"
-        assert ws.cell(row=HEADER_ROW, column=62).value == "VENTA TOTAL"
-        assert ws.cell(row=HEADER_ROW, column=63).value == "PEDIDO TOTAL"
-        assert ws.cell(row=HEADER_ROW, column=64).value == "ALCANCE TOTAL"
+        assert ws.cell(row=header_row, column=61).value == "Total"
+        assert ws.cell(row=header_row, column=62).value == "VENTA TOTAL"
+        assert ws.cell(row=header_row, column=63).value == "PEDIDO TOTAL"
+        assert ws.cell(row=header_row, column=64).value == "ALCANCE TOTAL"
 
     def test_stock_and_venta_cells_are_values_not_formulas(self):
         universe_df = pd.DataFrame(
@@ -665,7 +683,7 @@ class TestBuildWorkbookFormulas:
 
         wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
         ws = wb["STOCK"]
-        r = DATA_START_ROW
+        r = _layout_for(wide_df).data_start_row
 
         stock_cell = ws.cell(row=r, column=5)  # E: CASA CENTRAL Stock
         venta_cell = ws.cell(row=r, column=6)  # F: CASA CENTRAL VENTA
@@ -683,7 +701,7 @@ class TestBuildWorkbookFormulas:
 
         wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
         ws = wb["STOCK"]
-        r = DATA_START_ROW
+        r = _layout_for(wide_df).data_start_row
 
         pedido_cell = ws.cell(row=r, column=7).value  # G: CASA CENTRAL PEDIDO
 
@@ -702,7 +720,7 @@ class TestBuildWorkbookFormulas:
 
         wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
         ws = wb["STOCK"]
-        r = DATA_START_ROW
+        r = _layout_for(wide_df).data_start_row
 
         alcance_cell = ws.cell(row=r, column=8).value  # H: CASA CENTRAL ALCANCE
 
@@ -719,7 +737,7 @@ class TestBuildWorkbookFormulas:
         wide_df = pivot_wide(universe_df)
         wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
         ws = wb["STOCK"]
-        r = DATA_START_ROW
+        r = _layout_for(wide_df).data_start_row
 
         pedido_perico = ws.cell(row=r, column=59).value   # BG
         alcance_perico = ws.cell(row=r, column=60).value  # BH
@@ -734,9 +752,10 @@ class TestBuildWorkbookFormulas:
 
         wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
         ws = wb["STOCK"]
+        layout = _layout_for(wide_df)
 
-        assert ws.cell(row=HEADER_ROW, column=1).value is not None
-        assert ws.cell(row=DATA_START_ROW, column=1).value is None
+        assert ws.cell(row=layout.header_row, column=1).value is not None
+        assert ws.cell(row=layout.data_start_row, column=1).value is None
 
 
 class TestTotalBlockAlcance:
@@ -748,7 +767,7 @@ class TestTotalBlockAlcance:
 
         wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
         ws = wb["STOCK"]
-        r = DATA_START_ROW
+        r = _layout_for(wide_df).data_start_row
 
         total_stock = ws.cell(row=r, column=61).value  # BI
         total_venta = ws.cell(row=r, column=62).value  # BJ
@@ -796,7 +815,7 @@ class TestTotalBlockAlcance:
 
         wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
         ws = wb["STOCK"]
-        r = DATA_START_ROW
+        r = _layout_for(wide_df).data_start_row
 
         alcance_total = ws.cell(row=r, column=64).value  # BL
 
@@ -821,7 +840,8 @@ class TestTotalBlockAlcance:
         wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
         ws = wb["STOCK"]
 
-        row1, row2 = DATA_START_ROW, DATA_START_ROW + 1
+        data_start_row = _layout_for(wide_df).data_start_row
+        row1, row2 = data_start_row, data_start_row + 1
 
         alcance_total_row1 = ws.cell(row=row1, column=64).value
         alcance_total_row2 = ws.cell(row=row2, column=64).value
@@ -829,3 +849,323 @@ class TestTotalBlockAlcance:
         assert alcance_total_row1 == f"=IFERROR(BI{row1}/(BJ{row1}/DiasVenta),0)"
         assert alcance_total_row2 == f"=IFERROR(BI{row2}/(BJ{row2}/DiasVenta),0)"
         assert alcance_total_row1 != alcance_total_row2
+
+
+# ── RF-08: per-generico totals band ──────────────────────────────────────────
+# Strict TDD — Phase 4, Task 4.1 (RED) / 4.2 (GREEN) of sdd/stock-badie PR4.
+#
+# The band sits ABOVE the table header (user requirement: "totales en la
+# fila superior por generico"), so it is written at compute_layout()'s
+# band_start_row..band_end_row — always derived, never hardcoded.
+
+
+class TestGenericoBand:
+    def _two_generico_wide_df(self):
+        universe_df = pd.DataFrame(
+            [
+                _universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10, generico="CERVEZAS"),
+                _universe_row(2, "SUCURSAL METAN", stock_bultos=3, venta_bultos=6, generico="AGUAS DANONE"),
+            ]
+        )
+        return pivot_wide(universe_df)
+
+    def test_one_band_row_per_distinct_generico_sorted(self):
+        wide_df = self._two_generico_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        assert layout.band_end_row - layout.band_start_row + 1 == 2
+        # Deterministic sorted order: "AGUAS DANONE" < "CERVEZAS".
+        assert ws.cell(row=layout.band_start_row, column=3).value == "AGUAS DANONE"
+        assert ws.cell(row=layout.band_start_row + 1, column=3).value == "CERVEZAS"
+
+    def test_band_stock_is_sumifs_over_stock_and_generico_columns(self):
+        wide_df = self._two_generico_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cervezas_row = layout.band_start_row + 1  # second, sorted after AGUAS DANONE
+        stock_gen = ws.cell(row=cervezas_row, column=5).value  # E: CASA CENTRAL Stock
+
+        assert _is_formula(stock_gen)
+        assert stock_gen.startswith("=SUMIFS(")
+        assert f"E{layout.data_start_row}:E{layout.data_end_row}" in stock_gen
+        assert f"$C${layout.data_start_row}:$C${layout.data_end_row}" in stock_gen
+        assert f"$C${cervezas_row}" in stock_gen
+        assert stock_gen == (
+            f"=SUMIFS(E{layout.data_start_row}:E{layout.data_end_row},"
+            f"$C${layout.data_start_row}:$C${layout.data_end_row},$C${cervezas_row})"
+        )
+
+    def test_band_venta_and_pedido_are_also_sumifs(self):
+        wide_df = self._two_generico_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cervezas_row = layout.band_start_row + 1
+        venta_gen = ws.cell(row=cervezas_row, column=6).value   # F: CASA CENTRAL VENTA
+        pedido_gen = ws.cell(row=cervezas_row, column=7).value  # G: CASA CENTRAL PEDIDO
+
+        assert venta_gen.startswith("=SUMIFS(")
+        assert pedido_gen.startswith("=SUMIFS(")
+        assert f"F{layout.data_start_row}:F{layout.data_end_row}" in venta_gen
+        assert f"G{layout.data_start_row}:G{layout.data_end_row}" in pedido_gen
+
+    def test_band_alcance_is_ratio_not_sumifs(self):
+        wide_df = self._two_generico_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cervezas_row = layout.band_start_row + 1
+        alcance_gen = ws.cell(row=cervezas_row, column=8).value  # H: CASA CENTRAL ALCANCE
+
+        assert _is_formula(alcance_gen)
+        assert not alcance_gen.startswith("=SUMIFS(")
+        assert "DiasVenta" in alcance_gen
+        assert alcance_gen == f"=IFERROR(E{cervezas_row}/(F{cervezas_row}/DiasVenta),0)"
+
+    def test_band_total_block_stock_is_also_sumifs(self):
+        wide_df = self._two_generico_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cervezas_row = layout.band_start_row + 1
+        total_stock_gen = ws.cell(row=cervezas_row, column=61).value  # BI
+
+        assert total_stock_gen == (
+            f"=SUMIFS(BI{layout.data_start_row}:BI{layout.data_end_row},"
+            f"$C${layout.data_start_row}:$C${layout.data_end_row},$C${cervezas_row})"
+        )
+
+        total_venta_gen = ws.cell(row=cervezas_row, column=62).value  # BJ
+        total_pedido_gen = ws.cell(row=cervezas_row, column=63).value  # BK
+        assert total_venta_gen == (
+            f"=SUMIFS(BJ{layout.data_start_row}:BJ{layout.data_end_row},"
+            f"$C${layout.data_start_row}:$C${layout.data_end_row},$C${cervezas_row})"
+        )
+        assert total_pedido_gen == (
+            f"=SUMIFS(BK{layout.data_start_row}:BK{layout.data_end_row},"
+            f"$C${layout.data_start_row}:$C${layout.data_end_row},$C${cervezas_row})"
+        )
+
+    def test_band_total_block_alcance_is_ratio_not_sumifs(self):
+        wide_df = self._two_generico_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cervezas_row = layout.band_start_row + 1
+        total_alcance_gen = ws.cell(row=cervezas_row, column=64).value  # BL
+
+        assert not total_alcance_gen.startswith("=SUMIFS(")
+        assert total_alcance_gen == f"=IFERROR(BI{cervezas_row}/(BJ{cervezas_row}/DiasVenta),0)"
+
+    def test_empty_universe_has_empty_band_range_no_crash(self):
+        wide_df = pivot_wide(pd.DataFrame())
+        layout = _layout_for(wide_df)
+
+        build_workbook(wide_df, dias_venta=20, dias_stock=15)  # must not raise
+
+        assert layout.band_end_row < layout.band_start_row  # empty range
+
+
+# ── RF-09: TOTAL GENERAL row ──────────────────────────────────────────────────
+# Strict TDD — Phase 4, Task 4.3 (RED) / 4.4 (GREEN) of sdd/stock-badie PR4.
+
+
+class TestTotalGeneralRow:
+    def _single_generico_two_rows_wide_df(self):
+        universe_df = pd.DataFrame(
+            [
+                _universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10),
+                _universe_row(2, "CASA CENTRAL", stock_bultos=3, venta_bultos=6),
+            ]
+        )
+        return pivot_wide(universe_df)
+
+    def test_total_general_label_present_and_styled(self):
+        wide_df = self._single_generico_two_rows_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        label_cell = ws.cell(row=layout.total_general_row, column=1)
+
+        assert label_cell.value == "TOTAL GENERAL"
+        assert label_cell.font.bold is True
+        assert label_cell.fill.patternType == "solid"
+        assert label_cell.fill.fgColor.rgb == "00D9D9D9"
+
+    def test_total_general_stock_is_sum_over_data_rows(self):
+        wide_df = self._single_generico_two_rows_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        stock_total = ws.cell(row=layout.total_general_row, column=5).value  # E: CASA CENTRAL Stock
+
+        assert stock_total == f"=SUM(E{layout.data_start_row}:E{layout.data_end_row})"
+
+    def test_total_general_alcance_is_ratio_not_sum(self):
+        wide_df = self._single_generico_two_rows_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        r = layout.total_general_row
+        alcance_total = ws.cell(row=r, column=8).value  # H: CASA CENTRAL ALCANCE
+
+        assert _is_formula(alcance_total)
+        assert not alcance_total.startswith("=SUM(")
+        assert alcance_total == f"=IFERROR(E{r}/(F{r}/DiasVenta),0)"
+
+    def test_total_general_total_block_alcance_is_ratio(self):
+        wide_df = self._single_generico_two_rows_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        r = layout.total_general_row
+        total_block_alcance = ws.cell(row=r, column=64).value  # BL
+
+        assert not total_block_alcance.startswith("=SUM(")
+        assert total_block_alcance == f"=IFERROR(BI{r}/(BJ{r}/DiasVenta),0)"
+
+    def test_no_total_general_row_for_empty_universe(self):
+        """A header-only sheet (no article rows) skips the TOTAL GENERAL row
+        entirely — a SUM/ratio over an empty data range would be meaningless
+        and would emit a malformed reversed Excel range."""
+        wide_df = pivot_wide(pd.DataFrame())
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        assert ws.cell(row=layout.total_general_row, column=1).value is None
+
+
+# ── RF-10: number format + Stock-vs-Pedido conditional formatting ───────────
+# Strict TDD — Phase 4, Task 4.5 (RED) / 4.6 (GREEN) of sdd/stock-badie PR4.
+
+
+class TestNumberFormatAndConditionalFormatting:
+    def _wide_df(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        return pivot_wide(universe_df)
+
+    def test_number_format_on_data_stock_cell(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cell = ws.cell(row=layout.data_start_row, column=5)  # E: Stock
+        assert cell.number_format == NUMBER_FORMAT
+
+    def test_number_format_on_data_alcance_cell(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cell = ws.cell(row=layout.data_start_row, column=8)  # H: ALCANCE
+        assert cell.number_format == NUMBER_FORMAT
+
+    def test_number_format_on_band_row_cell(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        band_cell = ws.cell(row=layout.band_start_row, column=5)  # E: CERVEZAS band Stock
+        assert band_cell.number_format == NUMBER_FORMAT
+
+    def test_number_format_on_total_general_cell(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cell = ws.cell(row=layout.total_general_row, column=5)
+        assert cell.number_format == NUMBER_FORMAT
+
+    def test_identity_columns_stay_general_format(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        idarticulo_cell = ws.cell(row=layout.data_start_row, column=1)
+        assert idarticulo_cell.number_format == "General"
+
+    def test_conditional_formatting_rule_exists_for_casa_central_stock_vs_pedido(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        expected_range = f"E{layout.data_start_row}:E{layout.data_end_row}"
+        rules_for_range = ws.conditional_formatting[expected_range]
+
+        assert rules_for_range, f"no conditional formatting rules found on {expected_range}"
+        formulas = [rule.formula[0] for rule in rules_for_range]
+
+        red_formula = f"E{layout.data_start_row}<G{layout.data_start_row}"
+        green_formula = f"E{layout.data_start_row}>G{layout.data_start_row}"
+        assert red_formula in formulas
+        assert green_formula in formulas
+
+    def test_conditional_formatting_rule_exists_for_total_block_stock_vs_pedido(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        expected_range = f"BI{layout.data_start_row}:BI{layout.data_end_row}"
+        rules_for_range = ws.conditional_formatting[expected_range]
+
+        assert rules_for_range, f"no conditional formatting rules found on {expected_range}"
+        formulas = [rule.formula[0] for rule in rules_for_range]
+
+        red_formula = f"BI{layout.data_start_row}<BK{layout.data_start_row}"
+        green_formula = f"BI{layout.data_start_row}>BK{layout.data_start_row}"
+        assert red_formula in formulas
+        assert green_formula in formulas
+
+    def test_no_conditional_formatting_for_empty_universe(self):
+        """No data rows -> no conditional formatting rules at all (guards
+        against emitting a malformed reversed-range rule)."""
+        wide_df = pivot_wide(pd.DataFrame())
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        assert list(ws.conditional_formatting) == []
+
+
+# ── RF-11: no rounding guard ──────────────────────────────────────────────────
+# Strict TDD — Phase 4, Task 4.7 (RED) / 4.8 (GREEN) of sdd/stock-badie PR4.
+# Mirrors the project-wide "no rounding" rule: report values are never
+# truncated in Python; only Excel number_format controls display.
+
+
+class TestNoRounding:
+    def test_no_round_or_astype_int_in_workbook_or_processor(self):
+        """round(...) and .astype(int) must never appear in the report-value
+        path. A plain int(...) cast IS allowed (e.g. logging row counts),
+        which is why this guard targets the two truncation-prone calls
+        specifically instead of banning int(...) outright."""
+        import inspect
+
+        import src.services.stock_badie.processor as processor_module
+        import src.services.stock_badie.workbook as workbook_module
+
+        for module in (workbook_module, processor_module):
+            source = inspect.getsource(module)
+            assert "round(" not in source, f"{module.__name__} must not call round()"
+            assert ".astype(int)" not in source, f"{module.__name__} must not call .astype(int)"
