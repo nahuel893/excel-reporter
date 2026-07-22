@@ -11,6 +11,7 @@ no DB access anywhere in this file.
 """
 
 import logging
+import re
 from datetime import date, datetime
 
 import numpy as np
@@ -23,6 +24,11 @@ from src.services.stock_badie.processor import (
     build_universe,
     compute_dias_venta,
     pivot_wide,
+)
+from src.services.stock_badie.workbook import (
+    DATA_START_ROW,
+    HEADER_ROW,
+    build_workbook,
 )
 
 
@@ -583,3 +589,243 @@ class TestComputeDiasVenta:
         MAX((Venta/$DiasVenta$)*$DiasStock$ - Stock, 0), which has NO
         IFERROR — a raw 0 would produce #DIV/0! across every PEDIDO cell."""
         assert compute_dias_venta(date(2026, 1, 1)) == 1
+
+
+# ── RF-06/RF-07: build_workbook ──────────────────────────────────────────────
+# Strict TDD — Phase 3, Task 3.1 (RED) / 3.2 (GREEN) and 3.3 (RED) / 3.4 (GREEN)
+# of sdd/stock-badie PR3.
+#
+# Column map (fixed, per design spec §3): identity A-D, then 14 sucursal
+# blocks of 4 cols [Stock, VENTA, PEDIDO, ALCANCE] starting at col 5 (E),
+# then the Total block at cols 61-64 (BI-BL). CASA CENTRAL (block 0) sits at
+# E-H; the Total block's Stock/VENTA/PEDIDO/ALCANCE columns are BI/BJ/BK/BL.
+
+
+def _is_formula(value) -> bool:
+    return isinstance(value, str) and value.startswith("=")
+
+
+class TestBuildWorkbookFormulas:
+    def test_dias_stock_and_dias_venta_are_plain_values(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        assert ws["B1"].value == 15
+        assert ws["B2"].value == 20
+        assert not _is_formula(ws["B1"].value)
+        assert not _is_formula(ws["B2"].value)
+
+    def test_named_ranges_point_at_param_cells(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+
+        assert "DiasStock" in wb.defined_names
+        assert "DiasVenta" in wb.defined_names
+        assert wb.defined_names["DiasStock"].attr_text == "'STOCK'!$B$1"
+        assert wb.defined_names["DiasVenta"].attr_text == "'STOCK'!$B$2"
+
+    def test_header_row_has_sucursal_name_and_block_labels(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        assert ws.cell(row=HEADER_ROW, column=1).value == "idArticulo"
+        assert ws.cell(row=HEADER_ROW, column=2).value == "dsArticulo"
+        assert ws.cell(row=HEADER_ROW, column=3).value == "GENERICO"
+        assert ws.cell(row=HEADER_ROW, column=4).value == "MARCA"
+        # CASA CENTRAL block = col 5 (E): Stock header = sucursal name.
+        assert ws.cell(row=HEADER_ROW, column=5).value == "CASA CENTRAL"
+        assert ws.cell(row=HEADER_ROW, column=6).value == "VENTA"
+        assert ws.cell(row=HEADER_ROW, column=7).value == "PEDIDO"
+        assert ws.cell(row=HEADER_ROW, column=8).value == "ALCANCE"
+        # Total block = cols 61-64 (BI-BL).
+        assert ws.cell(row=HEADER_ROW, column=61).value == "Total"
+        assert ws.cell(row=HEADER_ROW, column=62).value == "VENTA TOTAL"
+        assert ws.cell(row=HEADER_ROW, column=63).value == "PEDIDO TOTAL"
+        assert ws.cell(row=HEADER_ROW, column=64).value == "ALCANCE TOTAL"
+
+    def test_stock_and_venta_cells_are_values_not_formulas(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        r = DATA_START_ROW
+
+        stock_cell = ws.cell(row=r, column=5)  # E: CASA CENTRAL Stock
+        venta_cell = ws.cell(row=r, column=6)  # F: CASA CENTRAL VENTA
+
+        assert stock_cell.value == 5
+        assert venta_cell.value == 10
+        assert not _is_formula(stock_cell.value)
+        assert not _is_formula(venta_cell.value)
+
+    def test_pedido_formula_references_named_ranges_and_row_cells(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        r = DATA_START_ROW
+
+        pedido_cell = ws.cell(row=r, column=7).value  # G: CASA CENTRAL PEDIDO
+
+        assert _is_formula(pedido_cell)
+        assert "DiasVenta" in pedido_cell
+        assert "DiasStock" in pedido_cell
+        assert f"F{r}" in pedido_cell  # VENTA cell of this row/block
+        assert f"E{r}" in pedido_cell  # Stock cell of this row/block
+        assert pedido_cell == f"=MAX((F{r}/DiasVenta)*DiasStock-E{r},0)"
+
+    def test_alcance_formula_references_named_range_and_row_cells(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        r = DATA_START_ROW
+
+        alcance_cell = ws.cell(row=r, column=8).value  # H: CASA CENTRAL ALCANCE
+
+        assert _is_formula(alcance_cell)
+        assert "DiasVenta" in alcance_cell
+        assert alcance_cell == f"=IFERROR(E{r}/(F{r}/DiasVenta),0)"
+
+    def test_last_block_perico_formulas_reference_correct_cells(self):
+        """Formulas are generated per-block, not hardcoded to CASA CENTRAL.
+        PERICO is the 14th/last block (BE stock, BF venta, BG pedido, BH alcance)."""
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "SUCURSAL PERICO", stock_bultos=7, venta_bultos=3)]
+        )
+        wide_df = pivot_wide(universe_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        r = DATA_START_ROW
+
+        pedido_perico = ws.cell(row=r, column=59).value   # BG
+        alcance_perico = ws.cell(row=r, column=60).value  # BH
+
+        assert pedido_perico == f"=MAX((BF{r}/DiasVenta)*DiasStock-BE{r},0)"
+        assert alcance_perico == f"=IFERROR(BE{r}/(BF{r}/DiasVenta),0)"
+
+    def test_empty_wide_df_produces_header_only_sheet(self):
+        """No kept pairs -> 0-row wide frame -> valid header-only STOCK sheet,
+        not a crash (guards the PR4 row-shifting edits near this loop)."""
+        wide_df = pivot_wide(pd.DataFrame())  # empty universe -> 0-row, 64-col
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        assert ws.cell(row=HEADER_ROW, column=1).value is not None
+        assert ws.cell(row=DATA_START_ROW, column=1).value is None
+
+
+class TestTotalBlockAlcance:
+    def test_total_stock_venta_pedido_are_sums_over_14_blocks(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        r = DATA_START_ROW
+
+        total_stock = ws.cell(row=r, column=61).value  # BI
+        total_venta = ws.cell(row=r, column=62).value  # BJ
+        total_pedido = ws.cell(row=r, column=63).value  # BK
+
+        assert _is_formula(total_stock) and total_stock.startswith("=SUM(")
+        assert _is_formula(total_venta) and total_venta.startswith("=SUM(")
+        assert _is_formula(total_pedido) and total_pedido.startswith("=SUM(")
+        # 14 sucursal blocks -> 14 comma-separated cell refs inside SUM(...).
+        assert total_stock.count(",") == 13
+        assert total_venta.count(",") == 13
+        assert total_pedido.count(",") == 13
+
+        # Robust ref check: parse the EXACT column letters summed and compare
+        # to the hand-derived expected columns (block i Stock at 5+4*i, Venta
+        # +1, Pedido +2). Catches a stock/venta/pedido ref swap or a
+        # duplicated/omitted sucursal column that the format + comma-count
+        # checks above would silently miss (per PR3 reliability review).
+        def _sum_cols(formula):
+            return sorted(re.findall(r"([A-Z]{1,3})" + str(r) + r"(?!\d)", formula))
+
+        expected_stock = sorted(
+            ["E", "I", "M", "Q", "U", "Y", "AC", "AG", "AK", "AO", "AS", "AW", "BA", "BE"]
+        )
+        expected_venta = sorted(
+            ["F", "J", "N", "R", "V", "Z", "AD", "AH", "AL", "AP", "AT", "AX", "BB", "BF"]
+        )
+        expected_pedido = sorted(
+            ["G", "K", "O", "S", "W", "AA", "AE", "AI", "AM", "AQ", "AU", "AY", "BC", "BG"]
+        )
+        assert _sum_cols(total_stock) == expected_stock
+        assert _sum_cols(total_venta) == expected_venta
+        assert _sum_cols(total_pedido) == expected_pedido
+
+    def test_alcance_total_is_ratio_of_sums_not_sum_of_alcances(self):
+        """The legacy xlsm sums the 14 per-sucursal ALCANCE cells for the
+        total (mathematically wrong: sum of ratios != ratio of sums). This
+        report's ALCANCE TOTAL must instead divide the row's total-stock
+        cell by (total-venta cell / DiasVenta) — i.e. NOT a SUM of the 14
+        alcance cells (H, L, P, ... columns)."""
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        r = DATA_START_ROW
+
+        alcance_total = ws.cell(row=r, column=64).value  # BL
+
+        assert _is_formula(alcance_total)
+        assert not alcance_total.startswith("=SUM(")
+        assert "DiasVenta" in alcance_total
+        # Must reference the row's Total-block Stock (BI) and VENTA TOTAL (BJ)
+        # cells — the ratio-of-sums inputs — not any per-sucursal ALCANCE cell.
+        assert f"BI{r}" in alcance_total
+        assert f"BJ{r}" in alcance_total
+        assert alcance_total == f"=IFERROR(BI{r}/(BJ{r}/DiasVenta),0)"
+
+    def test_multiple_article_rows_get_independent_formulas(self):
+        universe_df = pd.DataFrame(
+            [
+                _universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10),
+                _universe_row(2, "SUCURSAL METAN", stock_bultos=3, venta_bultos=6),
+            ]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        row1, row2 = DATA_START_ROW, DATA_START_ROW + 1
+
+        alcance_total_row1 = ws.cell(row=row1, column=64).value
+        alcance_total_row2 = ws.cell(row=row2, column=64).value
+
+        assert alcance_total_row1 == f"=IFERROR(BI{row1}/(BJ{row1}/DiasVenta),0)"
+        assert alcance_total_row2 == f"=IFERROR(BI{row2}/(BJ{row2}/DiasVenta),0)"
+        assert alcance_total_row1 != alcance_total_row2
