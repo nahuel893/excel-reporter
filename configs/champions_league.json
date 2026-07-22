@@ -34,7 +34,8 @@
             "MILLER": {
                 "articulos": [
                     22222,
-                    23301
+                    23301,
+                    23110
                 ],
                 "formula": {
                     "por_calibre": {
@@ -345,11 +346,10 @@
         {
             "nombre": "Champions League",
             "capture_images": [
-                {"hoja": "REPORTE", "rango": "auto"},
-                {"hoja": "REMIX", "rango": "auto"}
+                {"hoja": "REPORTE", "rango": "auto"}
             ],
             "enviar_a": {
-                "Gonzalo Farah": {
+                "Sucursales": {
                     "via": [
                         "whatsapp"
                     ]
