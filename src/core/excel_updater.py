@@ -104,6 +104,7 @@ def replace_sheet_data(
     df: pd.DataFrame,
     data_columns: list[str],
     header_row: int = 1,
+    numeric_columns: list[str] | None = None,
 ) -> int:
     """
     Reemplaza datos en columnas especificas de una hoja Excel existente,
@@ -115,6 +116,13 @@ def replace_sheet_data(
         df: DataFrame con los nuevos datos
         data_columns: Lista de nombres de columnas a reemplazar
         header_row: Fila del encabezado (1-based, default: 1)
+        numeric_columns: Columnas (subconjunto de data_columns) cuyas celdas
+            deben forzarse a formato numerico ("0") al escribirse. Necesario
+            para columnas-clave enteras (p.ej. id_ruta) que la plantilla trae
+            con formato de FECHA heredado: sin esto, un round-trip de openpyxl
+            reserializa el entero como fecha y el bug del anio bisiesto 1900
+            corre los seriales >= 60 un dia, rompiendo los VLOOKUP de coincidencia
+            exacta rio abajo (ver CuposVolumen!Código -> AvanceR).
 
     Returns:
         Numero de filas escritas
@@ -123,6 +131,7 @@ def replace_sheet_data(
         KeyError: Si la hoja no existe en el workbook
         ValueError: Si alguna columna de data_columns no existe en el header o en el DataFrame
     """
+    numeric_set = set(numeric_columns or [])
     # 1. Obtener worksheet
     if sheet_name not in wb.sheetnames:
         raise KeyError(f"Hoja '{sheet_name}' no encontrada en el workbook")
@@ -160,7 +169,12 @@ def replace_sheet_data(
         for col_name in data_columns:
             col_idx = col_map[col_name]
             raw_val = row[col_name]
-            ws.cell(row=data_row, column=col_idx, value=_coerce_value(raw_val))
+            cell = ws.cell(row=data_row, column=col_idx, value=_coerce_value(raw_val))
+            # Force numeric format on integer key columns so a later openpyxl
+            # round-trip does not reserialize the value as a date (would shift
+            # serials >= 60 via the 1900 leap-year bug and break exact VLOOKUPs).
+            if col_name in numeric_set:
+                cell.number_format = "0"
         rows_written += 1
 
     # 5b. Extender columnas de fórmulas adyacentes (BUSCARVs, etc.)

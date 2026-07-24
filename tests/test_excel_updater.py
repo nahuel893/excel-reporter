@@ -176,6 +176,57 @@ class TestReplaceSheetData:
         assert ws.cell(2, 4).value == "=A2*B2"
         assert ws.cell(3, 3).value == "=A3+B3"
 
+    def test_numeric_columns_resets_inherited_date_format(self):
+        """A key column that inherits a date number_format from the template is
+        reset to a plain numeric format when listed in numeric_columns."""
+        headers = ["Código", "Valor"]
+        wb = _make_wb(headers, [(1, 100)])
+        ws = wb["Sheet1"]
+        # Template inherited a date format on the integer key column.
+        ws.cell(2, 1).number_format = "[$-C0A]dd\\-mmm\\-yy;@"
+
+        df = pd.DataFrame({"Código": [6, 61], "Valor": [1, 2]})
+        replace_sheet_data(
+            wb, "Sheet1", df, ["Código", "Valor"], numeric_columns=["Código"]
+        )
+
+        ws = wb["Sheet1"]
+        assert ws.cell(2, 1).number_format == "0"
+        assert ws.cell(3, 1).number_format == "0"
+        assert ws.cell(2, 1).value == 6
+        assert isinstance(ws.cell(2, 1).value, int)
+        # Non-numeric column keeps whatever format it had (General here).
+        assert ws.cell(2, 2).number_format != "0" or ws.cell(2, 2).value == 1
+
+    def test_numeric_columns_survive_openpyxl_roundtrip(self):
+        """REGRESSION: integer keys written into a date-formatted column must
+        keep their exact value across an openpyxl save/reload cycle.
+
+        Without numeric_columns, openpyxl reserializes the int as a date on
+        reload (and the 1900 leap-year bug shifts serials >= 60 by a day),
+        silently breaking downstream exact-match VLOOKUPs. See CuposVolumen!
+        Código -> AvanceR lookup (avance-badie cerveza cupo 82.574 vs 83.000).
+        """
+        import io
+        from openpyxl import load_workbook
+
+        headers = ["Código", "Valor"]
+        wb = _make_wb(headers, [(1, 1)])
+        wb["Sheet1"].cell(2, 1).number_format = "[$-C0A]dd\\-mmm\\-yy;@"
+
+        df = pd.DataFrame({"Código": [61, 62, 63], "Valor": [1, 2, 3]})
+        replace_sheet_data(
+            wb, "Sheet1", df, ["Código", "Valor"], numeric_columns=["Código"]
+        )
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        ws2 = load_workbook(buf)["Sheet1"]
+        assert ws2.cell(2, 1).value == 61
+        assert ws2.cell(3, 1).value == 62
+        assert ws2.cell(4, 1).value == 63
+
 
 # ── Tests para _coerce_value ───────────────────────────────────────────────────
 

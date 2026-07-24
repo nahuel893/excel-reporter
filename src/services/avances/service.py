@@ -59,6 +59,11 @@ class SheetConfig:
     data_columns: list[str] = field(default_factory=list)
     header_row: int = 1
     column_rename: dict[str, str] = field(default_factory=dict)  # df_col -> excel_header
+    # Integer key columns to force to numeric format ("0") on write. Prevents an
+    # inherited date format from surviving into openpyxl round-trips, which would
+    # reserialize the id as a date and shift serials >= 60 (1900 leap-year bug),
+    # breaking exact-match VLOOKUPs (e.g. CuposVolumen!Código -> AvanceR).
+    numeric_columns: list[str] = field(default_factory=list)
 
 
 SHEET_CONFIGS_BRANCA: list[SheetConfig] = [
@@ -206,6 +211,7 @@ SHEET_CONFIGS_BADIE: list[SheetConfig] = [
             "Cupo ",  # trailing space matches Excel header exactly
         ],
         header_row=1,
+        numeric_columns=["Código"],  # id_ruta key: keep numeric (see SheetConfig)
     ),
     # 5. Cupos cobertura por genérico — CuposCoberGen sheet (5 data cols of 6)
     #    Source: gold.fact_cupos_cobertura WHERE tipo_apertura='generico'
@@ -289,6 +295,7 @@ SHEET_CONFIGS_GUEMES: list[SheetConfig] = [
             "Cupo ",  # trailing space matches Excel header exactly
         ],
         header_row=1,
+        numeric_columns=["Código"],  # id_ruta key: keep numeric (see SheetConfig)
     ),
     # 5. Cupos cobertura por genérico — CuposCoberGen sheet
     #    Source: gold.fact_cupos_cobertura WHERE tipo_apertura='generico'
@@ -556,7 +563,8 @@ class AvancesService(BaseService):
 
             t2 = time.perf_counter()
             rows = replace_sheet_data(
-                wb, sc.sheet_name, df, sc.data_columns, sc.header_row
+                wb, sc.sheet_name, df, sc.data_columns, sc.header_row,
+                numeric_columns=sc.numeric_columns,
             )
             logger.info("Sheet '%s': %d filas escritas en %.1fs", sc.sheet_name, rows, time.perf_counter() - t2)
             registros[sc.sheet_name] = rows
