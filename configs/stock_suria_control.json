@@ -1,0 +1,48 @@
+{
+    "tipo": "stock-suria-control",
+    "filtros": {
+        "fecha_desde": "2026-07-24",
+        "fecha_hasta": "2026-07-24",
+        "archivo_plantilla": "data/input/Copia de Stock SURIA - 17-07-2026.xlsx",
+        "enviar_email": true,
+        "enviar_whatsapp": false
+    },
+    "reportes": [
+        {
+            "nombre": "Control de stock SURIA",
+            "asunto_email": "Control de stock SURIA",
+            "enviar_a": {
+                "Fabian Gallardo": {
+                    "via": ["email"]
+                },
+                "Gonzalez Adera Juan (AARORA)": {
+                    "via": ["email_cc"]
+                },
+                "Lorgaz": {
+                    "via": ["email_cc"]
+                },
+                "Simon Quispe": {
+                    "via": ["email_cc"]
+                },
+                "Marta Vilca": {
+                    "via": ["email_cc"]
+                },
+                "Jorge Paredes": {
+                    "via": ["email_cc"]
+                },
+                "Gaston Ballon": {
+                    "via": ["email_cc"]
+                },
+                "Daniel Manzur": {
+                    "via": ["email_cc"]
+                },
+                "Magdalena Santillan": {
+                    "via": ["email_cc"]
+                },
+                "Angelica Lopez": {
+                    "via": ["email_cc"]
+                }
+            }
+        }
+    ]
+}

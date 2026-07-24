@@ -248,6 +248,11 @@ SERVICIOS: list[Servicio] = [
         fecha_modo="hoy",
     ),
     Servicio(
+        nombre="stock-suria-control",
+        config_path=CONFIGS_DIR / "stock_suria_control.json",
+        fecha_modo="hoy",
+    ),
+    Servicio(
         nombre="stock-suria-completo",
         config_path=CONFIGS_DIR / "stock_suria_completo.json",
         fecha_modo="hoy",
