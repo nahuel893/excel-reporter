@@ -388,12 +388,17 @@ def _run_stock_badie_report(report, merged: dict) -> list[tuple[Path, dict]]:
     from src.services.stock_badie.config import StockBadieConfig
     from src.services.stock_badie.service import StockBadieService
 
+    # Resolve {MES}/{AÑO} placeholders so the output filename tracks the
+    # output folder's month (e.g. "Stock Badie - JULIO 2026.xlsx" lands in
+    # data/output/stock-badie/2026-07/).
+    nombre_periodo = _resolver_nombre_periodo(report.nombre, merged["fecha_desde"])
+
     config = StockBadieConfig(
         fecha_desde=merged["fecha_desde"],
         fecha_hasta=merged["fecha_hasta"],
         dias_stock=merged.get("dias_stock", 15),
         genericos=merged.get("genericos"),
-        nombre_archivo=report.nombre or None,
+        nombre_archivo=nombre_periodo or None,
     )
 
     result = StockBadieService().generar_reporte(config)
@@ -407,7 +412,7 @@ def _run_stock_badie_report(report, merged: dict) -> list[tuple[Path, dict]]:
     return [
         (
             Path(result.archivo_generado),
-            {"nombre": report.nombre, "fecha": result.fecha_stock.isoformat()},
+            {"nombre": nombre_periodo, "fecha": result.fecha_stock.isoformat()},
         )
     ]
 
