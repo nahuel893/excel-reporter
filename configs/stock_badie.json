@@ -1,0 +1,49 @@
+{
+    "_note": "Stock BADIE — alcance en dias vs. ventas del mes en curso. Fechas parchadas en runtime por scripts/run_daily.py (fecha_modo=mes_a_hoy); los valores aqui son referencia. GO-LIVE DORMIDO: configs/daily_overrides.json pone enviar=false hasta validar el primer .xlsx en disco, luego se flipea con un cambio de una linea.",
+    "tipo": "stock-badie",
+    "filtros": {
+        "fecha_desde": "2026-07-01",
+        "fecha_hasta": "2026-07-31",
+        "dias_stock": 15,
+        "enviar_email": true,
+        "enviar_whatsapp": false,
+        "email_adjuntos": [
+            "excel"
+        ]
+    },
+    "reportes": [
+        {
+            "nombre": "Stock Badie - {MES} {AÑO}",
+            "asunto_email": "Stock Badie - {MES} {AÑO}",
+            "cuerpo_email": "Adjunto el reporte de alcance de stock BADIE (stock actual vs. ventas del mes, alcance en dias).",
+            "filtros": {},
+            "enviar_a": {
+                "M Bravo": {
+                    "via": [
+                        "email"
+                    ]
+                },
+                "Fabian Gallardo": {
+                    "via": [
+                        "email"
+                    ]
+                },
+                "Sebastian Dellamea": {
+                    "via": [
+                        "email"
+                    ]
+                },
+                "Gonzalo Farah": {
+                    "via": [
+                        "email"
+                    ]
+                },
+                "Nahuel Aguirre": {
+                    "via": [
+                        "email_cc"
+                    ]
+                }
+            }
+        }
+    ]
+}
