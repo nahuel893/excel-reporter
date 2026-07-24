@@ -1400,3 +1400,154 @@ class TestStockBadieServiceIntegration:
         service = StockBadieService(data_loader=mock_loader)
 
         assert service._create_data_loader(db_name=None) is mock_loader
+
+
+# ── Work Unit 6 (PR6): CLI registration + daily delivery wiring ─────────────
+#
+# Locks Phase 6 deliverable: stock-badie is reachable from the new-config
+# pipeline (REPORT_HANDLERS) AND the daily wiring (scripts/run_daily.py +
+# configs/stock_badie.json) so the report fires automatically each morning,
+# but in DORMANT-by-default mode: file is generated, delivery is held
+# until the user flips ejecutar=true (or removes the override).
+
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+
+class TestMainRegistration:
+    """main.py must register stock-badie as a dispatchable report handler."""
+
+    def test_stock_badie_handler_registered(self):
+        """REPORT_HANDLERS exposes 'stock-badie' -> a callable handler name."""
+        import main as main_mod
+
+        assert "stock-badie" in main_mod.REPORT_HANDLERS
+        # The handler must be a real function in the main module (not just a
+        # string label — _run_reportes uses globals()[handler_name] to call).
+        handler_name = main_mod.REPORT_HANDLERS["stock-badie"]
+        handler = getattr(main_mod, handler_name, None)
+        assert callable(handler), f"{handler_name} must be a callable function in main"
+
+
+class TestDeliveryWiring:
+    """configs/stock_badie.json + scripts/run_daily.py wire the daily run.
+
+    Locks:
+    - The config loads cleanly through load_report_config.
+    - It references the 4 recipients the spec requires, all present in
+      configs/contactos.json (validate_contacts must not raise).
+    - Dormant-by-default: the deliverable override flag is set so that
+      scripts/run_daily.py suppresses email/whatsapp on the live cron.
+    - The stock-badie entry exists in scripts/run_daily.py SERVICIOS.
+    """
+
+    CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "stock_badie.json"
+    CONTACTOS_PATH = Path(__file__).resolve().parent.parent / "configs" / "contactos.json"
+    RUN_DAILY_PATH = (
+        Path(__file__).resolve().parent.parent / "scripts" / "run_daily.py"
+    )
+
+    def _load_config(self):
+        from src.config.resolver import load_report_config
+
+        return load_report_config(self.CONFIG_PATH)
+
+    def test_config_loads_via_load_report_config(self):
+        """configs/stock_badie.json is a valid ReportConfig."""
+        assert self.CONFIG_PATH.exists(), (
+            f"Missing config: {self.CONFIG_PATH} — Phase 6 deliverable"
+        )
+        cfg = self._load_config()
+        assert cfg.tipo == "stock-badie"
+        assert len(cfg.reportes) >= 1
+
+    def test_config_has_expected_recipients(self):
+        """The 4 named recipients the spec requires are all in enviar_a."""
+        cfg = self._load_config()
+        report = cfg.reportes[0]
+        assert report.enviar_a is not None
+        expected = {"M Bravo", "Fabian Gallardo", "Sebastian Dellamea", "Gonzalo Farah"}
+        actual = set(report.enviar_a.keys())
+        assert expected.issubset(actual), (
+            f"Missing recipients in enviar_a: {expected - actual}"
+        )
+
+    def test_all_recipients_exist_in_contactos_catalog(self):
+        """validate_contacts must NOT raise for the 4 recipients.
+
+        This is the critical guard: resolve_delivery silently DROPS unknown
+        contacts (logs a warning), so the live cron would silently deliver
+        to 0 recipients if any name is mistyped. validate_contacts is the
+        load-time check that raises BEFORE that happens.
+        """
+        from src.config.resolver import load_contacts
+
+        cfg = self._load_config()
+        contactos = load_contacts(self.CONTACTOS_PATH)
+        # Must not raise — the 4 recipients must be in the catalog.
+        cfg.validate_contacts(contactos)
+
+    def test_config_dormant_by_default(self):
+        """DORMANT-by-default: configs/daily_overrides.json sets enviar=false
+        so the live cron generates the .xlsx but suppresses email/whatsapp.
+
+        The user explicitly chose 'DORMIDO PRIMERO' so the file can be
+        inspected in production before flipping the switch.
+        """
+        overrides_path = (
+            Path(__file__).resolve().parent.parent
+            / "configs"
+            / "daily_overrides.json"
+        )
+        assert overrides_path.exists(), (
+            f"Missing {overrides_path} — stock-badie dormancy must be declared there"
+        )
+        overrides = json.loads(overrides_path.read_text(encoding="utf-8"))
+        assert "stock-badie" in overrides, (
+            "stock-badie must appear in daily_overrides.json so its delivery is "
+            "explicitly disabled on the live cron"
+        )
+        entry = overrides["stock-badie"]
+        # The override must suppress delivery. Either via ejecutar=false
+        # (service skipped entirely) or enviar=false (generate, no send).
+        # We want the latter — the file MUST be produced so it can be
+        # inspected — so this test only accepts enviar=false.
+        assert entry.get("enviar") is False, (
+            f"stock-badie override must set enviar=false (dormant-by-default); "
+            f"got: {entry}"
+        )
+
+    def test_run_daily_registers_stock_badie(self):
+        """scripts/run_daily.py SERVICIOS list contains a stock-badie entry
+        with fecha_modo='mes_a_hoy' and the right config path."""
+        # Source-level parse: importlib re-execution triggers the @dataclass
+        # decorator on Servicio, which crashes on the freshly-minted module
+        # not yet registered in sys.modules under its __name__ — so we read
+        # the literal text and confirm both the dataclass entry AND the
+        # expected fields are present. This is sufficient for a wiring guard:
+        # a typo in the entry (wrong nombre, wrong fecha_modo) WILL change the
+        # text and fail this assertion.
+        import re
+
+        source = self.RUN_DAILY_PATH.read_text(encoding="utf-8")
+        # Locate a Servicio(...) block whose first positional arg is
+        # nombre="stock-badie" — extracted with a non-greedy multiline match.
+        pattern = re.compile(
+            r"Servicio\(\s*\n\s*nombre=\"stock-badie\"[^)]*\)",
+            re.DOTALL,
+        )
+        match = pattern.search(source)
+        assert match is not None, (
+            "scripts/run_daily.py must contain a Servicio(...) block with "
+            "nombre=\"stock-badie\""
+        )
+        block = match.group(0)
+        assert 'fecha_modo="mes_a_hoy"' in block, (
+            f"stock-badie Servicio must use fecha_modo='mes_a_hoy' (monthly); "
+            f"got block:\n{block}"
+        )
+        assert 'config_path=CONFIGS_DIR / "stock_badie.json"' in block, (
+            f"stock-badie Servicio must point at configs/stock_badie.json; "
+            f"got block:\n{block}"
+        )
