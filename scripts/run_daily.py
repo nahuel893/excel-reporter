@@ -102,6 +102,12 @@ OVERRIDES_PATH = CONFIGS_DIR / "daily_overrides.json"
 
 FechaModo = Literal["hoy", "mes_a_hoy", "solo_hasta"]
 
+# RAM guard for image-rendering reports (e.g. avance-badie's LibreOffice capture).
+# The render needs ~2.5 GB RAM; below this floor we skip images rather than risk
+# an OOM-killed render silently dropping the WhatsApp send.
+RAM_MIN_MB_IMAGENES = 3000
+_MEMINFO_PATH = Path("/proc/meminfo")
+
 
 def _is_business_day(value: date) -> bool:
     """Return True when the date is not Sunday nor configured holiday."""
@@ -349,6 +355,86 @@ def _objetivo_gate_bloquea(patched: dict) -> bool:
     return not _objetivo_cargado(str(fecha_desde)[:7], suc)
 
 
+def _mem_available_mb() -> int | None:
+    """Read `MemAvailable` from /proc/meminfo and return it in MB.
+
+    Returns None (never raises) if the file can't be read or the field is
+    missing — a fail-soft signal, not an error. Reads directly from /proc,
+    no new dependencies.
+    """
+    try:
+        contenido = _MEMINFO_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for linea in contenido.splitlines():
+        if linea.startswith("MemAvailable:"):
+            partes = linea.split()
+            try:
+                kb = int(partes[1])
+            except (IndexError, ValueError):
+                return None
+            return kb // 1024
+    return None
+
+
+def _report_renderiza_imagenes(patched: dict) -> bool:
+    """True iff the patched config would trigger a LibreOffice image render.
+
+    All of: enviar_whatsapp on, whatsapp_enviar_como includes images, and at
+    least one reporte has a non-empty capture_images (or legacy capture_image).
+    """
+    filtros = patched.get("filtros", {})
+    if not filtros.get("enviar_whatsapp"):
+        return False
+    if filtros.get("whatsapp_enviar_como") not in ("imagen", "ambos"):
+        return False
+    for reporte in patched.get("reportes", []):
+        if reporte.get("capture_images") or reporte.get("capture_image"):
+            return True
+    return False
+
+
+def _ram_guard_omite_imagenes(patched: dict, avail_mb: int | None) -> bool:
+    """True when the RAM guard must suppress image delivery for this report.
+
+    Fail-open: avail_mb is None means the measurement glitched (/proc/meminfo
+    is always present on this Linux host), so it must NOT be treated as "low
+    RAM" — doing so would suppress images on every run, not just genuinely
+    low-RAM ones.
+    """
+    if avail_mb is None:
+        return False
+    if not _report_renderiza_imagenes(patched):
+        return False
+    return avail_mb < RAM_MIN_MB_IMAGENES
+
+
+def _alertar_ram_baja(nombre: str, avail_mb: int | None) -> None:
+    """Notify Nahuel by WhatsApp that images were skipped due to low RAM.
+
+    Best-effort: an alert failure must NEVER crash the daily run — it's a
+    secondary notification, not part of the report pipeline.
+    """
+    try:
+        from config.settings import WHATSAPP_SERVICE_URL
+        from src.core.whatsapp_client import WhatsAppClient
+
+        contactos = load_contacts(CONTACTOS_PATH)
+        nahuel = contactos.get("Nahuel Aguirre")
+        telefono = nahuel.telefono if nahuel else None
+        if not telefono:
+            print("  ⚠️  alerta RAM baja: 'Nahuel Aguirre' sin telefono en contactos — no se envía")
+            return
+        msg = (
+            f"⚠️ {nombre}: RAM baja ({avail_mb} MB) a las 07:00 — se envió el xlsx por "
+            f"email pero se OMITIERON las imágenes del grupo. Cerrá el VM y regenerá si "
+            f"querés las imágenes."
+        )
+        WhatsAppClient(WHATSAPP_SERVICE_URL).send_text(target=telefono, text=msg)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ⚠️  no se pudo enviar la alerta de RAM baja: {exc!r}")
+
+
 def _ejecutar_servicio(
     svc: Servicio,
     hoy: date,
@@ -370,6 +456,22 @@ def _ejecutar_servicio(
             f"— se genera pero NO se envía"
         )
         enviar = False
+
+    # RAM guard: image-rendering reports (LibreOffice capture, ~2.5 GB) can get
+    # OOM-killed if a VM is eating RAM at 07:00, silently dropping the WhatsApp
+    # send. If RAM is short, disable enviar_whatsapp — resolve_delivery then
+    # builds no WhatsApp config, so CaptureImageStep's `_images_consumed` gate
+    # returns False (email adjuntos default to ["excel"], not image) → no
+    # render, no OOM, but the email xlsx still goes out. Nahuel gets alerted.
+    if enviar and _report_renderiza_imagenes(patched):
+        avail = _mem_available_mb()
+        if _ram_guard_omite_imagenes(patched, avail):
+            print(
+                f"  🧠 {svc.nombre}: RAM insuficiente ({avail} MB < {RAM_MIN_MB_IMAGENES} MB) — "
+                f"se envía xlsx por email, se OMITEN las imágenes"
+            )
+            patched.setdefault("filtros", {})["enviar_whatsapp"] = False
+            _alertar_ram_baja(svc.nombre, avail)
 
     if not enviar:
         patched = _strip_delivery(patched)
