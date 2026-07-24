@@ -16,15 +16,19 @@ from datetime import date, datetime
 
 import numpy as np
 import pandas as pd
+import pytest
+from openpyxl import load_workbook
 from unittest.mock import MagicMock
 
 from src.core.data_loader import DataLoader
+from src.services.stock_badie.config import StockBadieConfig
 from src.services.stock_badie.processor import (
     SUCURSAL_ORDER,
     build_universe,
     compute_dias_venta,
     pivot_wide,
 )
+from src.services.stock_badie.service import StockBadieResult, StockBadieService
 from src.services.stock_badie.workbook import (
     NUMBER_FORMAT,
     _generico_labels,
@@ -1169,3 +1173,381 @@ class TestNoRounding:
             source = inspect.getsource(module)
             assert "round(" not in source, f"{module.__name__} must not call round()"
             assert ".astype(int)" not in source, f"{module.__name__} must not call .astype(int)"
+
+
+# ── Phase 5 (PR5): StockBadieService orchestration ──────────────────────────
+# Strict TDD — Task 5.1 (RED) / 5.2 (GREEN) of sdd/stock-badie PR5.
+#
+# DataLoader is fully mocked (no real DB access anywhere in this class). The
+# service wires: get_ultima_fecha_stock() -> get_stock_diario() ->
+# get_venta_mes() -> build_universe() -> pivot_wide() -> compute_dias_venta()
+# -> build_workbook() -> save to disk, returning a StockBadieResult.
+
+
+class TestStockBadieServiceIntegration:
+    def _mock_loader(self, fecha_stock=date(2026, 7, 20)):
+        loader = MagicMock(spec=DataLoader)
+        loader.get_ultima_fecha_stock.return_value = fecha_stock
+        loader.get_stock_diario.return_value = pd.DataFrame(
+            [_stock_row(1, "CASA CENTRAL", cant_bultos=5, cant_htls=0.5)]
+        )
+        loader.get_venta_mes.return_value = pd.DataFrame(
+            [_venta_row(1, "CASA CENTRAL", venta_bultos=10, venta_htls=1.0)]
+        )
+        return loader
+
+    def _config(self, **overrides):
+        defaults = dict(fecha_desde="2026-07-01", fecha_hasta="2026-08-01")
+        defaults.update(overrides)
+        return StockBadieConfig(**defaults)
+
+    def test_calls_get_ultima_fecha_stock(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        service.generar_reporte(self._config())
+
+        loader.get_ultima_fecha_stock.assert_called_once_with()
+
+    def test_get_stock_diario_called_with_latest_stock_date_as_string(self, tmp_path, monkeypatch):
+        """get_ultima_fecha_stock() returns a date object; get_stock_diario()
+        needs the 'YYYY-MM-DD' string its query param expects (see its
+        docstring) — the service must convert, not pass the date through."""
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader(fecha_stock=date(2026, 7, 20))
+        service = StockBadieService(data_loader=loader)
+
+        service.generar_reporte(self._config(genericos=["CERVEZAS"]))
+
+        loader.get_stock_diario.assert_called_once_with("2026-07-20", ["CERVEZAS"])
+
+    def test_get_venta_mes_called_with_config_dates(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        service.generar_reporte(self._config(fecha_desde="2026-07-01", fecha_hasta="2026-08-01"))
+
+        loader.get_venta_mes.assert_called_once_with(
+            fecha_desde="2026-07-01", fecha_hasta="2026-08-01"
+        )
+
+    def test_writes_xlsx_to_service_output_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config())
+
+        expected_dir = tmp_path / "stock-badie" / "2026-07"
+        assert result.archivo_generado.parent == expected_dir
+        assert result.archivo_generado.exists()
+        assert result.archivo_generado.suffix == ".xlsx"
+
+    def test_saved_file_is_a_valid_reloadable_workbook_with_stock_sheet(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config())
+
+        wb = load_workbook(result.archivo_generado)
+        assert "STOCK" in wb.sheetnames
+        ws = wb["STOCK"]
+        assert ws.cell(row=1, column=2).value == 15  # DiasStock default
+
+    def test_default_filename_includes_periodo(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config())
+
+        assert "2026-07" in result.archivo_generado.name
+
+    def test_custom_nombre_archivo_is_used(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config(nombre_archivo="Reporte Custom.xlsx"))
+
+        assert result.archivo_generado.name == "Reporte Custom.xlsx"
+
+    def test_dias_stock_config_value_flows_to_workbook(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config(dias_stock=20))
+
+        wb = load_workbook(result.archivo_generado)
+        ws = wb["STOCK"]
+        assert ws.cell(row=1, column=2).value == 20
+
+    def test_dias_venta_uses_explicit_fecha_referencia_when_given(self, tmp_path, monkeypatch):
+        """fecha_referencia overrides date.today() so DiasVenta is
+        deterministic and matches compute_dias_venta() called directly on
+        the same reference date — the project has no freezegun dependency,
+        so the reference date must be injectable via config, not hardcoded
+        to the wall clock (same precedent as processor.compute_dias_venta,
+        which also takes an explicit date parameter instead of freezing the
+        clock internally)."""
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config(fecha_referencia="2026-07-20"))
+
+        expected_dias_venta = compute_dias_venta(date(2026, 7, 20))
+        assert result.dias_venta == expected_dias_venta
+        wb = load_workbook(result.archivo_generado)
+        assert wb["STOCK"].cell(row=2, column=2).value == expected_dias_venta
+
+    def test_dias_venta_past_month_default_clamps_to_month_end(self, tmp_path, monkeypatch):
+        """Re-running for a PAST month with no fecha_referencia must compute
+        DiasVenta for THAT month (its last day), not today's month — else it
+        divides the reported month's sales by the wrong elapsed-days count
+        (the review BLOCKER)."""
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        # A month safely in the past so date.today() is always > its last day.
+        result = service.generar_reporte(
+            self._config(fecha_desde="2020-01-01", fecha_hasta="2020-02-01")
+        )
+
+        # Clamped to 2020-01-31 (period end), NOT date.today().
+        assert result.dias_venta == compute_dias_venta(date(2020, 1, 31))
+
+    def test_explicit_fecha_referencia_beyond_period_is_clamped(self, tmp_path, monkeypatch):
+        """An explicit fecha_referencia outside the reporting period is clamped
+        into it, so DiasVenta can never be computed for a foreign month."""
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(
+            self._config(
+                fecha_desde="2020-01-01",
+                fecha_hasta="2020-02-01",
+                fecha_referencia="2020-03-15",  # outside the period -> clamped
+            )
+        )
+
+        assert result.dias_venta == compute_dias_venta(date(2020, 1, 31))
+
+    def test_empty_universe_logs_warning(self, tmp_path, monkeypatch, caplog):
+        """A generico filter matching no stock yields a 0-row report; log a
+        warning so the empty result is visible, not a silent near-empty xlsx."""
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        loader.get_stock_diario.return_value = pd.DataFrame(
+            [_stock_row(1, "CASA CENTRAL", cant_bultos=5, cant_htls=0.5)]
+        ).iloc[0:0]
+        loader.get_venta_mes.return_value = pd.DataFrame(
+            [_venta_row(1, "CASA CENTRAL", venta_bultos=10, venta_htls=1.0)]
+        ).iloc[0:0]
+        service = StockBadieService(data_loader=loader)
+
+        with caplog.at_level(logging.WARNING):
+            result = service.generar_reporte(self._config(genericos=["NOEXISTE"]))
+
+        assert result.n_articulos == 0
+        assert any("universo vacio" in r.message for r in caplog.records)
+
+    def test_returns_result_with_n_articulos_and_fecha_stock(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader(fecha_stock=date(2026, 7, 20))
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config())
+
+        assert isinstance(result, StockBadieResult)
+        assert result.n_articulos == 1
+        assert result.fecha_stock == date(2026, 7, 20)
+
+    def test_no_stock_snapshot_raises_value_error(self, tmp_path, monkeypatch):
+        """get_ultima_fecha_stock() returning None means gold.fact_stock has
+        no rows at all — must fail loudly, not build a bogus empty report."""
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        loader.get_ultima_fecha_stock.return_value = None
+        service = StockBadieService(data_loader=loader)
+
+        with pytest.raises(ValueError):
+            service.generar_reporte(self._config())
+
+    def test_service_slug_and_granularity(self):
+        assert StockBadieService.SERVICE_SLUG == "stock-badie"
+        assert StockBadieService.GRANULARITY == "month"
+
+    def test_create_data_loader_honors_db_name_override(self):
+        service = StockBadieService()
+        loader = service._create_data_loader(db_name="other_db")
+        assert isinstance(loader, DataLoader)
+
+    def test_create_data_loader_reuses_injected_loader_when_no_override(self):
+        """Unlike the sibling stock_diario._create_data_loader (which always
+        builds a fresh real DataLoader, silently discarding an injected
+        loader), stock_badie must actually use the constructor-injected
+        DataLoader when config.db_name is not set — otherwise every test
+        above that injects a mock via StockBadieService(data_loader=mock)
+        would silently hit a real DB instead."""
+        mock_loader = MagicMock(spec=DataLoader)
+        service = StockBadieService(data_loader=mock_loader)
+
+        assert service._create_data_loader(db_name=None) is mock_loader
+
+
+# ── Work Unit 6 (PR6): CLI registration + daily delivery wiring ─────────────
+#
+# Locks Phase 6 deliverable: stock-badie is reachable from the new-config
+# pipeline (REPORT_HANDLERS) AND the daily wiring (scripts/run_daily.py +
+# configs/stock_badie.json) so the report fires automatically each morning,
+# but in DORMANT-by-default mode: file is generated, delivery is held
+# until the user flips ejecutar=true (or removes the override).
+
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+
+class TestMainRegistration:
+    """main.py must register stock-badie as a dispatchable report handler."""
+
+    def test_stock_badie_handler_registered(self):
+        """REPORT_HANDLERS exposes 'stock-badie' -> a callable handler name."""
+        import main as main_mod
+
+        assert "stock-badie" in main_mod.REPORT_HANDLERS
+        # The handler must be a real function in the main module (not just a
+        # string label — _run_reportes uses globals()[handler_name] to call).
+        handler_name = main_mod.REPORT_HANDLERS["stock-badie"]
+        handler = getattr(main_mod, handler_name, None)
+        assert callable(handler), f"{handler_name} must be a callable function in main"
+
+
+class TestDeliveryWiring:
+    """configs/stock_badie.json + scripts/run_daily.py wire the daily run.
+
+    Locks:
+    - The config loads cleanly through load_report_config.
+    - It references the 4 recipients the spec requires, all present in
+      configs/contactos.json (validate_contacts must not raise).
+    - Dormant-by-default: the deliverable override flag is set so that
+      scripts/run_daily.py suppresses email/whatsapp on the live cron.
+    - The stock-badie entry exists in scripts/run_daily.py SERVICIOS.
+    """
+
+    CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "stock_badie.json"
+    CONTACTOS_PATH = Path(__file__).resolve().parent.parent / "configs" / "contactos.json"
+    RUN_DAILY_PATH = (
+        Path(__file__).resolve().parent.parent / "scripts" / "run_daily.py"
+    )
+
+    def _load_config(self):
+        from src.config.resolver import load_report_config
+
+        return load_report_config(self.CONFIG_PATH)
+
+    def test_config_loads_via_load_report_config(self):
+        """configs/stock_badie.json is a valid ReportConfig."""
+        assert self.CONFIG_PATH.exists(), (
+            f"Missing config: {self.CONFIG_PATH} — Phase 6 deliverable"
+        )
+        cfg = self._load_config()
+        assert cfg.tipo == "stock-badie"
+        assert len(cfg.reportes) >= 1
+
+    def test_config_has_expected_recipients(self):
+        """The 4 named recipients the spec requires are all in enviar_a."""
+        cfg = self._load_config()
+        report = cfg.reportes[0]
+        assert report.enviar_a is not None
+        expected = {"M Bravo", "Fabian Gallardo", "Sebastian Dellamea", "Gonzalo Farah"}
+        actual = set(report.enviar_a.keys())
+        assert expected.issubset(actual), (
+            f"Missing recipients in enviar_a: {expected - actual}"
+        )
+
+    def test_all_recipients_exist_in_contactos_catalog(self):
+        """validate_contacts must NOT raise for the 4 recipients.
+
+        This is the critical guard: resolve_delivery silently DROPS unknown
+        contacts (logs a warning), so the live cron would silently deliver
+        to 0 recipients if any name is mistyped. validate_contacts is the
+        load-time check that raises BEFORE that happens.
+        """
+        from src.config.resolver import load_contacts
+
+        cfg = self._load_config()
+        contactos = load_contacts(self.CONTACTOS_PATH)
+        # Must not raise — the 4 recipients must be in the catalog.
+        cfg.validate_contacts(contactos)
+
+    def test_config_dormant_by_default(self):
+        """DORMANT-by-default: configs/daily_overrides.json sets enviar=false
+        so the live cron generates the .xlsx but suppresses email/whatsapp.
+
+        The user explicitly chose 'DORMIDO PRIMERO' so the file can be
+        inspected in production before flipping the switch.
+        """
+        overrides_path = (
+            Path(__file__).resolve().parent.parent
+            / "configs"
+            / "daily_overrides.json"
+        )
+        assert overrides_path.exists(), (
+            f"Missing {overrides_path} — stock-badie dormancy must be declared there"
+        )
+        overrides = json.loads(overrides_path.read_text(encoding="utf-8"))
+        assert "stock-badie" in overrides, (
+            "stock-badie must appear in daily_overrides.json so its delivery is "
+            "explicitly disabled on the live cron"
+        )
+        entry = overrides["stock-badie"]
+        # The override must suppress delivery. Either via ejecutar=false
+        # (service skipped entirely) or enviar=false (generate, no send).
+        # We want the latter — the file MUST be produced so it can be
+        # inspected — so this test only accepts enviar=false.
+        assert entry.get("enviar") is False, (
+            f"stock-badie override must set enviar=false (dormant-by-default); "
+            f"got: {entry}"
+        )
+
+    def test_run_daily_registers_stock_badie(self):
+        """scripts/run_daily.py SERVICIOS list contains a stock-badie entry
+        with fecha_modo='mes_a_hoy' and the right config path."""
+        # Source-level parse: importlib re-execution triggers the @dataclass
+        # decorator on Servicio, which crashes on the freshly-minted module
+        # not yet registered in sys.modules under its __name__ — so we read
+        # the literal text and confirm both the dataclass entry AND the
+        # expected fields are present. This is sufficient for a wiring guard:
+        # a typo in the entry (wrong nombre, wrong fecha_modo) WILL change the
+        # text and fail this assertion.
+        import re
+
+        source = self.RUN_DAILY_PATH.read_text(encoding="utf-8")
+        # Locate a Servicio(...) block whose first positional arg is
+        # nombre="stock-badie" — extracted with a non-greedy multiline match.
+        pattern = re.compile(
+            r"Servicio\(\s*\n\s*nombre=\"stock-badie\"[^)]*\)",
+            re.DOTALL,
+        )
+        match = pattern.search(source)
+        assert match is not None, (
+            "scripts/run_daily.py must contain a Servicio(...) block with "
+            "nombre=\"stock-badie\""
+        )
+        block = match.group(0)
+        assert 'fecha_modo="mes_a_hoy"' in block, (
+            f"stock-badie Servicio must use fecha_modo='mes_a_hoy' (monthly); "
+            f"got block:\n{block}"
+        )
+        assert 'config_path=CONFIGS_DIR / "stock_badie.json"' in block, (
+            f"stock-badie Servicio must point at configs/stock_badie.json; "
+            f"got block:\n{block}"
+        )
