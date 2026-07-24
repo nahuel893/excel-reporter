@@ -95,6 +95,8 @@ class GlobalFilters(BaseModel):
     # stock-suria: si True, ignora la lista JSON de match y trae TODOS los
     # articulos de SURIA con registro de stock (reporte completo).
     todos_los_articulos: bool = False
+    # stock-badie: dias de stock objetivo (alcance en dias = stock / venta_dia).
+    dias_stock: int = 15
 
 
 class ReportFilters(BaseModel):
@@ -140,7 +142,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "ventas-marca", "ventas-cober-preventista-marca"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "ventas-marca", "ventas-cober-preventista-marca", "stock-badie"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

@@ -82,6 +82,7 @@ REPORT_HANDLERS: dict[str, str] = {
     "stock-suria": "_run_stock_suria_report",
     "ventas-marca": "_run_ventas_marca_report",
     "ventas-cober-preventista-marca": "_run_ventas_cober_preventista_marca_report",
+    "stock-badie": "_run_stock_badie_report",
 }
 
 
@@ -373,6 +374,46 @@ def _run_stock_diario_report(report, merged: dict) -> list[tuple[Path, dict]]:
             {"nombre": report.nombre, "fecha": ruta.stem},
         )
         for ruta in result.archivos_generados
+    ]
+
+
+def _run_stock_badie_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate stock-badie report (RF-01..RF-11). Returns list of (path, metadata).
+
+    Mirrors the per-report handler contract used by sibling services:
+    build the StockBadieConfig from the merged filters, dispatch through
+    StockBadieService.generar_reporte, and return a list of (path, metadata)
+    tuples so _run_reportes can hand each artifact to the delivery pipeline.
+    """
+    from src.services.stock_badie.config import StockBadieConfig
+    from src.services.stock_badie.service import StockBadieService
+
+    # Resolve {MES}/{AÑO} placeholders so the output filename tracks the
+    # output folder's month (e.g. "Stock Badie - JULIO 2026.xlsx" lands in
+    # data/output/stock-badie/2026-07/).
+    nombre_periodo = _resolver_nombre_periodo(report.nombre, merged["fecha_desde"])
+
+    config = StockBadieConfig(
+        fecha_desde=merged["fecha_desde"],
+        fecha_hasta=merged["fecha_hasta"],
+        dias_stock=merged.get("dias_stock", 15),
+        genericos=merged.get("genericos"),
+        nombre_archivo=nombre_periodo or None,
+    )
+
+    result = StockBadieService().generar_reporte(config)
+
+    print("Stock Badie generado exitosamente:")
+    print(f"  - Archivo: {result.archivo_generado.name}")
+    print(f"  - Fecha stock: {result.fecha_stock.isoformat()}")
+    print(f"  - Articulos: {result.n_articulos}")
+    print(f"  - DiasVenta: {result.dias_venta}")
+
+    return [
+        (
+            Path(result.archivo_generado),
+            {"nombre": nombre_periodo, "fecha": result.fecha_stock.isoformat()},
+        )
     ]
 
 
@@ -1196,6 +1237,22 @@ def _run_stock_suria_report(report, merged: dict) -> list[tuple[Path, dict]]:
     ]
 
 
+def cmd_stock_badie(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando stock-badie."""
+    if not args.config:
+        print("Error: stock-badie requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    else:
+        print("Error: stock-badie solo soporta el nuevo formato de configuracion JSON.")
+        return 1
+
+
 def cmd_cartesiano(args, test_mode: bool = False) -> int:
     """Ejecuta el comando cartesiano."""
     if not args.config:
@@ -1562,6 +1619,20 @@ Ejemplos:
         help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
     )
     stock_suria_parser.set_defaults(func=cmd_stock_suria)
+
+    # Subcomando: stock-badie (alcance vs. ventas del mes en curso)
+    stock_badie_parser = subparsers.add_parser(
+        "stock-badie",
+        help="Reporte de alcance de stock BADIE (stock actual vs. ventas del mes)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    stock_badie_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    stock_badie_parser.set_defaults(func=cmd_stock_badie)
 
     # check-delivery: mostrar estado de envios del dia
     check_parser = subparsers.add_parser(
