@@ -11,19 +11,46 @@ no DB access anywhere in this file.
 """
 
 import logging
+import re
 from datetime import date, datetime
 
 import numpy as np
 import pandas as pd
+import pytest
+from openpyxl import load_workbook
 from unittest.mock import MagicMock
 
 from src.core.data_loader import DataLoader
+from src.services.stock_badie.config import StockBadieConfig
 from src.services.stock_badie.processor import (
     SUCURSAL_ORDER,
     build_universe,
     compute_dias_venta,
     pivot_wide,
 )
+from src.services.stock_badie.service import StockBadieResult, StockBadieService
+from src.services.stock_badie.workbook import (
+    NUMBER_FORMAT,
+    _generico_labels,
+    build_workbook,
+    compute_layout,
+)
+
+
+def _layout_for(wide_df: pd.DataFrame):
+    """Derive the SheetLayout a given wide_df will produce, the same way
+    build_workbook() does internally (n_genericos = distinct GENERICO
+    labels present, n_articulos = row count) — tests must never hardcode
+    row numbers, since the per-generico band (RF-08) shifts the
+    header/data/TOTAL GENERAL rows depending on wide_df's shape."""
+    # Reuse the production band-label logic so this test-derived layout can
+    # never disagree with build_workbook on the band-row count — notably for
+    # blank GENERICO rows, which _generico_labels excludes ("") but a plain
+    # nunique() would count as a distinct band row (off-by-one landmine).
+    return compute_layout(
+        n_genericos=len(_generico_labels(wide_df)),
+        n_articulos=len(wide_df),
+    )
 
 
 # ── RF-01: get_venta_mes ─────────────────────────────────────────────────────
@@ -389,11 +416,11 @@ class TestBuildUniverse:
 # Strict TDD — Phase 2, Task 2.3 (RED) / 2.4 (GREEN) of sdd/stock-badie PR2.
 
 
-def _universe_row(id_articulo, sucursal, stock_bultos, venta_bultos, estado="normal"):
+def _universe_row(id_articulo, sucursal, stock_bultos, venta_bultos, estado="normal", generico="CERVEZAS"):
     return {
         "id_articulo": id_articulo,
         "des_articulo": f"ARTICULO {id_articulo}",
-        "generico": "CERVEZAS",
+        "generico": generico,
         "marca": "QUILMES",
         "sucursal": sucursal,
         "stock_bultos": stock_bultos,
@@ -583,3 +610,944 @@ class TestComputeDiasVenta:
         MAX((Venta/$DiasVenta$)*$DiasStock$ - Stock, 0), which has NO
         IFERROR — a raw 0 would produce #DIV/0! across every PEDIDO cell."""
         assert compute_dias_venta(date(2026, 1, 1)) == 1
+
+
+# ── RF-06/RF-07: build_workbook ──────────────────────────────────────────────
+# Strict TDD — Phase 3, Task 3.1 (RED) / 3.2 (GREEN) and 3.3 (RED) / 3.4 (GREEN)
+# of sdd/stock-badie PR3.
+#
+# Column map (fixed, per design spec §3): identity A-D, then 14 sucursal
+# blocks of 4 cols [Stock, VENTA, PEDIDO, ALCANCE] starting at col 5 (E),
+# then the Total block at cols 61-64 (BI-BL). CASA CENTRAL (block 0) sits at
+# E-H; the Total block's Stock/VENTA/PEDIDO/ALCANCE columns are BI/BJ/BK/BL.
+
+
+def _is_formula(value) -> bool:
+    return isinstance(value, str) and value.startswith("=")
+
+
+class TestBuildWorkbookFormulas:
+    def test_dias_stock_and_dias_venta_are_plain_values(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        assert ws["B1"].value == 15
+        assert ws["B2"].value == 20
+        assert not _is_formula(ws["B1"].value)
+        assert not _is_formula(ws["B2"].value)
+
+    def test_named_ranges_point_at_param_cells(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+
+        assert "DiasStock" in wb.defined_names
+        assert "DiasVenta" in wb.defined_names
+        assert wb.defined_names["DiasStock"].attr_text == "'STOCK'!$B$1"
+        assert wb.defined_names["DiasVenta"].attr_text == "'STOCK'!$B$2"
+
+    def test_header_row_has_sucursal_name_and_block_labels(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        header_row = _layout_for(wide_df).header_row
+
+        assert ws.cell(row=header_row, column=1).value == "idArticulo"
+        assert ws.cell(row=header_row, column=2).value == "dsArticulo"
+        assert ws.cell(row=header_row, column=3).value == "GENERICO"
+        assert ws.cell(row=header_row, column=4).value == "MARCA"
+        # CASA CENTRAL block = col 5 (E): Stock header = sucursal name.
+        assert ws.cell(row=header_row, column=5).value == "CASA CENTRAL"
+        assert ws.cell(row=header_row, column=6).value == "VENTA"
+        assert ws.cell(row=header_row, column=7).value == "PEDIDO"
+        assert ws.cell(row=header_row, column=8).value == "ALCANCE"
+        # Total block = cols 61-64 (BI-BL).
+        assert ws.cell(row=header_row, column=61).value == "Total"
+        assert ws.cell(row=header_row, column=62).value == "VENTA TOTAL"
+        assert ws.cell(row=header_row, column=63).value == "PEDIDO TOTAL"
+        assert ws.cell(row=header_row, column=64).value == "ALCANCE TOTAL"
+
+    def test_stock_and_venta_cells_are_values_not_formulas(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        r = _layout_for(wide_df).data_start_row
+
+        stock_cell = ws.cell(row=r, column=5)  # E: CASA CENTRAL Stock
+        venta_cell = ws.cell(row=r, column=6)  # F: CASA CENTRAL VENTA
+
+        assert stock_cell.value == 5
+        assert venta_cell.value == 10
+        assert not _is_formula(stock_cell.value)
+        assert not _is_formula(venta_cell.value)
+
+    def test_pedido_formula_references_named_ranges_and_row_cells(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        r = _layout_for(wide_df).data_start_row
+
+        pedido_cell = ws.cell(row=r, column=7).value  # G: CASA CENTRAL PEDIDO
+
+        assert _is_formula(pedido_cell)
+        assert "DiasVenta" in pedido_cell
+        assert "DiasStock" in pedido_cell
+        assert f"F{r}" in pedido_cell  # VENTA cell of this row/block
+        assert f"E{r}" in pedido_cell  # Stock cell of this row/block
+        assert pedido_cell == f"=MAX((F{r}/DiasVenta)*DiasStock-E{r},0)"
+
+    def test_alcance_formula_references_named_range_and_row_cells(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        r = _layout_for(wide_df).data_start_row
+
+        alcance_cell = ws.cell(row=r, column=8).value  # H: CASA CENTRAL ALCANCE
+
+        assert _is_formula(alcance_cell)
+        assert "DiasVenta" in alcance_cell
+        assert alcance_cell == f"=IFERROR(E{r}/(F{r}/DiasVenta),0)"
+
+    def test_last_block_perico_formulas_reference_correct_cells(self):
+        """Formulas are generated per-block, not hardcoded to CASA CENTRAL.
+        PERICO is the 14th/last block (BE stock, BF venta, BG pedido, BH alcance)."""
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "SUCURSAL PERICO", stock_bultos=7, venta_bultos=3)]
+        )
+        wide_df = pivot_wide(universe_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        r = _layout_for(wide_df).data_start_row
+
+        pedido_perico = ws.cell(row=r, column=59).value   # BG
+        alcance_perico = ws.cell(row=r, column=60).value  # BH
+
+        assert pedido_perico == f"=MAX((BF{r}/DiasVenta)*DiasStock-BE{r},0)"
+        assert alcance_perico == f"=IFERROR(BE{r}/(BF{r}/DiasVenta),0)"
+
+    def test_empty_wide_df_produces_header_only_sheet(self):
+        """No kept pairs -> 0-row wide frame -> valid header-only STOCK sheet,
+        not a crash (guards the PR4 row-shifting edits near this loop)."""
+        wide_df = pivot_wide(pd.DataFrame())  # empty universe -> 0-row, 64-col
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        layout = _layout_for(wide_df)
+
+        assert ws.cell(row=layout.header_row, column=1).value is not None
+        assert ws.cell(row=layout.data_start_row, column=1).value is None
+
+
+class TestTotalBlockAlcance:
+    def test_total_stock_venta_pedido_are_sums_over_14_blocks(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        r = _layout_for(wide_df).data_start_row
+
+        total_stock = ws.cell(row=r, column=61).value  # BI
+        total_venta = ws.cell(row=r, column=62).value  # BJ
+        total_pedido = ws.cell(row=r, column=63).value  # BK
+
+        assert _is_formula(total_stock) and total_stock.startswith("=SUM(")
+        assert _is_formula(total_venta) and total_venta.startswith("=SUM(")
+        assert _is_formula(total_pedido) and total_pedido.startswith("=SUM(")
+        # 14 sucursal blocks -> 14 comma-separated cell refs inside SUM(...).
+        assert total_stock.count(",") == 13
+        assert total_venta.count(",") == 13
+        assert total_pedido.count(",") == 13
+
+        # Robust ref check: parse the EXACT column letters summed and compare
+        # to the hand-derived expected columns (block i Stock at 5+4*i, Venta
+        # +1, Pedido +2). Catches a stock/venta/pedido ref swap or a
+        # duplicated/omitted sucursal column that the format + comma-count
+        # checks above would silently miss (per PR3 reliability review).
+        def _sum_cols(formula):
+            return sorted(re.findall(r"([A-Z]{1,3})" + str(r) + r"(?!\d)", formula))
+
+        expected_stock = sorted(
+            ["E", "I", "M", "Q", "U", "Y", "AC", "AG", "AK", "AO", "AS", "AW", "BA", "BE"]
+        )
+        expected_venta = sorted(
+            ["F", "J", "N", "R", "V", "Z", "AD", "AH", "AL", "AP", "AT", "AX", "BB", "BF"]
+        )
+        expected_pedido = sorted(
+            ["G", "K", "O", "S", "W", "AA", "AE", "AI", "AM", "AQ", "AU", "AY", "BC", "BG"]
+        )
+        assert _sum_cols(total_stock) == expected_stock
+        assert _sum_cols(total_venta) == expected_venta
+        assert _sum_cols(total_pedido) == expected_pedido
+
+    def test_alcance_total_is_ratio_of_sums_not_sum_of_alcances(self):
+        """The legacy xlsm sums the 14 per-sucursal ALCANCE cells for the
+        total (mathematically wrong: sum of ratios != ratio of sums). This
+        report's ALCANCE TOTAL must instead divide the row's total-stock
+        cell by (total-venta cell / DiasVenta) — i.e. NOT a SUM of the 14
+        alcance cells (H, L, P, ... columns)."""
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        r = _layout_for(wide_df).data_start_row
+
+        alcance_total = ws.cell(row=r, column=64).value  # BL
+
+        assert _is_formula(alcance_total)
+        assert not alcance_total.startswith("=SUM(")
+        assert "DiasVenta" in alcance_total
+        # Must reference the row's Total-block Stock (BI) and VENTA TOTAL (BJ)
+        # cells — the ratio-of-sums inputs — not any per-sucursal ALCANCE cell.
+        assert f"BI{r}" in alcance_total
+        assert f"BJ{r}" in alcance_total
+        assert alcance_total == f"=IFERROR(BI{r}/(BJ{r}/DiasVenta),0)"
+
+    def test_multiple_article_rows_get_independent_formulas(self):
+        universe_df = pd.DataFrame(
+            [
+                _universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10),
+                _universe_row(2, "SUCURSAL METAN", stock_bultos=3, venta_bultos=6),
+            ]
+        )
+        wide_df = pivot_wide(universe_df)
+
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        data_start_row = _layout_for(wide_df).data_start_row
+        row1, row2 = data_start_row, data_start_row + 1
+
+        alcance_total_row1 = ws.cell(row=row1, column=64).value
+        alcance_total_row2 = ws.cell(row=row2, column=64).value
+
+        assert alcance_total_row1 == f"=IFERROR(BI{row1}/(BJ{row1}/DiasVenta),0)"
+        assert alcance_total_row2 == f"=IFERROR(BI{row2}/(BJ{row2}/DiasVenta),0)"
+        assert alcance_total_row1 != alcance_total_row2
+
+
+# ── RF-08: per-generico totals band ──────────────────────────────────────────
+# Strict TDD — Phase 4, Task 4.1 (RED) / 4.2 (GREEN) of sdd/stock-badie PR4.
+#
+# The band sits ABOVE the table header (user requirement: "totales en la
+# fila superior por generico"), so it is written at compute_layout()'s
+# band_start_row..band_end_row — always derived, never hardcoded.
+
+
+class TestGenericoBand:
+    def _two_generico_wide_df(self):
+        universe_df = pd.DataFrame(
+            [
+                _universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10, generico="CERVEZAS"),
+                _universe_row(2, "SUCURSAL METAN", stock_bultos=3, venta_bultos=6, generico="AGUAS DANONE"),
+            ]
+        )
+        return pivot_wide(universe_df)
+
+    def test_one_band_row_per_distinct_generico_sorted(self):
+        wide_df = self._two_generico_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        assert layout.band_end_row - layout.band_start_row + 1 == 2
+        # Deterministic sorted order: "AGUAS DANONE" < "CERVEZAS".
+        assert ws.cell(row=layout.band_start_row, column=3).value == "AGUAS DANONE"
+        assert ws.cell(row=layout.band_start_row + 1, column=3).value == "CERVEZAS"
+
+    def test_band_stock_is_sumifs_over_stock_and_generico_columns(self):
+        wide_df = self._two_generico_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cervezas_row = layout.band_start_row + 1  # second, sorted after AGUAS DANONE
+        stock_gen = ws.cell(row=cervezas_row, column=5).value  # E: CASA CENTRAL Stock
+
+        assert _is_formula(stock_gen)
+        assert stock_gen.startswith("=SUMIFS(")
+        assert f"E{layout.data_start_row}:E{layout.data_end_row}" in stock_gen
+        assert f"$C${layout.data_start_row}:$C${layout.data_end_row}" in stock_gen
+        assert f"$C${cervezas_row}" in stock_gen
+        assert stock_gen == (
+            f"=SUMIFS(E{layout.data_start_row}:E{layout.data_end_row},"
+            f"$C${layout.data_start_row}:$C${layout.data_end_row},$C${cervezas_row})"
+        )
+
+    def test_band_venta_and_pedido_are_also_sumifs(self):
+        wide_df = self._two_generico_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cervezas_row = layout.band_start_row + 1
+        venta_gen = ws.cell(row=cervezas_row, column=6).value   # F: CASA CENTRAL VENTA
+        pedido_gen = ws.cell(row=cervezas_row, column=7).value  # G: CASA CENTRAL PEDIDO
+
+        assert venta_gen.startswith("=SUMIFS(")
+        assert pedido_gen.startswith("=SUMIFS(")
+        assert f"F{layout.data_start_row}:F{layout.data_end_row}" in venta_gen
+        assert f"G{layout.data_start_row}:G{layout.data_end_row}" in pedido_gen
+
+    def test_band_alcance_is_ratio_not_sumifs(self):
+        wide_df = self._two_generico_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cervezas_row = layout.band_start_row + 1
+        alcance_gen = ws.cell(row=cervezas_row, column=8).value  # H: CASA CENTRAL ALCANCE
+
+        assert _is_formula(alcance_gen)
+        assert not alcance_gen.startswith("=SUMIFS(")
+        assert "DiasVenta" in alcance_gen
+        assert alcance_gen == f"=IFERROR(E{cervezas_row}/(F{cervezas_row}/DiasVenta),0)"
+
+    def test_band_total_block_stock_is_also_sumifs(self):
+        wide_df = self._two_generico_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cervezas_row = layout.band_start_row + 1
+        total_stock_gen = ws.cell(row=cervezas_row, column=61).value  # BI
+
+        assert total_stock_gen == (
+            f"=SUMIFS(BI{layout.data_start_row}:BI{layout.data_end_row},"
+            f"$C${layout.data_start_row}:$C${layout.data_end_row},$C${cervezas_row})"
+        )
+
+        total_venta_gen = ws.cell(row=cervezas_row, column=62).value  # BJ
+        total_pedido_gen = ws.cell(row=cervezas_row, column=63).value  # BK
+        assert total_venta_gen == (
+            f"=SUMIFS(BJ{layout.data_start_row}:BJ{layout.data_end_row},"
+            f"$C${layout.data_start_row}:$C${layout.data_end_row},$C${cervezas_row})"
+        )
+        assert total_pedido_gen == (
+            f"=SUMIFS(BK{layout.data_start_row}:BK{layout.data_end_row},"
+            f"$C${layout.data_start_row}:$C${layout.data_end_row},$C${cervezas_row})"
+        )
+
+    def test_band_total_block_alcance_is_ratio_not_sumifs(self):
+        wide_df = self._two_generico_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cervezas_row = layout.band_start_row + 1
+        total_alcance_gen = ws.cell(row=cervezas_row, column=64).value  # BL
+
+        assert not total_alcance_gen.startswith("=SUMIFS(")
+        assert total_alcance_gen == f"=IFERROR(BI{cervezas_row}/(BJ{cervezas_row}/DiasVenta),0)"
+
+    def test_empty_universe_has_empty_band_range_no_crash(self):
+        wide_df = pivot_wide(pd.DataFrame())
+        layout = _layout_for(wide_df)
+
+        build_workbook(wide_df, dias_venta=20, dias_stock=15)  # must not raise
+
+        assert layout.band_end_row < layout.band_start_row  # empty range
+
+
+# ── RF-09: TOTAL GENERAL row ──────────────────────────────────────────────────
+# Strict TDD — Phase 4, Task 4.3 (RED) / 4.4 (GREEN) of sdd/stock-badie PR4.
+
+
+class TestTotalGeneralRow:
+    def _single_generico_two_rows_wide_df(self):
+        universe_df = pd.DataFrame(
+            [
+                _universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10),
+                _universe_row(2, "CASA CENTRAL", stock_bultos=3, venta_bultos=6),
+            ]
+        )
+        return pivot_wide(universe_df)
+
+    def test_total_general_label_present_and_styled(self):
+        wide_df = self._single_generico_two_rows_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        label_cell = ws.cell(row=layout.total_general_row, column=1)
+
+        assert label_cell.value == "TOTAL GENERAL"
+        assert label_cell.font.bold is True
+        assert label_cell.fill.patternType == "solid"
+        assert label_cell.fill.fgColor.rgb == "00D9D9D9"
+
+    def test_total_general_stock_is_sum_over_data_rows(self):
+        wide_df = self._single_generico_two_rows_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        stock_total = ws.cell(row=layout.total_general_row, column=5).value  # E: CASA CENTRAL Stock
+
+        assert stock_total == f"=SUM(E{layout.data_start_row}:E{layout.data_end_row})"
+
+    def test_total_general_alcance_is_ratio_not_sum(self):
+        wide_df = self._single_generico_two_rows_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        r = layout.total_general_row
+        alcance_total = ws.cell(row=r, column=8).value  # H: CASA CENTRAL ALCANCE
+
+        assert _is_formula(alcance_total)
+        assert not alcance_total.startswith("=SUM(")
+        assert alcance_total == f"=IFERROR(E{r}/(F{r}/DiasVenta),0)"
+
+    def test_total_general_total_block_alcance_is_ratio(self):
+        wide_df = self._single_generico_two_rows_wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        r = layout.total_general_row
+        total_block_alcance = ws.cell(row=r, column=64).value  # BL
+
+        assert not total_block_alcance.startswith("=SUM(")
+        assert total_block_alcance == f"=IFERROR(BI{r}/(BJ{r}/DiasVenta),0)"
+
+    def test_no_total_general_row_for_empty_universe(self):
+        """A header-only sheet (no article rows) skips the TOTAL GENERAL row
+        entirely — a SUM/ratio over an empty data range would be meaningless
+        and would emit a malformed reversed Excel range."""
+        wide_df = pivot_wide(pd.DataFrame())
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        assert ws.cell(row=layout.total_general_row, column=1).value is None
+
+
+# ── RF-10: number format + Stock-vs-Pedido conditional formatting ───────────
+# Strict TDD — Phase 4, Task 4.5 (RED) / 4.6 (GREEN) of sdd/stock-badie PR4.
+
+
+class TestNumberFormatAndConditionalFormatting:
+    def _wide_df(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        return pivot_wide(universe_df)
+
+    def test_number_format_on_data_stock_cell(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cell = ws.cell(row=layout.data_start_row, column=5)  # E: Stock
+        assert cell.number_format == NUMBER_FORMAT
+
+    def test_number_format_on_data_alcance_cell(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cell = ws.cell(row=layout.data_start_row, column=8)  # H: ALCANCE
+        assert cell.number_format == NUMBER_FORMAT
+
+    def test_number_format_on_band_row_cell(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        band_cell = ws.cell(row=layout.band_start_row, column=5)  # E: CERVEZAS band Stock
+        assert band_cell.number_format == NUMBER_FORMAT
+
+    def test_number_format_on_total_general_cell(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        cell = ws.cell(row=layout.total_general_row, column=5)
+        assert cell.number_format == NUMBER_FORMAT
+
+    def test_identity_columns_stay_general_format(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        idarticulo_cell = ws.cell(row=layout.data_start_row, column=1)
+        assert idarticulo_cell.number_format == "General"
+
+    def test_conditional_formatting_rule_exists_for_casa_central_stock_vs_pedido(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        expected_range = f"E{layout.data_start_row}:E{layout.data_end_row}"
+        rules_for_range = ws.conditional_formatting[expected_range]
+
+        assert rules_for_range, f"no conditional formatting rules found on {expected_range}"
+        formulas = [rule.formula[0] for rule in rules_for_range]
+
+        red_formula = f"E{layout.data_start_row}<G{layout.data_start_row}"
+        green_formula = f"E{layout.data_start_row}>G{layout.data_start_row}"
+        assert red_formula in formulas
+        assert green_formula in formulas
+
+    def test_conditional_formatting_rule_exists_for_total_block_stock_vs_pedido(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        expected_range = f"BI{layout.data_start_row}:BI{layout.data_end_row}"
+        rules_for_range = ws.conditional_formatting[expected_range]
+
+        assert rules_for_range, f"no conditional formatting rules found on {expected_range}"
+        formulas = [rule.formula[0] for rule in rules_for_range]
+
+        red_formula = f"BI{layout.data_start_row}<BK{layout.data_start_row}"
+        green_formula = f"BI{layout.data_start_row}>BK{layout.data_start_row}"
+        assert red_formula in formulas
+        assert green_formula in formulas
+
+    def test_no_conditional_formatting_for_empty_universe(self):
+        """No data rows -> no conditional formatting rules at all (guards
+        against emitting a malformed reversed-range rule)."""
+        wide_df = pivot_wide(pd.DataFrame())
+        wb = build_workbook(wide_df, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+
+        assert list(ws.conditional_formatting) == []
+
+
+# ── RF-11: no rounding guard ──────────────────────────────────────────────────
+# Strict TDD — Phase 4, Task 4.7 (RED) / 4.8 (GREEN) of sdd/stock-badie PR4.
+# Mirrors the project-wide "no rounding" rule: report values are never
+# truncated in Python; only Excel number_format controls display.
+
+
+class TestNoRounding:
+    def test_no_round_or_astype_int_in_workbook_or_processor(self):
+        """round(...) and .astype(int) must never appear in the report-value
+        path. A plain int(...) cast IS allowed (e.g. logging row counts),
+        which is why this guard targets the two truncation-prone calls
+        specifically instead of banning int(...) outright."""
+        import inspect
+
+        import src.services.stock_badie.processor as processor_module
+        import src.services.stock_badie.workbook as workbook_module
+
+        for module in (workbook_module, processor_module):
+            source = inspect.getsource(module)
+            assert "round(" not in source, f"{module.__name__} must not call round()"
+            assert ".astype(int)" not in source, f"{module.__name__} must not call .astype(int)"
+
+
+# ── Phase 5 (PR5): StockBadieService orchestration ──────────────────────────
+# Strict TDD — Task 5.1 (RED) / 5.2 (GREEN) of sdd/stock-badie PR5.
+#
+# DataLoader is fully mocked (no real DB access anywhere in this class). The
+# service wires: get_ultima_fecha_stock() -> get_stock_diario() ->
+# get_venta_mes() -> build_universe() -> pivot_wide() -> compute_dias_venta()
+# -> build_workbook() -> save to disk, returning a StockBadieResult.
+
+
+class TestStockBadieServiceIntegration:
+    def _mock_loader(self, fecha_stock=date(2026, 7, 20)):
+        loader = MagicMock(spec=DataLoader)
+        loader.get_ultima_fecha_stock.return_value = fecha_stock
+        loader.get_stock_diario.return_value = pd.DataFrame(
+            [_stock_row(1, "CASA CENTRAL", cant_bultos=5, cant_htls=0.5)]
+        )
+        loader.get_venta_mes.return_value = pd.DataFrame(
+            [_venta_row(1, "CASA CENTRAL", venta_bultos=10, venta_htls=1.0)]
+        )
+        return loader
+
+    def _config(self, **overrides):
+        defaults = dict(fecha_desde="2026-07-01", fecha_hasta="2026-08-01")
+        defaults.update(overrides)
+        return StockBadieConfig(**defaults)
+
+    def test_calls_get_ultima_fecha_stock(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        service.generar_reporte(self._config())
+
+        loader.get_ultima_fecha_stock.assert_called_once_with()
+
+    def test_get_stock_diario_called_with_latest_stock_date_as_string(self, tmp_path, monkeypatch):
+        """get_ultima_fecha_stock() returns a date object; get_stock_diario()
+        needs the 'YYYY-MM-DD' string its query param expects (see its
+        docstring) — the service must convert, not pass the date through."""
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader(fecha_stock=date(2026, 7, 20))
+        service = StockBadieService(data_loader=loader)
+
+        service.generar_reporte(self._config(genericos=["CERVEZAS"]))
+
+        loader.get_stock_diario.assert_called_once_with("2026-07-20", ["CERVEZAS"])
+
+    def test_get_venta_mes_called_with_config_dates(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        service.generar_reporte(self._config(fecha_desde="2026-07-01", fecha_hasta="2026-08-01"))
+
+        loader.get_venta_mes.assert_called_once_with(
+            fecha_desde="2026-07-01", fecha_hasta="2026-08-01"
+        )
+
+    def test_writes_xlsx_to_service_output_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config())
+
+        expected_dir = tmp_path / "stock-badie" / "2026-07"
+        assert result.archivo_generado.parent == expected_dir
+        assert result.archivo_generado.exists()
+        assert result.archivo_generado.suffix == ".xlsx"
+
+    def test_saved_file_is_a_valid_reloadable_workbook_with_stock_sheet(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config())
+
+        wb = load_workbook(result.archivo_generado)
+        assert "STOCK" in wb.sheetnames
+        ws = wb["STOCK"]
+        assert ws.cell(row=1, column=2).value == 15  # DiasStock default
+
+    def test_default_filename_includes_periodo(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config())
+
+        assert "2026-07" in result.archivo_generado.name
+
+    def test_custom_nombre_archivo_is_used(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config(nombre_archivo="Reporte Custom.xlsx"))
+
+        assert result.archivo_generado.name == "Reporte Custom.xlsx"
+
+    def test_dias_stock_config_value_flows_to_workbook(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config(dias_stock=20))
+
+        wb = load_workbook(result.archivo_generado)
+        ws = wb["STOCK"]
+        assert ws.cell(row=1, column=2).value == 20
+
+    def test_dias_venta_uses_explicit_fecha_referencia_when_given(self, tmp_path, monkeypatch):
+        """fecha_referencia overrides date.today() so DiasVenta is
+        deterministic and matches compute_dias_venta() called directly on
+        the same reference date — the project has no freezegun dependency,
+        so the reference date must be injectable via config, not hardcoded
+        to the wall clock (same precedent as processor.compute_dias_venta,
+        which also takes an explicit date parameter instead of freezing the
+        clock internally)."""
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config(fecha_referencia="2026-07-20"))
+
+        expected_dias_venta = compute_dias_venta(date(2026, 7, 20))
+        assert result.dias_venta == expected_dias_venta
+        wb = load_workbook(result.archivo_generado)
+        assert wb["STOCK"].cell(row=2, column=2).value == expected_dias_venta
+
+    def test_dias_venta_past_month_default_clamps_to_month_end(self, tmp_path, monkeypatch):
+        """Re-running for a PAST month with no fecha_referencia must compute
+        DiasVenta for THAT month (its last day), not today's month — else it
+        divides the reported month's sales by the wrong elapsed-days count
+        (the review BLOCKER)."""
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        # A month safely in the past so date.today() is always > its last day.
+        result = service.generar_reporte(
+            self._config(fecha_desde="2020-01-01", fecha_hasta="2020-02-01")
+        )
+
+        # Clamped to 2020-01-31 (period end), NOT date.today().
+        assert result.dias_venta == compute_dias_venta(date(2020, 1, 31))
+
+    def test_explicit_fecha_referencia_beyond_period_is_clamped(self, tmp_path, monkeypatch):
+        """An explicit fecha_referencia outside the reporting period is clamped
+        into it, so DiasVenta can never be computed for a foreign month."""
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(
+            self._config(
+                fecha_desde="2020-01-01",
+                fecha_hasta="2020-02-01",
+                fecha_referencia="2020-03-15",  # outside the period -> clamped
+            )
+        )
+
+        assert result.dias_venta == compute_dias_venta(date(2020, 1, 31))
+
+    def test_empty_universe_logs_warning(self, tmp_path, monkeypatch, caplog):
+        """A generico filter matching no stock yields a 0-row report; log a
+        warning so the empty result is visible, not a silent near-empty xlsx."""
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        loader.get_stock_diario.return_value = pd.DataFrame(
+            [_stock_row(1, "CASA CENTRAL", cant_bultos=5, cant_htls=0.5)]
+        ).iloc[0:0]
+        loader.get_venta_mes.return_value = pd.DataFrame(
+            [_venta_row(1, "CASA CENTRAL", venta_bultos=10, venta_htls=1.0)]
+        ).iloc[0:0]
+        service = StockBadieService(data_loader=loader)
+
+        with caplog.at_level(logging.WARNING):
+            result = service.generar_reporte(self._config(genericos=["NOEXISTE"]))
+
+        assert result.n_articulos == 0
+        assert any("universo vacio" in r.message for r in caplog.records)
+
+    def test_returns_result_with_n_articulos_and_fecha_stock(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader(fecha_stock=date(2026, 7, 20))
+        service = StockBadieService(data_loader=loader)
+
+        result = service.generar_reporte(self._config())
+
+        assert isinstance(result, StockBadieResult)
+        assert result.n_articulos == 1
+        assert result.fecha_stock == date(2026, 7, 20)
+
+    def test_no_stock_snapshot_raises_value_error(self, tmp_path, monkeypatch):
+        """get_ultima_fecha_stock() returning None means gold.fact_stock has
+        no rows at all — must fail loudly, not build a bogus empty report."""
+        monkeypatch.setattr("config.settings.DATA_OUTPUT", tmp_path)
+        loader = self._mock_loader()
+        loader.get_ultima_fecha_stock.return_value = None
+        service = StockBadieService(data_loader=loader)
+
+        with pytest.raises(ValueError):
+            service.generar_reporte(self._config())
+
+    def test_service_slug_and_granularity(self):
+        assert StockBadieService.SERVICE_SLUG == "stock-badie"
+        assert StockBadieService.GRANULARITY == "month"
+
+    def test_create_data_loader_honors_db_name_override(self):
+        service = StockBadieService()
+        loader = service._create_data_loader(db_name="other_db")
+        assert isinstance(loader, DataLoader)
+
+    def test_create_data_loader_reuses_injected_loader_when_no_override(self):
+        """Unlike the sibling stock_diario._create_data_loader (which always
+        builds a fresh real DataLoader, silently discarding an injected
+        loader), stock_badie must actually use the constructor-injected
+        DataLoader when config.db_name is not set — otherwise every test
+        above that injects a mock via StockBadieService(data_loader=mock)
+        would silently hit a real DB instead."""
+        mock_loader = MagicMock(spec=DataLoader)
+        service = StockBadieService(data_loader=mock_loader)
+
+        assert service._create_data_loader(db_name=None) is mock_loader
+
+
+# ── Work Unit 6 (PR6): CLI registration + daily delivery wiring ─────────────
+#
+# Locks Phase 6 deliverable: stock-badie is reachable from the new-config
+# pipeline (REPORT_HANDLERS) AND the daily wiring (scripts/run_daily.py +
+# configs/stock_badie.json) so the report fires automatically each morning,
+# but in DORMANT-by-default mode: file is generated, delivery is held
+# until the user flips ejecutar=true (or removes the override).
+
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+
+class TestMainRegistration:
+    """main.py must register stock-badie as a dispatchable report handler."""
+
+    def test_stock_badie_handler_registered(self):
+        """REPORT_HANDLERS exposes 'stock-badie' -> a callable handler name."""
+        import main as main_mod
+
+        assert "stock-badie" in main_mod.REPORT_HANDLERS
+        # The handler must be a real function in the main module (not just a
+        # string label — _run_reportes uses globals()[handler_name] to call).
+        handler_name = main_mod.REPORT_HANDLERS["stock-badie"]
+        handler = getattr(main_mod, handler_name, None)
+        assert callable(handler), f"{handler_name} must be a callable function in main"
+
+
+class TestDeliveryWiring:
+    """configs/stock_badie.json + scripts/run_daily.py wire the daily run.
+
+    Locks:
+    - The config loads cleanly through load_report_config.
+    - It references the 4 recipients the spec requires, all present in
+      configs/contactos.json (validate_contacts must not raise).
+    - Dormant-by-default: the deliverable override flag is set so that
+      scripts/run_daily.py suppresses email/whatsapp on the live cron.
+    - The stock-badie entry exists in scripts/run_daily.py SERVICIOS.
+    """
+
+    CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "stock_badie.json"
+    CONTACTOS_PATH = Path(__file__).resolve().parent.parent / "configs" / "contactos.json"
+    RUN_DAILY_PATH = (
+        Path(__file__).resolve().parent.parent / "scripts" / "run_daily.py"
+    )
+
+    def _load_config(self):
+        from src.config.resolver import load_report_config
+
+        return load_report_config(self.CONFIG_PATH)
+
+    def test_config_loads_via_load_report_config(self):
+        """configs/stock_badie.json is a valid ReportConfig."""
+        assert self.CONFIG_PATH.exists(), (
+            f"Missing config: {self.CONFIG_PATH} — Phase 6 deliverable"
+        )
+        cfg = self._load_config()
+        assert cfg.tipo == "stock-badie"
+        assert len(cfg.reportes) >= 1
+
+    def test_config_has_expected_recipients(self):
+        """The 4 named recipients the spec requires are all in enviar_a."""
+        cfg = self._load_config()
+        report = cfg.reportes[0]
+        assert report.enviar_a is not None
+        expected = {"M Bravo", "Fabian Gallardo", "Sebastian Dellamea", "Gonzalo Farah"}
+        actual = set(report.enviar_a.keys())
+        assert expected.issubset(actual), (
+            f"Missing recipients in enviar_a: {expected - actual}"
+        )
+
+    def test_all_recipients_exist_in_contactos_catalog(self):
+        """validate_contacts must NOT raise for the 4 recipients.
+
+        This is the critical guard: resolve_delivery silently DROPS unknown
+        contacts (logs a warning), so the live cron would silently deliver
+        to 0 recipients if any name is mistyped. validate_contacts is the
+        load-time check that raises BEFORE that happens.
+        """
+        from src.config.resolver import load_contacts
+
+        cfg = self._load_config()
+        contactos = load_contacts(self.CONTACTOS_PATH)
+        # Must not raise — the 4 recipients must be in the catalog.
+        cfg.validate_contacts(contactos)
+
+    def test_config_dormant_by_default(self):
+        """DORMANT-by-default: configs/daily_overrides.json sets enviar=false
+        so the live cron generates the .xlsx but suppresses email/whatsapp.
+
+        The user explicitly chose 'DORMIDO PRIMERO' so the file can be
+        inspected in production before flipping the switch.
+        """
+        overrides_path = (
+            Path(__file__).resolve().parent.parent
+            / "configs"
+            / "daily_overrides.json"
+        )
+        assert overrides_path.exists(), (
+            f"Missing {overrides_path} — stock-badie dormancy must be declared there"
+        )
+        overrides = json.loads(overrides_path.read_text(encoding="utf-8"))
+        assert "stock-badie" in overrides, (
+            "stock-badie must appear in daily_overrides.json so its delivery is "
+            "explicitly disabled on the live cron"
+        )
+        entry = overrides["stock-badie"]
+        # The override must suppress delivery. Either via ejecutar=false
+        # (service skipped entirely) or enviar=false (generate, no send).
+        # We want the latter — the file MUST be produced so it can be
+        # inspected — so this test only accepts enviar=false.
+        assert entry.get("enviar") is False, (
+            f"stock-badie override must set enviar=false (dormant-by-default); "
+            f"got: {entry}"
+        )
+
+    def test_run_daily_registers_stock_badie(self):
+        """scripts/run_daily.py SERVICIOS list contains a stock-badie entry
+        with fecha_modo='mes_a_hoy' and the right config path."""
+        # Source-level parse: importlib re-execution triggers the @dataclass
+        # decorator on Servicio, which crashes on the freshly-minted module
+        # not yet registered in sys.modules under its __name__ — so we read
+        # the literal text and confirm both the dataclass entry AND the
+        # expected fields are present. This is sufficient for a wiring guard:
+        # a typo in the entry (wrong nombre, wrong fecha_modo) WILL change the
+        # text and fail this assertion.
+        import re
+
+        source = self.RUN_DAILY_PATH.read_text(encoding="utf-8")
+        # Locate a Servicio(...) block whose first positional arg is
+        # nombre="stock-badie" — extracted with a non-greedy multiline match.
+        pattern = re.compile(
+            r"Servicio\(\s*\n\s*nombre=\"stock-badie\"[^)]*\)",
+            re.DOTALL,
+        )
+        match = pattern.search(source)
+        assert match is not None, (
+            "scripts/run_daily.py must contain a Servicio(...) block with "
+            "nombre=\"stock-badie\""
+        )
+        block = match.group(0)
+        assert 'fecha_modo="mes_a_hoy"' in block, (
+            f"stock-badie Servicio must use fecha_modo='mes_a_hoy' (monthly); "
+            f"got block:\n{block}"
+        )
+        assert 'config_path=CONFIGS_DIR / "stock_badie.json"' in block, (
+            f"stock-badie Servicio must point at configs/stock_badie.json; "
+            f"got block:\n{block}"
+        )

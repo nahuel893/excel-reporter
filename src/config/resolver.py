@@ -255,6 +255,7 @@ def merge_filters(
         "marca_splits": global_f.marca_splits,
         "cupos_manuales": global_f.cupos_manuales,
         "todos_los_articulos": global_f.todos_los_articulos,
+        "dias_stock": global_f.dias_stock,
         # Per-client report filters (only meaningful per-report; no global fallback)
         "clientes": None,
         "articulos": None,
