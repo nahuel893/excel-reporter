@@ -1543,9 +1543,9 @@ class TestDeliveryWiring:
             "nombre=\"stock-badie\""
         )
         block = match.group(0)
-        assert 'fecha_modo="mes_a_hoy"' in block, (
-            f"stock-badie Servicio must use fecha_modo='mes_a_hoy' (monthly); "
-            f"got block:\n{block}"
+        assert 'fecha_modo="mes_completo"' in block, (
+            f"stock-badie Servicio must use fecha_modo='mes_completo' (half-open "
+            f"monthly window — get_venta_mes uses <); got block:\n{block}"
         )
         assert 'config_path=CONFIGS_DIR / "stock_badie.json"' in block, (
             f"stock-badie Servicio must point at configs/stock_badie.json; "
