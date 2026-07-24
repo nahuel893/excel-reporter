@@ -17,5 +17,11 @@
         "ejecutar": true,
         "enviar": true,
         "razon": "Activo. Template listo y verificado. El envio lo controla el gate de objetivo (esperar_objetivo=true en el config): solo entrega cuando los cupos del mes estan cargados en gold, si no genera pero no envia."
+    },
+    "stock-badie": {
+        "ejecutar": true,
+        "enviar": false,
+        "razon": "GO-LIVE DORMIDO PRIMERO (2026-07-24): el cron diario genera el .xlsx para inspeccion, pero NO envia email. Activar entrega cambiando 'enviar' a true despues de validar el primer archivo en data/output/stock-badie/."
     }
 }
+

@@ -100,7 +100,7 @@ CONFIGS_DIR = ROOT / "configs"
 CONTACTOS_PATH = CONFIGS_DIR / "contactos.json"
 OVERRIDES_PATH = CONFIGS_DIR / "daily_overrides.json"
 
-FechaModo = Literal["hoy", "mes_a_hoy", "solo_hasta"]
+FechaModo = Literal["hoy", "mes_a_hoy", "mes_completo", "solo_hasta"]
 
 # RAM guard for image-rendering reports (e.g. avance-badie's LibreOffice capture).
 # The render needs ~2.5 GB RAM; below this floor we skip images rather than risk
@@ -116,7 +116,15 @@ def _is_business_day(value: date) -> bool:
 
 
 def _is_first_business_day_of_month(value: date) -> bool:
-    """Return True if the given date is the first business day of its month."""
+    """Return True if the given date is the first business day of its month.
+
+    Note: the project's `_is_business_day` treats Saturday as a business
+    day (only Sundays + FERIADOS are excluded). So Aug 1 (Saturday) IS the
+    first business day of August — the function returns True. The
+    `mes_a_hoy`/`mes_completo` resolution then runs on the NEXT business
+    day (e.g. Monday Aug 3) when the daily actually fires, picking the
+    closed-previous-month window.
+    """
     if not _is_business_day(value):
         return False
 
@@ -133,6 +141,11 @@ def _resolve_mes_a_hoy_range(hoy: date) -> tuple[str, str]:
 
     Rule: on the first business day of a month, send the previous month closed.
     Otherwise, keep the current month-to-date behavior.
+
+    NOTE: returns INCLUSIVE `fecha_hasta` (last day of the period). Report
+    consumers that use a half-open SQL bound (e.g. `fecha_comprobante <
+    :fecha_hasta`) MUST add one day to `fecha_hasta` (or use `mes_completo`,
+    which returns the already-exclusive bound).
     """
     if _is_first_business_day_of_month(hoy):
         ultimo_dia_mes_anterior = hoy.replace(day=1) - timedelta(days=1)
@@ -140,6 +153,29 @@ def _resolve_mes_a_hoy_range(hoy: date) -> tuple[str, str]:
         return primer_dia_mes_anterior.isoformat(), ultimo_dia_mes_anterior.isoformat()
 
     return hoy.replace(day=1).isoformat(), hoy.isoformat()
+
+
+def _resolve_mes_completo_range(hoy: date) -> tuple[str, str]:
+    """Resolve the date range for monthly reports that use a half-open SQL
+    bound on `fecha_hasta` (e.g. `get_venta_mes`, which uses `<`).
+
+    Unlike `mes_a_hoy`, this returns fecha_hasta = FIRST day of the FOLLOWING
+    month (or tomorrow, when today is in the current month) — the exclusive
+    upper bound — so the period truly INCLUDES the last day of the reported
+    month (or today).
+    """
+    if _is_first_business_day_of_month(hoy):
+        # Closed previous month: [1st prev, 1st of current) — exclusive
+        # upper bound = 1st of current month.
+        primer_dia_mes_anterior = hoy.replace(day=1) - timedelta(days=1)
+        primer_dia_mes_anterior = primer_dia_mes_anterior.replace(day=1)
+        return (
+            primer_dia_mes_anterior.isoformat(),
+            hoy.replace(day=1).isoformat(),
+        )
+    # Current month to-date: [1st of this month, tomorrow) — exclusive
+    # upper bound = tomorrow (so today IS included).
+    return hoy.replace(day=1).isoformat(), (hoy + timedelta(days=1)).isoformat()
 
 
 @dataclass(frozen=True)
@@ -160,6 +196,15 @@ class Servicio:
             filtros["fecha_hasta"] = hoy_iso
         elif self.fecha_modo == "mes_a_hoy":
             fecha_desde, fecha_hasta = _resolve_mes_a_hoy_range(hoy)
+            filtros["fecha_desde"] = fecha_desde
+            filtros["fecha_hasta"] = fecha_hasta
+        elif self.fecha_modo == "mes_completo":
+            # Half-open window: fecha_hasta is the EXCLUSIVE upper bound
+            # (1st of next month, or tomorrow for the current month), so
+            # the consumer's SQL `fecha < :fecha_hasta` includes the last
+            # day of the period. Required for get_venta_mes and any other
+            # consumer that treats fecha_hasta as exclusive.
+            fecha_desde, fecha_hasta = _resolve_mes_completo_range(hoy)
             filtros["fecha_desde"] = fecha_desde
             filtros["fecha_hasta"] = fecha_hasta
         elif self.fecha_modo == "solo_hasta":
@@ -256,6 +301,11 @@ SERVICIOS: list[Servicio] = [
         nombre="stock-suria-completo",
         config_path=CONFIGS_DIR / "stock_suria_completo.json",
         fecha_modo="hoy",
+    ),
+    Servicio(
+        nombre="stock-badie",
+        config_path=CONFIGS_DIR / "stock_badie.json",
+        fecha_modo="mes_completo",  # half-open SQL upper bound (see _resolve_mes_completo_range)
     ),
 ]
 

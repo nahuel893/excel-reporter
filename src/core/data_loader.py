@@ -2658,6 +2658,55 @@ class DataLoader:
             params[f"gen_{i}"] = g
         return self.execute_query(query, params)
 
+    # ── Stock Badie ────────────────────────────────────────────
+
+    def get_venta_mes(self, fecha_desde: str, fecha_hasta: str) -> pd.DataFrame:
+        """Current calendar-month sales, grouped by (id_sucursal, id_articulo).
+
+        Args:
+            fecha_desde: Inclusive lower bound, format 'YYYY-MM-DD' (first day
+                of the current month).
+            fecha_hasta: Exclusive upper bound, format 'YYYY-MM-DD' (first day
+                of the NEXT month). The window is half-open
+                [fecha_desde, fecha_hasta) to avoid partial-month leakage.
+
+        Note: fact_ventas already carries id_sucursal directly, so this query
+        does NOT join/filter by id_ruta or id_vendedor — the composite-key
+        rule (id + id_sucursal) does not apply here.
+
+        Returns:
+            DataFrame with columns: id_sucursal, sucursal, id_articulo,
+            venta_bultos, venta_htls.
+        """
+        query = """
+        SELECT
+            fv.id_sucursal,
+            ds.descripcion AS sucursal,
+            fv.id_articulo,
+            SUM(fv.cantidades_total) AS venta_bultos,
+            SUM(fv.cantidad_total_htls) AS venta_htls
+        FROM gold.fact_ventas fv
+        LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+        WHERE fv.fecha_comprobante >= :fecha_desde
+          AND fv.fecha_comprobante < :fecha_hasta
+        GROUP BY fv.id_sucursal, ds.descripcion, fv.id_articulo
+        ORDER BY fv.id_sucursal, fv.id_articulo
+        """
+        params = {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta}
+        return self.execute_query(query, params)
+
+    def get_ultima_fecha_stock(self):
+        """Latest stock snapshot date available in gold.fact_stock.
+
+        Returns:
+            date, or None if fact_stock has no rows.
+        """
+        query = "SELECT MAX(date_stock) AS ultima_fecha FROM gold.fact_stock"
+        df = self.execute_query(query)
+        if df.empty or df["ultima_fecha"].iloc[0] is None:
+            return None
+        return pd.to_datetime(df["ultima_fecha"].iloc[0]).date()
+
 
 # Instancia por defecto para compatibilidad
 _default_loader = None
