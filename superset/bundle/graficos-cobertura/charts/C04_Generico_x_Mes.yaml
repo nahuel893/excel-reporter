@@ -1,0 +1,22 @@
+slice_name: "Cobertura \xB7 Gen\xE9rico \xD7 Mes"
+description: Line chart — tendencia de gen\xE9rico por mes (multi-anio)
+certified_by: null
+certification_details: null
+viz_type: line
+params:
+  viz_type: line
+  metrics:
+  - sum_clientes
+  groupby:
+  - generico
+  x_axis: periodo
+  row_limit: 10000
+  show_legend: true
+  y_axis_format: ',.0f'
+  datasource: 1__table
+  adhoc_filters: []
+query_context: null
+cache_timeout: null
+uuid: e1f71e5c-0604-464b-803c-6947c8838e34
+version: 1.0.0
+dataset_uuid: 81b9016f-b213-4840-9f48-ca4aa69bb652

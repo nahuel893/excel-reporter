@@ -1,0 +1,22 @@
+slice_name: "Cobertura \xB7 Gen\xE9rico Mix (%)"
+description: Pie — share de cada gen\xE9rico sobre el total de clientes
+certified_by: null
+certification_details: null
+viz_type: pie
+params:
+  viz_type: pie
+  metric: sum_clientes
+  groupby:
+  - generico
+  row_limit: 100
+  show_legend: true
+  show_labels: true
+  labels_outside: true
+  y_axis_format: ',.0f'
+  datasource: 1__table
+  adhoc_filters: []
+query_context: null
+cache_timeout: null
+uuid: 323ec863-a7c7-4679-9b5f-278c08cd93f3
+version: 1.0.0
+dataset_uuid: 81b9016f-b213-4840-9f48-ca4aa69bb652

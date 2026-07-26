@@ -1,0 +1,24 @@
+slice_name: "Cobertura \xB7 Pivot (zona \xD7 per\xEDodo)"
+description: Tabla pivot zona (rows) x periodo (cols), values=SUM(clientes)
+certified_by: null
+certification_details: null
+viz_type: pivot_table_v2
+params:
+  viz_type: pivot_table_v2
+  metrics:
+  - sum_clientes
+  groupby:
+  - zona
+  columns:
+  - periodo
+  row_limit: 1000
+  show_totals: true
+  show_row_totals: true
+  y_axis_format: ',.0f'
+  datasource: 1__table
+  adhoc_filters: []
+query_context: null
+cache_timeout: null
+uuid: 531845ad-087d-433a-a46e-588f16222396
+version: 1.0.0
+dataset_uuid: 81b9016f-b213-4840-9f48-ca4aa69bb652

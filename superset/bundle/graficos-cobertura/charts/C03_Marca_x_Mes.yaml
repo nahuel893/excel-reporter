@@ -1,0 +1,23 @@
+slice_name: "Cobertura \xB7 Marca \xD7 Mes"
+description: Barras marca stacked por mes para la (zona, generico) seleccionada
+certified_by: null
+certification_details: null
+viz_type: dist_bar
+params:
+  viz_type: dist_bar
+  metrics:
+  - sum_clientes
+  groupby:
+  - marca
+  columns:
+  - periodo
+  row_limit: 1000
+  show_legend: true
+  y_axis_format: ',.0f'
+  datasource: 1__table
+  adhoc_filters: []
+query_context: null
+cache_timeout: null
+uuid: 903b0637-75cf-46e2-8f20-b43f14ad4b86
+version: 1.0.0
+dataset_uuid: 81b9016f-b213-4840-9f48-ca4aa69bb652
