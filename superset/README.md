@@ -1,3 +1,71 @@
+# Superset Bundle — Informes Badie
+
+This directory contains the version-controlled exports of the BADIE SA Superset dashboards and all their dependent assets.
+
+## Bundles
+
+Two bundles are tracked here, each with its own dashboard, dataset, charts, and DB binding:
+
+- `bundle/` — **Resumen Mensual** (`slug: resumen-mensual`), backed by `gold.mv_resumen_mensual` (a materialized view).
+- `bundle/graficos-cobertura/` — **Cobertura Zonas** (`slug: cobertura-zonas`), backed by a **virtual dataset** whose `sql:` field encodes the 5-zona cobertura logic. No DDL on `gold`, no MV, no superuser.
+
+## Cobertura Zonas (virtual dataset, additive)
+
+`bundle/graficos-cobertura/` is a strict additive deliverable: the Python deck pipeline (`src/services/graficos_cobertura/*`) is untouched. See [`bundle/graficos-cobertura/README.md`](bundle/graficos-cobertura/README.md) for full details.
+
+```
+superset/bundle/graficos-cobertura/
+├── metadata.yaml                          # Export metadata (version, type)
+├── README.md                              # Bundle-specific notes
+├── dashboards/Cobertura_Zonas.yaml        # Dashboard + 4 native filters
+├── charts/C01..C08_*.yaml                 # 8 chart YAMLs (KPI, dist_bar, line, pivot, pie)
+├── datasets/Medallion_Gold/cobertura_zonas.yaml   # Virtual dataset, sql: populated
+└── databases/Medallion_Gold.yaml          # DB connection (REUSE, same UUID a842c321-...)
+```
+
+### Charts (8)
+
+| # | Name | Type | What it shows |
+|---|------|------|---|
+| 1 | Clientes TOTAL | KPI / Big Number | SUM(clientes) for selected (periodo, generico) |
+| 2 | NOA NORTE | KPI / Big Number | SUM(clientes) for NOA NORTE (rollup, NOT sum of others) |
+| 3 | Marca × Mes | dist_bar | marca stacked bars across meses |
+| 4 | Genérico × Mes | line | genérico trend across meses |
+| 5 | Pivot Cobertura | pivot_table_v2 | zona (rows) × periodo (cols) |
+| 6 | YoY Comparativo | dist_bar | anio_actual vs anio_anterior marca-stacked |
+| 7 | Genérico Mix (%) | pie | generico share of total clientes |
+| 8 | Clientes por Zona | KPI / Big Number (grouped) | one KPI per zona |
+
+### Native filters (4)
+
+| Filter | Column | `chartsInScope` | `tabsInScope` | `enableEmptyFilter` |
+|--------|--------|-----------------|---------------|---------------------|
+| Período | `periodo` | [1..8] | [] | true |
+| Zona | `zona` | [1..8] | [] | true |
+| Genérico | `generico` | [1..8] | [] | true |
+| Marca | `marca` | [1..8] | [] | true |
+
+### Database connection (REUSE)
+
+Same `Medallion (Gold)` connection as Resumen Mensual: `uuid: a842c321-6955-4eea-9c30-01824a8d0039`, masked password `XXXXXXXXXX`, `host.docker.internal:5432`, `medallion_db`. Supply the real `superset_ro` password at import time.
+
+### Re-import recipe
+
+```bash
+cd superset
+zip -r /tmp/cobertura_zonas_bundle.zip bundle/graficos-cobertura/
+
+curl -X POST https://bi.badie.site/api/v1/assets/import/ \
+  -H "Authorization: Bearer <token>" \
+  -H "X-CSRFToken: <csrf>" \
+  -F "bundle=@/tmp/cobertura_zonas_bundle.zip" \
+  -F 'passwords={"databases/Medallion_Gold.yaml": "<superset_ro_password>"}'
+```
+
+Or use the helper: `scripts/superset_reimport_cobertura.sh` (env-driven, prints chart listing at the end).
+
+---
+
 # Superset Bundle — Resumen Mensual
 
 This directory contains the version-controlled export of the **Resumen Mensual** Superset dashboard and all its dependent assets.
