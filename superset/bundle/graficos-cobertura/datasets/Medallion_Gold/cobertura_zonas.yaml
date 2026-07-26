@@ -1,0 +1,397 @@
+table_name: cobertura_zonas
+main_dttm_col: null
+description: Cobertura por zona (5 zonas NOA) — dashboard fuente de verdad
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: medallion_db
+schema: gold
+# Virtual dataset — `sql:` carries the long-form 5-branch UNION ALL.
+# No MV, no DDL on gold. Mirrors src/services/graficos_cobertura/{constants.py, processor.py}.
+sql: |-
+  -- =====================================================================
+  -- ASSUMPTION: id_fuerza_ventas = 1 (matches GraficosCoberturaConfig default)
+  -- REASSIGN: rutas 85,86,87,88,118,119 routed from SALTA CAPITAL to INTERIOR SALTA SUR
+  -- LINEAGE BOUNDARY: anio < 2025 preventista source; anio >= 2025 suc-1 aggregate
+  -- =====================================================================
+  WITH
+    -- Subdivision map (single source of truth for the dashboard; deck keeps
+    -- its own copy in src/services/graficos_cobertura/constants.py).
+    subdivision_map (marca, subdivision) AS (
+      VALUES
+        ('LEVITE',         'AGUAS SABORIZADAS'),
+        ('SER',            'AGUAS SABORIZADAS'),
+        ('BRIO',           'AGUAS SABORIZADAS'),
+        ('FULL SPORT',     'AGUAS SABORIZADAS'),
+        ('VILLA DEL SUR',  'AGUAS MINERAL'),
+        ('VILLAVICENCIO',  'AGUAS MINERAL')
+    ),
+
+    -- Guarded AGUAS source: zero rows if the table is absent.
+    aguas_source AS (
+      SELECT
+        s.id_sucursal,
+        s.periodo,
+        sm.subdivision AS subdivision_aguas,
+        s.clientes_compradores
+      FROM gold.cob_sucursal_aguas s
+      JOIN subdivision_map sm ON sm.marca = s.marca
+      WHERE to_regclass('gold.cob_sucursal_aguas')::text IS NOT NULL
+        AND s.id_fuerza_ventas = 1
+    ),
+
+    -- ────────────────────────────────────────────────────────────
+    -- 1) NOA NORTE (rollup, no id_sucursal filter — own branch, NOT a sum of others)
+    -- Sources: cob_sucursal_marca (all sucursales) + cob_sucursal_aguas (all)
+    -- ────────────────────────────────────────────────────────────
+    rama_noa_norte AS (
+      SELECT
+        'NOA NORTE'::text AS zona,
+        EXTRACT(YEAR  FROM cob.periodo)::int AS anio,
+        EXTRACT(MONTH FROM cob.periodo)::int AS mes,
+        CASE WHEN sm.subdivision IS NOT NULL THEN sm.subdivision END AS generico,
+        cob.marca,
+        SUM(cob.clientes_compradores) AS clientes
+      FROM gold.cob_sucursal_marca cob
+      LEFT JOIN subdivision_map sm ON sm.marca = cob.marca
+      WHERE cob.id_fuerza_ventas = 1
+      GROUP BY 1, 2, 3, 4, 5
+    ),
+
+    -- ────────────────────────────────────────────────────────────
+    -- 2) SALTA CAPITAL — pre-2025 preventista + 2025+ suc-1 aggregate
+    --    Preventista half excludes reassigned rutas (id_ruta NOT IN 85,86,87,88,118,119)
+    --    Suc-1 half reads cob_sucursal_marca (id_sucursal = 1, anio >= 2025)
+    -- ────────────────────────────────────────────────────────────
+    rama_salta_capital AS (
+      SELECT
+        'SALTA CAPITAL'::text AS zona,
+        anio, mes, generico, marca, SUM(clientes) AS clientes
+      FROM (
+        -- pre-2025 preventista (id_ruta NOT IN reassigned), generico grain
+        SELECT
+          EXTRACT(YEAR  FROM p.periodo)::int AS anio,
+          EXTRACT(MONTH FROM p.periodo)::int AS mes,
+          CASE WHEN sm.subdivision IS NOT NULL THEN sm.subdivision END AS generico,
+          NULL::text AS marca,
+          p.clientes_compradores AS clientes
+        FROM gold.cob_preventista_generico p
+        LEFT JOIN subdivision_map sm ON sm.marca = p.marca
+        WHERE p.id_fuerza_ventas = 1 AND p.id_sucursal = 1
+          AND p.id_ruta NOT IN (85, 86, 87, 88, 118, 119)
+          AND EXTRACT(YEAR FROM p.periodo) < 2025
+        UNION ALL
+        -- pre-2025 preventista (id_ruta NOT IN reassigned), marca grain
+        SELECT
+          EXTRACT(YEAR  FROM p.periodo)::int AS anio,
+          EXTRACT(MONTH FROM p.periodo)::int AS mes,
+          NULL::text AS generico,
+          p.marca,
+          p.clientes_compradores AS clientes
+        FROM gold.cob_preventista_marca p
+        WHERE p.id_fuerza_ventas = 1 AND p.id_sucursal = 1
+          AND p.id_ruta NOT IN (85, 86, 87, 88, 118, 119)
+          AND EXTRACT(YEAR FROM p.periodo) < 2025
+        UNION ALL
+        -- 2025+ suc-1 aggregate, marca grain
+        SELECT
+          EXTRACT(YEAR  FROM cob.periodo)::int AS anio,
+          EXTRACT(MONTH FROM cob.periodo)::int AS mes,
+          CASE WHEN sm.subdivision IS NOT NULL THEN sm.subdivision END AS generico,
+          cob.marca,
+          cob.clientes_compradores AS clientes
+        FROM gold.cob_sucursal_marca cob
+        LEFT JOIN subdivision_map sm ON sm.marca = cob.marca
+        WHERE cob.id_fuerza_ventas = 1 AND cob.id_sucursal = 1
+          AND EXTRACT(YEAR FROM cob.periodo) >= 2025
+        UNION ALL
+        -- 2025+ suc-1 aggregate, generico grain
+        SELECT
+          EXTRACT(YEAR  FROM cob.periodo)::int AS anio,
+          EXTRACT(MONTH FROM cob.periodo)::int AS mes,
+          cob.generico,
+          NULL::text AS marca,
+          cob.clientes_compradores AS clientes
+        FROM gold.cob_sucursal_generico cob
+        WHERE cob.id_fuerza_ventas = 1 AND cob.id_sucursal = 1
+          AND EXTRACT(YEAR FROM cob.periodo) >= 2025
+        UNION ALL
+        -- AGUAS subdivision rows for SALTA CAPITAL (id_sucursal = 1)
+        SELECT
+          EXTRACT(YEAR  FROM a.periodo)::int AS anio,
+          EXTRACT(MONTH FROM a.periodo)::int AS mes,
+          a.subdivision_aguas AS generico,
+          NULL::text AS marca,
+          a.clientes_compradores AS clientes
+        FROM aguas_source a
+        WHERE a.id_sucursal = 1
+      ) u
+      WHERE generico IS NULL
+         OR generico IN ('CERVEZAS','AGUAS SABORIZADAS','AGUAS MINERAL','SIDRAS Y LICORES','VINOS CCU')
+      GROUP BY 1, 2, 3, 4, 5
+    ),
+
+    -- ────────────────────────────────────────────────────────────
+    -- 3) INTERIOR SALTA SUR — cob_sucursal_* (suc 3,4,5,16) PLUS reassigned rutas
+    --    Sources: cob_sucursal_marca/_generico (id_sucursal IN 3,4,5,16) +
+    --             cob_preventista_marca/_generico (id_ruta IN 85,86,87,88,118,119) +
+    --             aguas_source (id_sucursal IN 3,4,5,16)
+    -- ────────────────────────────────────────────────────────────
+    rama_interior_salta_sur AS (
+      SELECT
+        'INTERIOR SALTA SUR'::text AS zona,
+        anio, mes, generico, marca, SUM(clientes) AS clientes
+      FROM (
+        -- cob_sucursal_marca for the 4 interior sucursales
+        SELECT
+          EXTRACT(YEAR  FROM cob.periodo)::int AS anio,
+          EXTRACT(MONTH FROM cob.periodo)::int AS mes,
+          CASE WHEN sm.subdivision IS NOT NULL THEN sm.subdivision END AS generico,
+          cob.marca,
+          cob.clientes_compradores AS clientes
+        FROM gold.cob_sucursal_marca cob
+        LEFT JOIN subdivision_map sm ON sm.marca = cob.marca
+        WHERE cob.id_fuerza_ventas = 1
+          AND cob.id_sucursal IN (3, 4, 5, 16)
+        UNION ALL
+        -- cob_sucursal_generico for the 4 interior sucursales
+        SELECT
+          EXTRACT(YEAR  FROM cob.periodo)::int AS anio,
+          EXTRACT(MONTH FROM cob.periodo)::int AS mes,
+          cob.generico,
+          NULL::text AS marca,
+          cob.clientes_compradores AS clientes
+        FROM gold.cob_sucursal_generico cob
+        WHERE cob.id_fuerza_ventas = 1
+          AND cob.id_sucursal IN (3, 4, 5, 16)
+        UNION ALL
+        -- reassigned preventista (id_ruta IN 85,86,87,88,118,119), marca grain
+        SELECT
+          EXTRACT(YEAR  FROM p.periodo)::int AS anio,
+          EXTRACT(MONTH FROM p.periodo)::int AS mes,
+          CASE WHEN sm.subdivision IS NOT NULL THEN sm.subdivision END AS generico,
+          p.marca,
+          p.clientes_compradores AS clientes
+        FROM gold.cob_preventista_marca p
+        LEFT JOIN subdivision_map sm ON sm.marca = p.marca
+        WHERE p.id_fuerza_ventas = 1 AND p.id_sucursal = 1
+          AND p.id_ruta IN (85, 86, 87, 88, 118, 119)
+        UNION ALL
+        -- reassigned preventista (id_ruta IN 85,86,87,88,118,119), generico grain
+        SELECT
+          EXTRACT(YEAR  FROM p.periodo)::int AS anio,
+          EXTRACT(MONTH FROM p.periodo)::int AS mes,
+          CASE WHEN sm.subdivision IS NOT NULL THEN sm.subdivision END AS generico,
+          NULL::text AS marca,
+          p.clientes_compradores AS clientes
+        FROM gold.cob_preventista_generico p
+        LEFT JOIN subdivision_map sm ON sm.marca = p.marca
+        WHERE p.id_fuerza_ventas = 1 AND p.id_sucursal = 1
+          AND p.id_ruta IN (85, 86, 87, 88, 118, 119)
+        UNION ALL
+        -- AGUAS subdivision rows for the 4 interior sucursales
+        SELECT
+          EXTRACT(YEAR  FROM a.periodo)::int AS anio,
+          EXTRACT(MONTH FROM a.periodo)::int AS mes,
+          a.subdivision_aguas AS generico,
+          NULL::text AS marca,
+          a.clientes_compradores AS clientes
+        FROM aguas_source a
+        WHERE a.id_sucursal IN (3, 4, 5, 16)
+      ) u
+      WHERE generico IS NULL
+         OR generico IN ('CERVEZAS','AGUAS SABORIZADAS','AGUAS MINERAL','SIDRAS Y LICORES','VINOS CCU')
+      GROUP BY 1, 2, 3, 4, 5
+    ),
+
+    -- ────────────────────────────────────────────────────────────
+    -- 4) INTERIOR SALTA NORTE — cob_sucursal_* (suc 6,7) + AGUAS subdivision
+    -- ────────────────────────────────────────────────────────────
+    rama_interior_salta_norte AS (
+      SELECT
+        'INTERIOR SALTA NORTE'::text AS zona,
+        anio, mes, generico, marca, SUM(clientes) AS clientes
+      FROM (
+        -- cob_sucursal_marca for the 2 norte sucursales
+        SELECT
+          EXTRACT(YEAR  FROM cob.periodo)::int AS anio,
+          EXTRACT(MONTH FROM cob.periodo)::int AS mes,
+          CASE WHEN sm.subdivision IS NOT NULL THEN sm.subdivision END AS generico,
+          cob.marca,
+          cob.clientes_compradores AS clientes
+        FROM gold.cob_sucursal_marca cob
+        LEFT JOIN subdivision_map sm ON sm.marca = cob.marca
+        WHERE cob.id_fuerza_ventas = 1
+          AND cob.id_sucursal IN (6, 7)
+        UNION ALL
+        -- cob_sucursal_generico for the 2 norte sucursales
+        SELECT
+          EXTRACT(YEAR  FROM cob.periodo)::int AS anio,
+          EXTRACT(MONTH FROM cob.periodo)::int AS mes,
+          cob.generico,
+          NULL::text AS marca,
+          cob.clientes_compradores AS clientes
+        FROM gold.cob_sucursal_generico cob
+        WHERE cob.id_fuerza_ventas = 1
+          AND cob.id_sucursal IN (6, 7)
+        UNION ALL
+        -- AGUAS subdivision rows for the 2 norte sucursales
+        SELECT
+          EXTRACT(YEAR  FROM a.periodo)::int AS anio,
+          EXTRACT(MONTH FROM a.periodo)::int AS mes,
+          a.subdivision_aguas AS generico,
+          NULL::text AS marca,
+          a.clientes_compradores AS clientes
+        FROM aguas_source a
+        WHERE a.id_sucursal IN (6, 7)
+      ) u
+      WHERE generico IS NULL
+         OR generico IN ('CERVEZAS','AGUAS SABORIZADAS','AGUAS MINERAL','SIDRAS Y LICORES','VINOS CCU')
+      GROUP BY 1, 2, 3, 4, 5
+    ),
+
+    -- ────────────────────────────────────────────────────────────
+    -- 5) JUJUY INTERIOR — cob_sucursal_* (suc 9..15) + AGUAS subdivision
+    -- ────────────────────────────────────────────────────────────
+    rama_jujuy_interior AS (
+      SELECT
+        'JUJUY INTERIOR'::text AS zona,
+        anio, mes, generico, marca, SUM(clientes) AS clientes
+      FROM (
+        -- cob_sucursal_marca for the 7 jujuy sucursales
+        SELECT
+          EXTRACT(YEAR  FROM cob.periodo)::int AS anio,
+          EXTRACT(MONTH FROM cob.periodo)::int AS mes,
+          CASE WHEN sm.subdivision IS NOT NULL THEN sm.subdivision END AS generico,
+          cob.marca,
+          cob.clientes_compradores AS clientes
+        FROM gold.cob_sucursal_marca cob
+        LEFT JOIN subdivision_map sm ON sm.marca = cob.marca
+        WHERE cob.id_fuerza_ventas = 1
+          AND cob.id_sucursal IN (9, 10, 11, 12, 13, 14, 15)
+        UNION ALL
+        -- cob_sucursal_generico for the 7 jujuy sucursales
+        SELECT
+          EXTRACT(YEAR  FROM cob.periodo)::int AS anio,
+          EXTRACT(MONTH FROM cob.periodo)::int AS mes,
+          cob.generico,
+          NULL::text AS marca,
+          cob.clientes_compradores AS clientes
+        FROM gold.cob_sucursal_generico cob
+        WHERE cob.id_fuerza_ventas = 1
+          AND cob.id_sucursal IN (9, 10, 11, 12, 13, 14, 15)
+        UNION ALL
+        -- AGUAS subdivision rows for the 7 jujuy sucursales
+        SELECT
+          EXTRACT(YEAR  FROM a.periodo)::int AS anio,
+          EXTRACT(MONTH FROM a.periodo)::int AS mes,
+          a.subdivision_aguas AS generico,
+          NULL::text AS marca,
+          a.clientes_compradores AS clientes
+        FROM aguas_source a
+        WHERE a.id_sucursal IN (9, 10, 11, 12, 13, 14, 15)
+      ) u
+      WHERE generico IS NULL
+         OR generico IN ('CERVEZAS','AGUAS SABORIZADAS','AGUAS MINERAL','SIDRAS Y LICORES','VINOS CCU')
+      GROUP BY 1, 2, 3, 4, 5
+    )
+
+  SELECT
+    to_char(make_date(anio, mes, 1), 'YYYY-MM') AS periodo,
+    zona,
+    generico,
+    marca,
+    SUM(clientes) AS clientes
+  FROM (
+    SELECT zona, anio, mes, generico, marca, clientes FROM rama_noa_norte
+    UNION ALL
+    SELECT zona, anio, mes, generico, marca, clientes FROM rama_salta_capital
+    UNION ALL
+    SELECT zona, anio, mes, generico, marca, clientes FROM rama_interior_salta_sur
+    UNION ALL
+    SELECT zona, anio, mes, generico, marca, clientes FROM rama_interior_salta_norte
+    UNION ALL
+    SELECT zona, anio, mes, generico, marca, clientes FROM rama_jujuy_interior
+  ) u
+  GROUP BY 1, 2, 3, 4
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+uuid: 81b9016f-b213-4840-9f48-ca4aa69bb652
+metrics:
+- metric_name: sum_clientes
+  verbose_name: Clientes
+  metric_type: null
+  expression: SUM(clientes)
+  description: null
+  d3format: ',.0f'
+  currency: null
+  extra: null
+  warning_text: null
+columns:
+- column_name: periodo
+  verbose_name: Período
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: zona
+  verbose_name: Zona
+  is_dttm: false
+  is_active: true
+  type: VARCHAR
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: generico
+  verbose_name: Genérico
+  is_dttm: false
+  is_active: true
+  type: VARCHAR
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: marca
+  verbose_name: Marca
+  is_dttm: false
+  is_active: true
+  type: VARCHAR
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: clientes
+  verbose_name: Clientes
+  is_dttm: false
+  is_active: true
+  type: NUMERIC
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+version: 1.0.0
+database_uuid: a842c321-6955-4eea-9c30-01824a8d0039
