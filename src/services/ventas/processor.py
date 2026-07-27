@@ -83,6 +83,7 @@ def procesar_ventas_diarias(
     df_cob_marca: pd.DataFrame | None = None,
     df_mmaa: pd.DataFrame | None = None,
     df_cupos: pd.DataFrame | None = None,
+    df_cupos_cob: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Procesa las ventas diarias para generar tabla con columnas por dia.
@@ -103,6 +104,10 @@ def procesar_ventas_diarias(
                  (sucursal, generico, marca) con columnas cantidad y cantidad_htls.
         df_cupos: DataFrame con cupos por (sucursal, cupo_generico, cupo).
                   cupo_generico contiene tanto genericos como marcas.
+        df_cupos_cob: DataFrame con cupos de COBERTURA por
+                  (sucursal, cupo_cob_generico, cupo). Igual que df_cupos, la
+                  clave contiene tanto genericos como marcas. Es un conteo de
+                  clientes: NO se convierte entre bultos y HTLs.
 
     Returns:
         DataFrame con formato incluyendo dias como columnas y columnas de cobertura y cupos
@@ -118,6 +123,15 @@ def procesar_ventas_diarias(
             cupo_val = r["cupo"]
             if cupo_val is not None and not (isinstance(cupo_val, float) and cupo_val != cupo_val) and cupo_val > 0:
                 cupos_dict[(r["sucursal"], r["cupo_generico"])] = cupo_val
+
+    # Lookup de cupo de COBERTURA: (sucursal, cupo_cob_generico) -> cupo.
+    # Mismo criterio que cupos_dict; sirve para genericos y marcas.
+    cupos_cob_dict: dict = {}
+    if df_cupos_cob is not None and not df_cupos_cob.empty:
+        for _, r in df_cupos_cob.iterrows():
+            cupo_val = r["cupo"]
+            if cupo_val is not None and not (isinstance(cupo_val, float) and cupo_val != cupo_val) and cupo_val > 0:
+                cupos_cob_dict[(r["sucursal"], r["cupo_cob_generico"])] = cupo_val
 
     # Construir dicts de lookup para cobertura (acceso O(1) en el loop)
     cob_gen_dict = {}
@@ -278,6 +292,15 @@ def procesar_ventas_diarias(
             tend_gen_val = totales["tend_generico"] if i == 0 else None
             cupo_vs_tend_gen = (tend_gen_val / cupo_gen) if (i == 0 and cupo_gen) else None
 
+            # Cupo de cobertura del generico (solo primera fila del grupo).
+            # Es un conteo de clientes: no se convierte de unidad.
+            cob_gen_val = cob_gen_dict.get((sucursal, generico)) if i == 0 else None
+            cupo_cob_gen = cupos_cob_dict.get((sucursal, generico))
+            cupo_cob_gen_val = cupo_cob_gen if i == 0 else None
+            cob_vs_cupo_gen = (
+                (cob_gen_val / cupo_cob_gen) if (i == 0 and cupo_cob_gen and cob_gen_val is not None) else None
+            )
+
             row = {
                 COLUMN_NAMES["sucursal"]: sucursal,
                 COLUMN_NAMES["generico"]: generico,
@@ -290,7 +313,9 @@ def procesar_ventas_diarias(
                     if i == 0 and totales.get("desc_generico") and totales["monto_generico"]
                     else None
                 ),
-                COLUMN_NAMES["cob_generico"]: cob_gen_dict.get((sucursal, generico)) if i == 0 else None,
+                COLUMN_NAMES["cob_generico"]: cob_gen_val,
+                COLUMN_NAMES["cupo_cob_generico"]: cupo_cob_gen_val,
+                COLUMN_NAMES["cob_vs_cupo_generico"]: cob_vs_cupo_gen,
                 COLUMN_NAMES["cupo_generico"]: cupo_gen_val,
                 COLUMN_NAMES["cupo_vs_tend_generico"]: cupo_vs_tend_gen,
                 COLUMN_NAMES["marca"]: fila["marca"],
@@ -322,7 +347,15 @@ def procesar_ventas_diarias(
             row[COLUMN_NAMES["mmaa_marca"]] = mmaa_val
             row[COLUMN_NAMES["var_mmaa_marca"]] = (fila["total_marca"] / mmaa_val) if mmaa_val else None
 
-            row[COLUMN_NAMES["cob_marca"]] = cob_marca_dict.get((sucursal, fila["marca"]))
+            cob_marca_val = cob_marca_dict.get((sucursal, fila["marca"]))
+            row[COLUMN_NAMES["cob_marca"]] = cob_marca_val
+
+            # Cupo de cobertura de la marca (conteo de clientes, sin conversion)
+            cupo_cob_marca = cupos_cob_dict.get((sucursal, fila["marca"]))
+            row[COLUMN_NAMES["cupo_cob_marca"]] = cupo_cob_marca
+            row[COLUMN_NAMES["cob_vs_cupo_marca"]] = (
+                (cob_marca_val / cupo_cob_marca) if (cupo_cob_marca and cob_marca_val is not None) else None
+            )
 
             # Columnas de plata
             monto_m = fila["monto_marca"]

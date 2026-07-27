@@ -31,6 +31,8 @@ VENTAS_COLUMN_FORMATS = {
     COLUMN_NAMES["desc_generico"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True, header_fill_color="0055A4"),
     COLUMN_NAMES["desc_pct_generico"]: ColumnFormat(number_format='0.0%', width=11, font_bold=True),
     COLUMN_NAMES["cob_generico"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True, header_fill_color="60497A"),
+    COLUMN_NAMES["cupo_cob_generico"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True, header_fill_color="60497A"),
+    COLUMN_NAMES["cob_vs_cupo_generico"]: ColumnFormat(number_format='0.0%', width=13, font_bold=True, header_fill_color="60497A"),
     COLUMN_NAMES["cupo_generico"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True),
     COLUMN_NAMES["cupo_vs_tend_generico"]: ColumnFormat(number_format='0.0%', width=13, font_bold=True),
     COLUMN_NAMES["total_marca"]: ColumnFormat(number_format='#,##0', width=11, font_bold=True),
@@ -41,6 +43,8 @@ VENTAS_COLUMN_FORMATS = {
     COLUMN_NAMES["desc_marca"]: ColumnFormat(number_format='$ #,##0', width=15, font_bold=True, header_fill_color="0055A4"),
     COLUMN_NAMES["desc_pct_marca"]: ColumnFormat(number_format='0.0%', width=11, font_bold=True),
     COLUMN_NAMES["cob_marca"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True, header_fill_color="60497A"),
+    COLUMN_NAMES["cupo_cob_marca"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True, header_fill_color="60497A"),
+    COLUMN_NAMES["cob_vs_cupo_marca"]: ColumnFormat(number_format='0.0%', width=13, font_bold=True, header_fill_color="60497A"),
     COLUMN_NAMES["cupo_marca"]: ColumnFormat(number_format='#,##0', width=13, font_bold=True),
     COLUMN_NAMES["cupo_vs_tend_marca"]: ColumnFormat(number_format='0.0%', width=13, font_bold=True),
 }
@@ -144,6 +148,8 @@ def _crear_estilo_ventas(
         COLUMN_NAMES["monto_generico"],
         COLUMN_NAMES["desc_generico"],
         # Cobertura (Generico) excluida
+        # Cupo Cob (Generico) excluida: es un objetivo de clientes, no aditivo
+        # % Cob (Generico) excluida (ratio)
         COLUMN_NAMES["cupo_generico"],
         # Cupo vs Tend (Generico) excluida (ratio)
         *columnas_dias,
@@ -154,6 +160,8 @@ def _crear_estilo_ventas(
         COLUMN_NAMES["mmaa_marca"],
         # Var% excluida
         # Cobertura (Marca) excluida
+        # Cupo Cob (Marca) excluida: objetivo de clientes, no aditivo
+        # % Cob (Marca) excluida (ratio)
         COLUMN_NAMES["monto_marca"],
         COLUMN_NAMES["desc_marca"],
     ]
@@ -492,7 +500,7 @@ class VentasService(BaseService):
         zonas virtuales (ej: CASA CENTRAL → CASA CENTRAL + VALLE SALTA).
 
         Returns:
-            (df_ventas, df_sucursales, df_articulos, df_cob_generico, df_cob_marca, df_mmaa, df_cupos, info_dias)
+            (df_ventas, df_sucursales, df_articulos, df_cob_generico, df_cob_marca, df_mmaa, df_cupos, df_cupos_cob, info_dias)
         """
         df_ventas = self.data_loader.get_ventas_diarias_con_ruta(
             config.fecha_desde,
@@ -568,7 +576,21 @@ class VentasService(BaseService):
         except Exception:
             pass
 
-        return df_ventas, df_sucursales, df_articulos, df_cob_generico, df_cob_marca, df_mmaa, df_cupos, info_dias
+        # Cupo de COBERTURA (objetivo de clientes). Se agrupa por ruta igual que
+        # el cupo de volumen para que el split de zonas virtuales sea correcto.
+        df_cupos_cob = pd.DataFrame(columns=["sucursal", "cupo_cob_generico", "cupo"])
+        try:
+            periodo = pd.to_datetime(config.fecha_desde).strftime("%Y-%m")
+            df_cc_raw = self.data_loader.get_cupos_cobertura(periodo)
+            if not df_cc_raw.empty:
+                df_cc_raw = _aplicar_zonas_virtuales(zonas_config=_ZONAS_VIRTUALES_VENTAS, df=df_cc_raw)
+                df_cupos_cob = df_cc_raw.groupby(
+                    ["sucursal", "cupo_cob_generico"], as_index=False
+                )["cupo"].sum()
+        except Exception:
+            pass
+
+        return df_ventas, df_sucursales, df_articulos, df_cob_generico, df_cob_marca, df_mmaa, df_cupos, df_cupos_cob, info_dias
 
     def _build_workbook(
         self,
@@ -582,6 +604,7 @@ class VentasService(BaseService):
         df_cob_marca: pd.DataFrame | None,
         df_mmaa: pd.DataFrame | None,
         df_cupos: pd.DataFrame | None,
+        df_cupos_cob: pd.DataFrame | None,
         info_dias: dict,
         con_slicers: bool,
         output_dir: Path | None = None,
@@ -612,6 +635,7 @@ class VentasService(BaseService):
                 df_cob_marca=df_cob_marca,
                 df_mmaa=df_mmaa,
                 df_cupos=df_cupos,
+                df_cupos_cob=df_cupos_cob,
             )
 
             if not con_montos:
@@ -709,7 +733,7 @@ class VentasService(BaseService):
         Returns:
             ReporteVentasResult con informacion del reporte generado.
         """
-        df_ventas, df_sucursales, df_articulos, df_cob_gen, df_cob_marca, df_mmaa, df_cupos, info_dias = (
+        df_ventas, df_sucursales, df_articulos, df_cob_gen, df_cob_marca, df_mmaa, df_cupos, df_cupos_cob, info_dias = (
             self._fetch_data(config)
         )
 
@@ -729,6 +753,7 @@ class VentasService(BaseService):
             df_cob_marca,
             df_mmaa,
             df_cupos,
+            df_cupos_cob,
             info_dias,
             config.con_slicers,
             output_dir=out,
@@ -767,7 +792,7 @@ class VentasService(BaseService):
             Lista de ReporteVentasResult, uno por supervisor.
         """
         # Una sola consulta para todos los supervisores
-        df_ventas, _, df_articulos, df_cob_gen, df_cob_marca, df_mmaa, df_cupos, info_dias = (
+        df_ventas, _, df_articulos, df_cob_gen, df_cob_marca, df_mmaa, df_cupos, df_cupos_cob, info_dias = (
             self._fetch_data(config)
         )
 
@@ -792,6 +817,12 @@ class VentasService(BaseService):
 
             df_cupos_sup = df_cupos[df_cupos["sucursal"].isin(sucursales_expandidas)] if not df_cupos.empty else df_cupos
 
+            df_cupos_cob_sup = (
+                df_cupos_cob[df_cupos_cob["sucursal"].isin(sucursales_expandidas)]
+                if df_cupos_cob is not None and not df_cupos_cob.empty
+                else df_cupos_cob
+            )
+
             # Nombre de archivo: "Ventas {supervisor} - {ultima_fecha}"
             nombre = _nombre_reporte(df_ventas_sup, config.fecha_hasta, supervisor=supervisor)
 
@@ -809,6 +840,7 @@ class VentasService(BaseService):
                 df_cob_marca_sup,
                 df_mmaa_sup,
                 df_cupos_sup,
+                df_cupos_cob_sup,
                 info_dias,
                 config.con_slicers,
                 output_dir=out,

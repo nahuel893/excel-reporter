@@ -1481,6 +1481,45 @@ class DataLoader:
         """
         return self.execute_query(query, {"periodo": periodo})
 
+    def get_cupos_cobertura(self, periodo: str) -> pd.DataFrame:
+        """
+        Obtiene cupos de COBERTURA (objetivo de clientes) para un periodo.
+
+        ⚠️ gold.fact_cupos_cobertura tiene las columnas INVERTIDAS segun
+        `tipo_apertura`:
+          - tipo_apertura='generico' -> el nombre del generico viene en `marca`
+            (y `generico` queda NULL)
+          - tipo_apertura='marca'    -> el nombre de la marca viene en `generico`
+            (y `marca` queda NULL)
+        Por eso la clave se arma con COALESCE(marca, generico): nunca vienen las
+        dos con valor. Las filas con ambas en NULL no tienen contra que joinear
+        y se descartan.
+
+        A diferencia del cupo de volumen, este cupo es un CONTEO DE CLIENTES: no
+        se convierte entre bultos y HTLs (vale igual en las dos hojas).
+
+        Args:
+            periodo: Periodo en formato "YYYY-MM" (ej: "2026-07")
+
+        Returns:
+            DataFrame con columnas: sucursal, id_ruta, cupo_cob_generico, cupo
+            donde `cupo_cob_generico` contiene tanto genericos como marcas.
+        """
+        query = """
+        SELECT
+            ds.descripcion                        AS sucursal,
+            fcc.id_ruta,
+            COALESCE(fcc.marca, fcc.generico)     AS cupo_cob_generico,
+            SUM(fcc.cupo)                         AS cupo
+        FROM gold.fact_cupos_cobertura fcc
+        JOIN gold.dim_sucursal ds ON fcc.id_sucursal = ds.id_sucursal
+        WHERE fcc.periodo = :periodo
+          AND COALESCE(fcc.marca, fcc.generico) IS NOT NULL
+        GROUP BY ds.descripcion, fcc.id_ruta, COALESCE(fcc.marca, fcc.generico)
+        ORDER BY ds.descripcion, cupo_cob_generico
+        """
+        return self.execute_query(query, {"periodo": periodo})
+
     # ── Ventas Articulo Diario ──────────────────────────────────
 
     def get_ventas_diarias_articulo(
