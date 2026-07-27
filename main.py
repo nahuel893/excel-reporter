@@ -80,6 +80,7 @@ REPORT_HANDLERS: dict[str, str] = {
     "reporte-descuentos": "_run_descuentos_report",
     "subdistribuidores": "_run_subdistribuidores_report",
     "stock-suria": "_run_stock_suria_report",
+    "stock-suria-control": "_run_stock_suria_control_report",
     "ventas-marca": "_run_ventas_marca_report",
     "ventas-cober-preventista-marca": "_run_ventas_cober_preventista_marca_report",
     "stock-badie": "_run_stock_badie_report",
@@ -1233,6 +1234,56 @@ def _run_stock_suria_report(report, merged: dict) -> list[tuple[Path, dict]]:
         (
             Path(result.ruta_archivo),
             {"nombre": report.nombre, "fecha": fecha},
+        )
+    ]
+
+
+def _run_stock_suria_control_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Refresh stock columns of a user-maintained 'Control de stock' SURIA base.
+
+    Reads `archivo_plantilla` from merged (the user-managed base xlsx), runs
+    StockSuriaControlService which writes ONLY stock columns K..O in-place
+    matched by 'Cod SURIA', and returns the OUTPUT (copied) file as the
+    artifact. The base file at data/input is never touched.
+    """
+    import logging
+    from src.services.stock_suria_control import (
+        StockSuriaControlConfig,
+        StockSuriaControlService,
+    )
+
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s"
+    )
+
+    archivo_plantilla = merged.get("archivo_plantilla")
+    if not archivo_plantilla:
+        print("Error: stock-suria-control requires filtros.archivo_plantilla")
+        return []
+
+    fecha = merged.get("fecha_hasta") or merged.get("fecha_desde")
+    config = StockSuriaControlConfig(
+        archivo_plantilla=archivo_plantilla,
+        nombre_archivo=report.nombre,
+        fecha=fecha,
+        in_place=False,
+    )
+    service = StockSuriaControlService()
+    try:
+        result = service.generar_reporte(config)
+    except FileNotFoundError as e:
+        print(f"Error: Archivo base no encontrado: {e}")
+        return []
+
+    print(f"Stock SURIA Control '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Fecha stock: {result.fecha_stock}")
+    print(f"  - Filas actualizadas: {result.filas_actualizadas}")
+    print(f"  - Articulos sin stock: {len(result.articulos_sin_stock)}")
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": fecha or ""},
         )
     ]
 
