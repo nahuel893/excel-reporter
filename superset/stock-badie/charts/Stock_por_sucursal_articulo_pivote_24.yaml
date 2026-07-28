@@ -1,0 +1,45 @@
+slice_name: "Stock por sucursal \xB7 art\xEDculo (pivote)"
+description: null
+certified_by: null
+certification_details: null
+viz_type: pivot_table_v2
+params:
+  datasource: 3__table
+  viz_type: pivot_table_v2
+  groupbyRows:
+  - des_articulo
+  - generico
+  - marca
+  groupbyColumns:
+  - sucursal
+  metrics:
+  - sum_stock_hoy_bultos
+  - sum_venta_mes_bultos
+  - sum_pedido_sugerido_15d
+  - alcance_dias
+  metricsLayout: COLUMNS
+  aggregateFunction: Sum
+  rowTotals: true
+  colTotals: true
+  colSubTotals: false
+  rowSubTotals: false
+  valueFormat: ',.1f'
+  conditional_formatting:
+  - column: alcance_dias
+    operator: <
+    targetValue: 15
+    colorScheme: '#e04355'
+  - column: alcance_dias
+    operator: "\u2264 x \u2264"
+    targetValueLeft: 15
+    targetValueRight: 30
+    colorScheme: '#fcc700'
+  - column: alcance_dias
+    operator: '>'
+    targetValue: 30
+    colorScheme: '#59c189'
+query_context: null
+cache_timeout: null
+uuid: 7bbeb59e-5a19-4843-9780-c6d7edf4dacf
+version: 1.0.0
+dataset_uuid: 6b1c34b7-564d-4dc2-88a7-2c1fb69a90df
