@@ -22,12 +22,18 @@ class StockBadieConfig:
     date.today() inside the service) so callers/tests can pin it without a
     freezegun dependency, matching the deterministic-by-parameter
     precedent already set by processor.compute_dias_venta().
+
+    genericos_excluidos drops non-sale genericos (envases, marketing,
+    equipos de frio, dispensers) from the whole report — article rows AND
+    the per-generico band. Parameterized here so the list lives in
+    configs/stock_badie.json, not in code.
     """
 
     fecha_desde: str
     fecha_hasta: str
     dias_stock: int = 15
     genericos: list[str] | None = None
+    genericos_excluidos: list[str] | None = None
     nombre_archivo: str | None = None
     db_name: str | None = None
     fecha_referencia: str | None = None

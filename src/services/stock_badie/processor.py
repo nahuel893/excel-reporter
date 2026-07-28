@@ -63,7 +63,11 @@ def _wide_columns() -> pd.MultiIndex:
     return pd.MultiIndex.from_tuples(tuples)
 
 
-def build_universe(stock_df: pd.DataFrame, venta_df: pd.DataFrame) -> pd.DataFrame:
+def build_universe(
+    stock_df: pd.DataFrame,
+    venta_df: pd.DataFrame,
+    genericos_excluidos: list[str] | None = None,
+) -> pd.DataFrame:
     """Build the (sucursal, articulo) universe merging today's stock with
     this month's sales.
 
@@ -88,10 +92,27 @@ def build_universe(stock_df: pd.DataFrame, venta_df: pd.DataFrame) -> pd.DataFra
     venta_bultos != 0), 'dormant' (stock_bultos > 0 & venta_bultos <= 0),
     'normal' (stock_bultos > 0 & venta_bultos > 0 — the only remaining case).
 
+    `genericos_excluidos` drops non-sale genericos (packaging, marketing
+    material, coolers, dispensers) before anything else, so they appear
+    neither in the article rows nor in the per-generico band. Matching is
+    case-insensitive and whitespace-tolerant; unknown names are ignored
+    (a typo silently filters nothing, so the count is logged).
+
     Returns:
         DataFrame with columns: id_articulo, des_articulo, generico, marca,
         sucursal, stock_bultos, stock_htls, venta_bultos, venta_htls, estado.
     """
+    if genericos_excluidos:
+        excluidos = {str(g).strip().upper() for g in genericos_excluidos}
+        antes = len(stock_df)
+        stock_df = stock_df.loc[
+            ~stock_df["generico"].astype(str).str.strip().str.upper().isin(excluidos)
+        ]
+        logger.info(
+            "build_universe: %d fila(s) de stock excluidas por generico %s",
+            antes - len(stock_df), sorted(excluidos),
+        )
+
     venta_cols = ["sucursal", "id_articulo", "venta_bultos", "venta_htls"]
     venta_subset = venta_df[venta_cols]
 

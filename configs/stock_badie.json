@@ -5,6 +5,16 @@
         "fecha_desde": "2026-07-01",
         "fecha_hasta": "2026-08-01",
         "dias_stock": 15,
+        "_genericos_excluidos_nota": "Genericos que NO son articulos de venta: no van al informe ni a la banda de totales. Agregar o quitar nombres aca (match sin distinguir mayusculas ni espacios). Para volver a incluir uno, borralo de esta lista.",
+        "genericos_excluidos": [
+            "ENVASES CCU",
+            "ENVASES GASEOSAS",
+            "ENVASES PALAU",
+            "EQUIPOS DE FRIO",
+            "MARKETING",
+            "MARKETING BRANCA",
+            "DISPENSER"
+        ],
         "enviar_email": true,
         "enviar_whatsapp": true,
         "whatsapp_enviar_como": "archivo",

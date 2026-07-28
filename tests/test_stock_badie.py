@@ -431,6 +431,66 @@ def _universe_row(id_articulo, sucursal, stock_bultos, venta_bultos, estado="nor
     }
 
 
+class TestGenericosExcluidos:
+    """Non-sale genericos are dropped from the universe, so they appear
+    neither as article rows nor as per-generico band rows."""
+
+    def _frames(self):
+        stock_df = pd.DataFrame([
+            _stock_row(1, "CASA CENTRAL", cant_bultos=5, generico="CERVEZAS"),
+            _stock_row(2, "CASA CENTRAL", cant_bultos=9, generico="MARKETING"),
+            _stock_row(3, "CASA CENTRAL", cant_bultos=7, generico="ENVASES CCU"),
+        ])
+        venta_df = pd.DataFrame([
+            _venta_row(1, "CASA CENTRAL", venta_bultos=10),
+            _venta_row(2, "CASA CENTRAL", venta_bultos=4),
+            _venta_row(3, "CASA CENTRAL", venta_bultos=2),
+        ])
+        return stock_df, venta_df
+
+    def test_excluded_genericos_are_dropped(self):
+        stock_df, venta_df = self._frames()
+        universe = build_universe(
+            stock_df, venta_df, genericos_excluidos=["MARKETING", "ENVASES CCU"]
+        )
+        assert set(universe["generico"]) == {"CERVEZAS"}
+        assert set(universe["id_articulo"]) == {1}
+
+    def test_none_keeps_everything(self):
+        stock_df, venta_df = self._frames()
+        universe = build_universe(stock_df, venta_df, genericos_excluidos=None)
+        assert len(universe) == 3
+
+    def test_match_is_case_and_whitespace_insensitive(self):
+        """A config typo in casing/spacing must not silently keep the
+        generico in the report."""
+        stock_df, venta_df = self._frames()
+        universe = build_universe(
+            stock_df, venta_df, genericos_excluidos=["  marketing ", "envases ccu"]
+        )
+        assert set(universe["generico"]) == {"CERVEZAS"}
+
+    def test_unknown_generico_is_ignored(self):
+        stock_df, venta_df = self._frames()
+        universe = build_universe(
+            stock_df, venta_df, genericos_excluidos=["NO EXISTE"]
+        )
+        assert len(universe) == 3
+
+    def test_excluded_generico_absent_from_band(self):
+        """End-to-end: an excluded generico must not produce a band row."""
+        stock_df, venta_df = self._frames()
+        universe = build_universe(stock_df, venta_df, genericos_excluidos=["MARKETING"])
+        wide = pivot_wide(universe)
+        wb = build_workbook(wide, dias_venta=20, dias_stock=15)
+        ws = wb["STOCK"]
+        labels = {
+            ws.cell(row=r, column=3).value
+            for r in range(1, ws.max_row + 1)
+        }
+        assert "MARKETING" not in labels
+
+
 class TestPivotWide:
     def test_sucursal_order_has_14_entries(self):
         assert len(SUCURSAL_ORDER) == 14
@@ -1630,6 +1690,15 @@ class TestDeliveryWiring:
             assert via == {"email", "whatsapp"}, (
                 f"{nombre} must receive by email AND whatsapp; got {via}"
             )
+
+    def test_config_declares_excluded_genericos(self):
+        """Non-sale genericos (envases/marketing/equipos/dispenser) are
+        parameterized in the JSON, not hardcoded."""
+        cfg = self._load_config()
+        excl = cfg.filtros.genericos_excluidos
+        assert excl, "genericos_excluidos must be declared in the config"
+        for g in ("ENVASES CCU", "EQUIPOS DE FRIO", "MARKETING", "DISPENSER"):
+            assert g in excl, f"{g} should be excluded from the report"
 
     def test_whatsapp_sends_the_xlsx_as_a_file_not_an_image(self):
         """A 64-column sheet rendered as a WhatsApp image is unreadable, so

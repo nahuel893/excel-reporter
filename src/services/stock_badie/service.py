@@ -73,7 +73,9 @@ class StockBadieService(BaseService):
             fecha_desde=config.fecha_desde, fecha_hasta=config.fecha_hasta
         )
 
-        universe = build_universe(stock_df, venta_df)
+        universe = build_universe(
+            stock_df, venta_df, genericos_excluidos=config.genericos_excluidos
+        )
         wide = pivot_wide(universe)
 
         if len(wide) == 0:
