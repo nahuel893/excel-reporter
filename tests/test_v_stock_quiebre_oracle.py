@@ -119,11 +119,14 @@ def test_oracle_sample_row_matches_direct_query(db_engine, refreshed_mv):
 
     direct_venta, direct_stock = float(direct[0]), float(direct[1])
 
-    assert abs(float(mv_venta) - direct_venta) <= 1.0, (
+    # Both sides SUM the same rows with the same filters -> the delta is exactly 0.
+    # The 1e-6 window only tolerates float-repr noise; it still catches any ROUND()/
+    # TRUNC regression in the MV (the whole point of this oracle gate).
+    assert abs(float(mv_venta) - direct_venta) <= 1e-6, (
         f"venta_mes_bultos mismatch for {sucursal}/{id_articulo}: "
         f"MV={mv_venta}, direct={direct_venta}"
     )
-    assert abs(float(mv_stock) - direct_stock) <= 1.0, (
+    assert abs(float(mv_stock) - direct_stock) <= 1e-6, (
         f"stock_hoy_bultos mismatch for {sucursal}/{id_articulo}: "
         f"MV={mv_stock}, direct={direct_stock}"
     )
@@ -136,7 +139,11 @@ def test_oracle_sample_row_matches_direct_query(db_engine, refreshed_mv):
         if mv_venta_diaria and float(mv_venta_diaria) != 0:
             mv_alcance = float(mv_stock) / float(mv_venta_diaria)
             if direct_alcance is not None:
-                assert abs(mv_alcance - direct_alcance) <= 1.0, (
+                # Relative tolerance: alcance is a ratio, and mv_venta_diaria is a
+                # Postgres NUMERIC (finite scale) while direct is double — the delta is
+                # float-repr noise, not rounding. Still orders of magnitude tighter than
+                # the band widths (15, 30), so a real ROUND() regression is caught.
+                assert abs(mv_alcance - direct_alcance) <= 1e-6 * max(1.0, abs(direct_alcance)), (
                     f"alcance_dias mismatch for {sucursal}/{id_articulo}: "
                     f"MV-derived={mv_alcance}, direct={direct_alcance}"
                 )
@@ -254,4 +261,54 @@ def test_oracle_pedido_formula_on_sample_row(db_engine, refreshed_mv):
     expected = max(venta_diaria * 15 - stock, 0)
     assert abs(pedido - expected) <= 0.01, (
         f"pedido_sugerido_15d_bultos={pedido} != expected {expected}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-ORACLE-05: universe boundary — a zero-stock article the sucursal has NEVER
+# sold in 3 years is ABSENT (we surface real quiebres, we do NOT fall back to
+# every-article-in-every-sucursal noise). Locks against the rejected "Option B".
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_oracle_zero_stock_never_sold_here_is_absent(db_engine, refreshed_mv):
+    from sqlalchemy import text
+    with _conn(db_engine) as conn:
+        cand = conn.execute(text("""
+            WITH snap AS (SELECT MAX(date_stock) d FROM gold.fact_stock),
+            stock_hoy AS (
+                SELECT dd.id_sucursal, fs.id_articulo, SUM(fs.cant_bultos) AS sb
+                FROM gold.fact_stock fs
+                JOIN gold.dim_deposito dd ON fs.id_deposito = dd.id_deposito
+                WHERE fs.date_stock = (SELECT d FROM snap)
+                GROUP BY 1, 2
+            )
+            SELECT ds.descripcion, sh.id_articulo
+            FROM stock_hoy sh
+            JOIN gold.dim_sucursal ds ON ds.id_sucursal = sh.id_sucursal
+            WHERE sh.sb = 0
+              AND sh.id_articulo IN (
+                  SELECT DISTINCT id_articulo FROM gold.fact_ventas
+                  WHERE fecha_comprobante >= (CURRENT_DATE - interval '3 years')::date
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM gold.fact_ventas fv
+                  WHERE fv.id_sucursal = sh.id_sucursal
+                    AND fv.id_articulo = sh.id_articulo
+                    AND fv.fecha_comprobante >= (CURRENT_DATE - interval '3 years')::date
+              )
+            LIMIT 1
+        """)).fetchone()
+
+        if cand is None:
+            pytest.skip("No zero-stock/never-sold-here candidate found — cannot verify boundary")
+
+        present = conn.execute(text("""
+            SELECT COUNT(*) FROM gold.mv_stock_quiebre
+            WHERE sucursal = :suc AND id_articulo = :art
+        """), {"suc": cand[0], "art": cand[1]}).scalar()
+
+    assert present == 0, (
+        f"Article {cand[1]} is zero-stock and never sold by '{cand[0]}' in 3yr — it must NOT "
+        f"appear (that would be the rejected every-article-in-every-sucursal noise)"
     )

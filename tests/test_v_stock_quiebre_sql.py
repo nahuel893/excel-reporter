@@ -155,9 +155,8 @@ def test_view_sql_contains_nullif_guard():
 
 def test_view_sql_left_joins_ventas_onto_stock():
     """Universe: venta_mes is LEFT-JOINed onto stock_hoy so dormant stock (stock>0,
-    no current-month sales) surfaces as VERDE instead of being dropped, guarded by a
-    WHERE keeping only rows with physical stock OR a sales row. NOT a FULL OUTER JOIN
-    (an article selling with zero stock still has a zero stock_hoy row)."""
+    no current-month sales) surfaces as VERDE instead of being dropped. NOT a FULL
+    OUTER JOIN (an article selling with zero stock still has a zero stock_hoy row)."""
     content = _strip_sql_comments(SQL_VIEW_FILE.read_text(encoding="utf-8"))
     assert re.search(r"\bLEFT\s+(OUTER\s+)?JOIN\s+venta_mes\b", content, re.IGNORECASE), (
         "Expected a LEFT JOIN of venta_mes onto stock_hoy (dormant stock must not be dropped)"
@@ -168,8 +167,35 @@ def test_view_sql_left_joins_ventas_onto_stock():
     assert not re.search(r"\bFULL\s+(OUTER\s+)?JOIN\b", content, re.IGNORECASE), (
         "No FULL OUTER JOIN expected (a selling article always has a zero stock_hoy row)"
     )
-    assert re.search(r"stock_bultos\s*<>\s*0\s+OR", content, re.IGNORECASE), (
-        "Expected the universe guard (stock_bultos <> 0 OR sales row) to drop zero-stock/zero-sale noise"
+
+
+def test_view_sql_universe_is_assortment_based():
+    """Universe guard (revised 2026-07-28): keep a (sucursal, articulo) row when it has
+    physical stock OR the sucursal sold it in the last 3 years (pares_activos). This
+    surfaces zero-stock / no-sale-this-month quiebres the old 'sold-this-month' guard
+    hid, WITHOUT falling back to every-article-in-every-sucursal noise."""
+    content = _strip_sql_comments(SQL_VIEW_FILE.read_text(encoding="utf-8"))
+    assert re.search(r"\bpares_activos\b", content, re.IGNORECASE), (
+        "Expected a pares_activos CTE ((sucursal, articulo) sold in last 3 years)"
+    )
+    assert re.search(r"stock_bultos\s*<>\s*0\s+OR\s+EXISTS", content, re.IGNORECASE), (
+        "Expected the guard 'stock_bultos <> 0 OR EXISTS (... pares_activos ...)' so a "
+        "zero-stock row is kept when the sucursal actually sells the article"
+    )
+
+
+def test_view_sql_zero_stock_is_rojo_before_no_demand_branch():
+    """Semáforo: stock <= 0 must be classified ROJO, and that branch must PRECEDE the
+    'venta_diaria <= 0 -> VERDE' branch — otherwise a zero-stock article with no sales
+    this month is painted green (the bug this fix removes)."""
+    content = _strip_sql_comments(SQL_VIEW_FILE.read_text(encoding="utf-8"))
+    m_zero = re.search(r"stock_hoy_bultos\s*<=\s*0", content, re.IGNORECASE)
+    assert m_zero, "Expected a 'stock_hoy_bultos <= 0 -> ROJO' branch in the semáforo CASE"
+    m_verde = re.search(r"venta_diaria_bultos\s+IS\s+NULL\s+OR\s+venta_diaria_bultos\s*<=\s*0",
+                        content, re.IGNORECASE)
+    assert m_verde, "Expected the 'venta_diaria <= 0 -> VERDE' dormant branch"
+    assert m_zero.start() < m_verde.start(), (
+        "The stock<=0 -> ROJO branch must come BEFORE the no-demand -> VERDE branch"
     )
 
 
@@ -476,18 +502,54 @@ def test_semaforo_band_boundaries(db_engine, refreshed_mv):
 
 @pytest.mark.integration
 def test_semaforo_verde_when_no_positive_venta_diaria(db_engine, refreshed_mv):
-    """Non-positive velocity must render VERDE: dormant stock (venta_diaria NULL/0) AND
-    net-negative sales (returns > sales -> venta_diaria < 0). A net-negative article is
-    over-stocked, not a quiebre; classifying it ROJO would inflate the quiebre KPI."""
+    """Non-positive velocity renders VERDE ONLY when there is stock on hand: dormant
+    stock (venta_diaria NULL/0, stock>0) AND net-negative sales (returns > sales ->
+    venta_diaria < 0, stock>0). A stocked article with no/negative demand is
+    over-stocked, not a quiebre. Zero-stock rows are excluded here — they are ROJO
+    (see test_semaforo_zero_stock_always_rojo)."""
     from sqlalchemy import text
     with _conn(db_engine) as conn:
         result = conn.execute(text(f"""
             SELECT COUNT(*) FROM {MV_RELATION}
-            WHERE (venta_diaria_bultos IS NULL OR venta_diaria_bultos <= 0)
+            WHERE stock_hoy_bultos > 0
+              AND (venta_diaria_bultos IS NULL OR venta_diaria_bultos <= 0)
               AND estado_semaforo != 'VERDE'
         """))
         row = result.fetchone()
-    assert row[0] == 0, "Non-positive velocity rows (NULL/0/negative) must be classified VERDE"
+    assert row[0] == 0, "Stocked (stock>0) non-positive-velocity rows must be VERDE"
+
+
+@pytest.mark.integration
+def test_semaforo_zero_stock_always_rojo(db_engine, refreshed_mv):
+    """Revised 2026-07-28: stock <= 0 is a hard quiebre (0 días de alcance) and MUST be
+    ROJO regardless of demand — never VERDE/AMARILLO."""
+    from sqlalchemy import text
+    with _conn(db_engine) as conn:
+        result = conn.execute(text(f"""
+            SELECT COUNT(*) FROM {MV_RELATION}
+            WHERE stock_hoy_bultos <= 0 AND estado_semaforo != 'ROJO'
+        """))
+        row = result.fetchone()
+    assert row[0] == 0, "Every zero-stock row must be classified ROJO"
+
+
+@pytest.mark.integration
+def test_zero_stock_no_current_sale_article_present(db_engine, refreshed_mv):
+    """The bug fix: an article with zero stock today, sold by the sucursal in the last
+    3 years but NOT this month, must be PRESENT (it was hidden before) and ROJO."""
+    from sqlalchemy import text
+    with _conn(db_engine) as conn:
+        result = conn.execute(text(f"""
+            SELECT sucursal, id_articulo, estado_semaforo FROM {MV_RELATION}
+            WHERE stock_hoy_bultos = 0 AND venta_mes_bultos = 0
+            LIMIT 1
+        """))
+        row = result.fetchone()
+    if row is None:
+        pytest.skip("No zero-stock/zero-current-sale row present — cannot verify")
+    assert row[2] == "ROJO", (
+        f"Zero-stock/no-current-sale quiebre {row[0]}/{row[1]} must be ROJO, got {row[2]!r}"
+    )
 
 
 @pytest.mark.integration
@@ -537,13 +599,24 @@ def test_both_roles_can_select(db_engine, refreshed_mv):
         # (information_schema.role_table_grants only shows grants visible to the
         # CURRENT session's enabled roles, per the SQL standard — it under-reports
         # here since this session cannot assume superset_ro/superset_user.)
+        # Only probe roles that actually exist: has_table_privilege() raises
+        # "role ... does not exist" otherwise, and a one-role environment is
+        # explicitly supported (the grant DO blocks swallow undefined_object).
         with _conn(db_engine) as conn:
+            existing = [
+                role for role in ("superset_ro", "superset_user")
+                if conn.execute(
+                    text("SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = :r"), {"r": role}
+                ).fetchone()
+            ]
+            if not existing:
+                pytest.skip("Neither superset_ro nor superset_user exists — nothing to verify")
             granted = {
                 role: conn.execute(
                     text("SELECT has_table_privilege(:role, 'gold.mv_stock_quiebre', 'SELECT')"),
                     {"role": role},
                 ).scalar()
-                for role in ("superset_ro", "superset_user")
+                for role in existing
             }
         assert any(granted.values()), (
             f"Expected SELECT grant for superset_ro or superset_user: {granted}"
@@ -552,29 +625,31 @@ def test_both_roles_can_select(db_engine, refreshed_mv):
 
 @pytest.mark.integration
 def test_write_attempt_rejected_for_both_roles(db_engine, refreshed_mv):
+    """superset_ro / superset_user must hold NO write privilege on the MV.
+
+    Checked via has_table_privilege — NOT by attempting an INSERT. Postgres rejects
+    writes to ANY materialized view for EVERY role ("cannot change materialized view",
+    SQLSTATE 42809), so an INSERT attempt is a false positive: it would pass even if the
+    role had been granted full write. has_table_privilege actually distinguishes
+    read-only from read-write, so this test can genuinely fail if a write grant leaks.
+    """
     from sqlalchemy import text
-    from sqlalchemy.exc import ProgrammingError, InternalError
 
-    tested_any = False
-    for role in ("superset_ro", "superset_user"):
-        with db_engine.connect() as conn:
-            role_exists = conn.execute(
-                text("SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = :r"), {"r": role}
+    with _conn(db_engine) as conn:
+        existing = [
+            r for r in ("superset_ro", "superset_user")
+            if conn.execute(
+                text("SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = :r"), {"r": r}
             ).fetchone()
-            if not role_exists:
-                continue
-            try:
-                conn.execute(text(f"SET ROLE {role}"))
-            except ProgrammingError:
-                conn.rollback()
-                continue
-            with pytest.raises((ProgrammingError, InternalError)):
-                conn.execute(text(f"INSERT INTO {MV_RELATION} (sucursal) VALUES ('X')"))
-            conn.rollback()
-            tested_any = True
-
-    if not tested_any:
-        pytest.skip(
-            "Current DB user cannot SET ROLE to superset_ro/superset_user in this "
-            "environment — write-rejection cannot be exercised interactively"
-        )
+        ]
+        if not existing:
+            pytest.skip("Neither superset_ro nor superset_user exists — nothing to verify")
+        for role in existing:
+            for priv in ("INSERT", "UPDATE", "DELETE"):
+                has_priv = conn.execute(
+                    text("SELECT has_table_privilege(:role, 'gold.mv_stock_quiebre', :priv)"),
+                    {"role": role, "priv": priv},
+                ).scalar()
+                assert has_priv is False, (
+                    f"{role} must NOT have {priv} on gold.mv_stock_quiebre (read-only role)"
+                )

@@ -43,9 +43,10 @@
 --                                          (project convention: cantidad * dias_totales/dias_transcurridos;
 --                                          parity column, not in the xlsm reference).
 --   pedido_sugerido_15d_bultos      NUMERIC  = GREATEST(venta_diaria_bultos * 15 - stock_hoy_bultos, 0)
---   estado_semaforo                  TEXT    'ROJO' (<15d) | 'AMARILLO' (15-30d) | 'VERDE' (>30d or
---                                          dormant/no sales this month) — per-row band, drives the
---                                          KPI count cards (RF-12).
+--   estado_semaforo                  TEXT    'ROJO' (stock = 0, OR <15d cobertura) | 'AMARILLO'
+--                                          (15-30d) | 'VERDE' (>30d, or dormant stock>0 with
+--                                          no/negative sales) — per-row band, drives the KPI count
+--                                          cards (RF-12). Zero stock is ALWAYS ROJO (see CASE).
 --
 -- NON-GOALS (RF-04, RF-15):
 --   `alcance_dias` (dias de cobertura) is NEVER a stored column here. It MUST be
@@ -57,22 +58,28 @@
 --   and universe-validation discovery).
 --   No ROUND/TRUNC/::INTEGER anywhere — formatting is a Superset display concern only.
 --
--- UNIVERSE / JOIN SEMANTICS (locked decision — see sdd/stock-quiebre-superset
--- universe-validation discovery):
+-- UNIVERSE / JOIN SEMANTICS (revised 2026-07-28 — surface every real quiebre):
 --   gold.fact_stock emits a row per (article, deposito) EVERY day, including
 --   zero-stock rows (verified: 34245 rows = 2283 articulos x 15 depositos on a
---   representative snapshot; 91% of rows are zero bultos).
---   The universe is (sucursal, articulo) pairs that either HAVE physical stock
---   today (stock <> 0) OR have current-month sales — a LEFT JOIN of venta_mes
---   onto stock_hoy, kept when (stock <> 0 OR the sales row exists). This is what
---   the xlsm reference shows and what the design locked:
+--   representative snapshot; 91% of rows are zero bultos). So the raw snapshot is
+--   a full (article x deposito) cartesian — most of it zero noise.
+--   The universe keeps a (sucursal, articulo) row when the article is active
+--   (sold anywhere in the last 3 years, RF-05) AND, per sucursal, EITHER
+--     * it has physical stock today (stock <> 0)  -> real inventory to report, OR
+--     * this sucursal has sold it in the last 3 years (pares_activos) -> part of
+--       the sucursal's real assortment, so a zero-stock row IS a quiebre to show.
+--   This deliberately surfaces stock=0 / no-sale-this-month rows the prior
+--   "stock<>0 OR sold-this-month" guard hid — the most critical quiebres (an item
+--   often stops selling precisely because it hit zero). It does NOT fall back to
+--   "every article in every sucursal": a zero-stock article a sucursal has NEVER
+--   sold in 3 years stays out (that is the ~10k-row noise band).
 --     * stock > 0, sales this month  -> colored by coverage (ROJO/AMARILLO/VERDE)
---     * stock = 0, sales this month  -> hard quiebre -> ROJO (visible because
---                                       fact_stock emits the zero-stock row)
+--     * stock = 0 (any/no sales)     -> hard quiebre -> ROJO (0 dias de alcance)
 --     * stock > 0, NO sales          -> dormant stock -> VERDE (no quiebre risk)
---     * stock = 0, NO sales          -> nothing to show -> excluded (the 91% noise)
---   No FULL OUTER JOIN is needed: an article selling with zero stock still has a
---   (zero) stock_hoy row, so LEFT-joining sales onto stock covers every case.
+--     * stock = 0, never sold here   -> not this sucursal's assortment -> excluded
+--   venta_mes is LEFT-joined onto stock_hoy (COALESCE 0) so dormant stock and
+--   zero-demand quiebres both survive. No FULL OUTER JOIN needed: a selling
+--   article always has a (possibly zero) stock_hoy row.
 -- =============================================================================
 
 -- Step 1: Drop the materialized view if it already exists (idempotent re-run)
@@ -184,11 +191,23 @@ articulos_activos AS (
 ),
 
 -- ---------------------------------------------------------------------------
--- grano: universe = (sucursal, articulo) pairs that have physical stock today
--- (stock <> 0) OR current-month sales (LEFT JOIN venta_mes onto stock_hoy — see
--- header note), restricted to articles active in the last 3 years, with dim
--- labels + working-day constants attached. venta is COALESCE'd to 0 so dormant
--- stock (no sales this month) surfaces as VERDE instead of being dropped.
+-- pares_activos: (sucursal, articulo) pairs sold in the last 3 years. Defines,
+-- per sucursal, the real assortment — so a zero-stock row for a pair the
+-- sucursal actually sells surfaces as a quiebre instead of being hidden.
+-- ---------------------------------------------------------------------------
+pares_activos AS (
+    SELECT DISTINCT id_sucursal, id_articulo
+    FROM gold.fact_ventas
+    WHERE fecha_comprobante >= (CURRENT_DATE - interval '3 years')::date
+),
+
+-- ---------------------------------------------------------------------------
+-- grano: universe = (sucursal, articulo) pairs where the article is active in
+-- the last 3 years (RF-05) AND, per sucursal, either has physical stock today
+-- (stock <> 0) OR was sold by that sucursal in the last 3 years (pares_activos —
+-- see header note). venta_mes is LEFT-joined + COALESCE'd to 0 so both dormant
+-- stock (stock>0, no sales -> VERDE) and zero-demand quiebres (stock=0, no sale
+-- this month -> ROJO) surface instead of being dropped.
 -- ---------------------------------------------------------------------------
 grano AS (
     SELECT
@@ -211,7 +230,14 @@ grano AS (
     JOIN gold.dim_articulo da ON da.id_articulo  = s.id_articulo
     CROSS JOIN dias d
     WHERE s.id_articulo IN (SELECT id_articulo FROM articulos_activos)
-      AND (s.stock_bultos <> 0 OR v.id_articulo IS NOT NULL)
+      AND (
+          s.stock_bultos <> 0
+          OR EXISTS (
+              SELECT 1 FROM pares_activos pa
+              WHERE pa.id_sucursal = s.id_sucursal
+                AND pa.id_articulo = s.id_articulo
+          )
+      )
 ),
 
 -- ---------------------------------------------------------------------------
@@ -256,12 +282,20 @@ SELECT
     tendencia_bultos,
     GREATEST(venta_diaria_bultos * 15 - stock_hoy_bultos, 0)                 AS pedido_sugerido_15d_bultos,
     CASE
+        WHEN stock_hoy_bultos <= 0
+            THEN 'ROJO'   -- hard quiebre: sin stock = 0 dias de alcance. ALWAYS red,
+                          -- regardless of current demand (revised 2026-07-28). This
+                          -- MUST precede the "no demand -> VERDE" branch below, or a
+                          -- zero-stock article with no sales this month would be
+                          -- painted green — the bug this fix removes.
         WHEN venta_diaria_bultos IS NULL OR venta_diaria_bultos <= 0
-            THEN 'VERDE'  -- dormant (no sales) OR net-negative sales (returns > sales):
-                          -- no quiebre risk. <= 0 keeps this consistent with the
-                          -- pedido floor GREATEST(..., 0); a bare "= 0" would leave
-                          -- net-negative velocity dividing into a negative alcance and
-                          -- falsely flagging over-stocked articles as ROJO.
+            THEN 'VERDE'  -- dormant stock (stock>0, no sales) OR net-negative sales
+                          -- (returns > sales): inventory on hand, no quiebre risk.
+                          -- <= 0 keeps this consistent with the pedido floor
+                          -- GREATEST(..., 0); a bare "= 0" would leave net-negative
+                          -- velocity dividing into a negative alcance and falsely
+                          -- flagging over-stocked articles as ROJO. Only reached when
+                          -- stock > 0 (stock <= 0 is caught above).
         WHEN stock_hoy_bultos / venta_diaria_bultos < 15
             THEN 'ROJO'
         WHEN stock_hoy_bultos / venta_diaria_bultos <= 30
