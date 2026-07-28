@@ -20,8 +20,8 @@
     },
     "stock-badie": {
         "ejecutar": true,
-        "enviar": false,
-        "razon": "GO-LIVE DORMIDO PRIMERO (2026-07-24): el cron diario genera el .xlsx para inspeccion, pero NO envia email. Activar entrega cambiando 'enviar' a true despues de validar el primer archivo en data/output/stock-badie/."
+        "enviar": true,
+        "razon": "GO-LIVE (2026-07-28): entrega ACTIVA tras validar el .xlsx en WPS (formato: cabeceras con color, bordes, grupos colapsables por sucursal). Envio diario por email + WhatsApp (xlsx como archivo) a Sebastian Dellamea, Fabian Gallardo y Gonzalo Farah, con Nahuel en copia por email. M Bravo quedo fuera de la lista: no tiene telefono cargado en contactos.json y el pedido fue email+wpp para los tres."
     }
 }
 

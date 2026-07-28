@@ -26,7 +26,7 @@ from dataclasses import dataclass
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.formatting.rule import FormulaRule
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.workbook.defined_name import DefinedName
 
@@ -68,6 +68,39 @@ _GREEN_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="s
 _TOTAL_GENERAL_FILL = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
 _TOTAL_GENERAL_FONT = Font(bold=True)
 _TOTAL_GENERAL_LABEL = "TOTAL GENERAL"
+
+# ── Visual styling: colored headers + cell borders ──────────────────────
+# Header palette. Identity columns and each sucursal's name cell get the
+# dark tone; the VENTA/PEDIDO/ALCANCE sub-headers get the medium tone so a
+# reader can tell block boundaries apart at a glance across 64 columns.
+# The Total block gets the darkest tone to read as "this is the rollup".
+_HEADER_FILL_DARK = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
+_HEADER_FILL_MEDIUM = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+_HEADER_FILL_TOTAL = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+_HEADER_FONT = Font(bold=True, color="FFFFFF", size=10)
+_HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+# Per-generico band: a light accent so the summary zone reads as separate
+# from the article table below it.
+_BAND_FILL = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+_BAND_LABEL_FONT = Font(bold=True)
+
+# Param cells (DiasStock / DiasVenta) — DiasStock is the interactive knob,
+# so it gets a distinct "edit me" accent.
+_PARAM_LABEL_FONT = Font(bold=True)
+_PARAM_VALUE_FILL = PatternFill(start_color="FFE699", end_color="FFE699", fill_type="solid")
+
+_THIN_SIDE = Side(style="thin", color="B4B4B4")
+_CELL_BORDER = Border(left=_THIN_SIDE, right=_THIN_SIDE, top=_THIN_SIDE, bottom=_THIN_SIDE)
+
+# Column widths: identity columns carry text (the article description is
+# long), the numeric block columns only ever hold formatted numbers.
+_WIDTH_ID_ARTICULO = 12
+_WIDTH_DS_ARTICULO = 42
+_WIDTH_GENERICO = 20
+_WIDTH_MARCA = 18
+_WIDTH_NUMERIC = 13
+_HEADER_ROW_HEIGHT = 30
 
 
 @dataclass(frozen=True)
@@ -147,6 +180,98 @@ def _generico_labels(wide_df: pd.DataFrame) -> list[str]:
 def _apply_number_format_row(ws, row: int, columns: range) -> None:
     for col in columns:
         ws.cell(row=row, column=col).number_format = NUMBER_FORMAT
+
+
+def _apply_borders_row(ws, row: int, last_col: int) -> None:
+    """Thin border on every cell of `row` from column A through `last_col`."""
+    for col in range(PARAM_LABEL_COL, last_col + 1):
+        ws.cell(row=row, column=col).border = _CELL_BORDER
+
+
+def _style_header_row(
+    ws,
+    header_row: int,
+    sucursales: list[str],
+    block_col_of: dict[str, int],
+    total_col: int,
+) -> None:
+    """Colored, bold, wrapped, centered header row.
+
+    Identity columns and each sucursal's NAME cell get the dark tone; the
+    VENTA/PEDIDO/ALCANCE sub-headers get the medium tone so block
+    boundaries stay readable across 64 columns; the Total block gets the
+    darkest tone to read as the rollup.
+    """
+    for col in range(PARAM_LABEL_COL, _N_IDENTITY + 1):
+        cell = ws.cell(row=header_row, column=col)
+        cell.fill = _HEADER_FILL_DARK
+        cell.font = _HEADER_FONT
+        cell.alignment = _HEADER_ALIGNMENT
+
+    for sucursal in sucursales:
+        block_col = block_col_of[sucursal]
+        # Stock column carries the sucursal name -> dark tone.
+        name_cell = ws.cell(row=header_row, column=block_col)
+        name_cell.fill = _HEADER_FILL_DARK
+        name_cell.font = _HEADER_FONT
+        name_cell.alignment = _HEADER_ALIGNMENT
+        # VENTA / PEDIDO / ALCANCE sub-headers -> medium tone.
+        for offset in (1, 2, 3):
+            sub_cell = ws.cell(row=header_row, column=block_col + offset)
+            sub_cell.fill = _HEADER_FILL_MEDIUM
+            sub_cell.font = _HEADER_FONT
+            sub_cell.alignment = _HEADER_ALIGNMENT
+
+    for offset in range(_BLOCK_WIDTH):
+        cell = ws.cell(row=header_row, column=total_col + offset)
+        cell.fill = _HEADER_FILL_TOTAL
+        cell.font = _HEADER_FONT
+        cell.alignment = _HEADER_ALIGNMENT
+
+    ws.row_dimensions[header_row].height = _HEADER_ROW_HEIGHT
+
+
+def _group_block_detail_columns(ws, sucursales: list[str], block_col_of: dict[str, int]) -> None:
+    """Outline-group each sucursal's VENTA/PEDIDO/ALCANCE columns so they
+    collapse to just the Stock column (user request).
+
+    Collapsing all 14 groups turns the sheet into a 14-sucursal stock
+    overview; expanding one shows that sucursal's detail. Left EXPANDED on
+    open (hidden=False) — the outline controls are present so a reader
+    collapses with one click without losing data on first open.
+    """
+    for sucursal in sucursales:
+        block_col = block_col_of[sucursal]
+        ws.column_dimensions.group(
+            get_column_letter(block_col + 1),  # VENTA
+            get_column_letter(block_col + 3),  # ALCANCE
+            outline_level=1,
+            hidden=False,
+        )
+
+
+def _group_top_rows(ws, header_row: int) -> None:
+    """Outline-group every row ABOVE the table header (params, spacer, the
+    per-generico band, spacer) so the whole summary zone collapses to a
+    single control and the article table jumps to the top of the screen.
+
+    Left EXPANDED on open (hidden=False) — the control is there, the reader
+    collapses with one click.
+    """
+    if header_row <= 1:
+        return
+    ws.row_dimensions.group(1, header_row - 1, outline_level=1, hidden=False)
+
+
+def _set_column_widths(ws, sucursales: list[str], block_col_of: dict[str, int], last_col: int) -> None:
+    """Identity columns sized for their text; every numeric block column
+    gets a uniform width wide enough for the accounting format."""
+    ws.column_dimensions[get_column_letter(1)].width = _WIDTH_ID_ARTICULO
+    ws.column_dimensions[get_column_letter(2)].width = _WIDTH_DS_ARTICULO
+    ws.column_dimensions[get_column_letter(3)].width = _WIDTH_GENERICO
+    ws.column_dimensions[get_column_letter(4)].width = _WIDTH_MARCA
+    for col in range(_FIRST_BLOCK_COL, last_col + 1):
+        ws.column_dimensions[get_column_letter(col)].width = _WIDTH_NUMERIC
 
 
 def _write_generico_band_row(
@@ -303,6 +428,15 @@ def build_workbook(wide_df: pd.DataFrame, dias_venta: int, dias_stock: int = 15)
     ws.cell(row=DIAS_VENTA_ROW, column=PARAM_LABEL_COL, value="DiasVenta:")
     ws.cell(row=DIAS_VENTA_ROW, column=PARAM_VALUE_COL, value=dias_venta)
 
+    # DiasStock is the interactive knob — highlight it so it reads as editable.
+    ws.cell(row=DIAS_STOCK_ROW, column=PARAM_LABEL_COL).font = _PARAM_LABEL_FONT
+    ws.cell(row=DIAS_VENTA_ROW, column=PARAM_LABEL_COL).font = _PARAM_LABEL_FONT
+    for param_row in (DIAS_STOCK_ROW, DIAS_VENTA_ROW):
+        value_cell = ws.cell(row=param_row, column=PARAM_VALUE_COL)
+        value_cell.font = _PARAM_LABEL_FONT
+        value_cell.border = _CELL_BORDER
+    ws.cell(row=DIAS_STOCK_ROW, column=PARAM_VALUE_COL).fill = _PARAM_VALUE_FILL
+
     _param_col_letter = get_column_letter(PARAM_VALUE_COL)
     wb.defined_names["DiasStock"] = DefinedName(
         "DiasStock", attr_text=f"'{SHEET_NAME}'!${_param_col_letter}${DIAS_STOCK_ROW}"
@@ -402,6 +536,7 @@ def build_workbook(wide_df: pd.DataFrame, dias_venta: int, dias_stock: int = 15)
 
         # RF-10: accounting number format on every numeric cell of this row.
         _apply_number_format_row(ws, r, numeric_cols)
+        _apply_borders_row(ws, r, total_alcance_col)
 
     # ── Per-generico totals band (RF-08) ──
     for idx, generico in enumerate(genericos):
@@ -410,6 +545,10 @@ def build_workbook(wide_df: pd.DataFrame, dias_venta: int, dias_stock: int = 15)
             ws, band_row, generico, all_blocks, layout.data_start_row, layout.data_end_row,
         )
         _apply_number_format_row(ws, band_row, numeric_cols)
+        _apply_borders_row(ws, band_row, total_alcance_col)
+        for col in range(PARAM_LABEL_COL, total_alcance_col + 1):
+            ws.cell(row=band_row, column=col).fill = _BAND_FILL
+        ws.cell(row=band_row, column=_GENERICO_COL).font = _BAND_LABEL_FONT
 
     # ── TOTAL GENERAL row (RF-09) + conditional formatting (RF-10) ──
     # Both need at least one data row: an empty SUM(...)/conditional range
@@ -420,10 +559,24 @@ def build_workbook(wide_df: pd.DataFrame, dias_venta: int, dias_stock: int = 15)
             ws, layout.total_general_row, all_blocks, layout.data_start_row, layout.data_end_row,
         )
         _apply_number_format_row(ws, layout.total_general_row, numeric_cols)
+        _apply_borders_row(ws, layout.total_general_row, total_alcance_col)
 
         stock_cols = [block_col_of[s] for s in sucursales] + [total_stock_col]
         _apply_stock_vs_pedido_conditional_formatting(
             ws, stock_cols, layout.data_start_row, layout.data_end_row,
         )
+
+    # ── Visual styling: colored headers, borders, widths, groups, panes ──
+    _style_header_row(ws, layout.header_row, sucursales, block_col_of, total_col)
+    _apply_borders_row(ws, layout.header_row, total_alcance_col)
+    _set_column_widths(ws, sucursales, block_col_of, total_alcance_col)
+    _group_block_detail_columns(ws, sucursales, block_col_of)
+    _group_top_rows(ws, layout.header_row)
+
+    # Freeze the identity columns and everything above the first data row,
+    # so scrolling a 64-column x N-row sheet keeps both the article name and
+    # the sucursal headers on screen.
+    ws.freeze_panes = f"{get_column_letter(_FIRST_BLOCK_COL)}{layout.data_start_row}"
+    ws.sheet_view.showGridLines = False
 
     return wb

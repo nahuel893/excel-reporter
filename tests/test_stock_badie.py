@@ -1056,6 +1056,153 @@ class TestTotalGeneralRow:
 # Strict TDD — Phase 4, Task 4.5 (RED) / 4.6 (GREEN) of sdd/stock-badie PR4.
 
 
+class TestVisualStyling:
+    """Colored headers, wrapped text, cell borders, collapsible per-sucursal
+    detail groups, column widths and freeze panes — the presentation layer
+    the user asked for after reviewing the first generated file."""
+
+    def _wide_df(self):
+        universe_df = pd.DataFrame(
+            [_universe_row(1, "CASA CENTRAL", stock_bultos=5, venta_bultos=10)]
+        )
+        return pivot_wide(universe_df)
+
+    def test_header_cells_are_filled_bold_white_and_wrapped(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+
+        for col in (1, 5, 6, 61):  # idArticulo, sucursal name, VENTA, Total
+            cell = ws.cell(row=layout.header_row, column=col)
+            assert cell.fill.fill_type == "solid", f"col {col} header not filled"
+            assert cell.fill.start_color.rgb not in (None, "00000000")
+            assert cell.font.bold is True
+            assert cell.font.color.rgb.endswith("FFFFFF")
+            assert cell.alignment.wrap_text is True
+            assert cell.alignment.horizontal == "center"
+
+    def test_sucursal_name_and_subheaders_use_distinct_fills(self):
+        """Block boundaries must stay readable across 64 columns: the
+        sucursal name cell and its VENTA/PEDIDO/ALCANCE sub-headers carry
+        different tones."""
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+
+        name_fill = ws.cell(row=layout.header_row, column=5).fill.start_color.rgb
+        sub_fill = ws.cell(row=layout.header_row, column=6).fill.start_color.rgb
+        total_fill = ws.cell(row=layout.header_row, column=61).fill.start_color.rgb
+
+        assert name_fill != sub_fill
+        assert total_fill != name_fill
+
+    def test_borders_on_header_data_band_and_total_rows(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+
+        rows = [
+            layout.header_row,
+            layout.data_start_row,
+            layout.band_start_row,
+            layout.total_general_row,
+        ]
+        for row in rows:
+            for col in (1, 5, 61):
+                border = ws.cell(row=row, column=col).border
+                assert border.left.style == "thin", f"row {row} col {col} missing border"
+                assert border.right.style == "thin"
+                assert border.top.style == "thin"
+                assert border.bottom.style == "thin"
+
+    def test_venta_pedido_alcance_columns_are_grouped_per_sucursal(self):
+        """Each sucursal's 3 detail columns collapse to just its Stock
+        column. openpyxl stores a group as ONE ColumnDimension spanning
+        min..max (intermediate entries are dropped), which serializes to
+        <col min=".." max=".." outlineLevel="1"/> — so assert the SPANS,
+        not per-letter outline levels."""
+        wide_df = self._wide_df()
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+
+        spans = sorted(
+            (d.min, d.max)
+            for d in ws.column_dimensions.values()
+            if d.outline_level == 1
+        )
+
+        # 14 sucursales, each grouping exactly its VENTA/PEDIDO/ALCANCE.
+        assert len(spans) == len(SUCURSAL_ORDER) == 14
+        # Block i (0-based) has Stock at 5+4*i, so its detail span is
+        # (6+4*i, 8+4*i): (6,8), (10,12), ... (58,60).
+        expected = [(6 + 4 * i, 8 + 4 * i) for i in range(14)]
+        assert spans == expected
+
+        # Every group covers exactly 3 columns — never swallows a Stock column.
+        assert all(hi - lo == 2 for lo, hi in spans)
+
+        # The Total block (61-64) stays ungrouped — always-visible rollup.
+        assert all(hi < 61 for _lo, hi in spans)
+
+    def test_groups_are_expanded_on_open(self):
+        """Outline controls present but NOT collapsed, so the first open
+        shows all data; the reader collapses with one click."""
+        wide_df = self._wide_df()
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+
+        grouped = [d for d in ws.column_dimensions.values() if d.outline_level == 1]
+        assert grouped, "no collapsible groups found"
+        assert all(d.hidden is False for d in grouped)
+
+    def test_top_rows_are_grouped_so_the_summary_zone_collapses(self):
+        """Params + per-generico band (everything above the header) sit in a
+        collapsible row group, so the article table can jump to the top."""
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+
+        # Unlike columns, openpyxl stores row groups per-row (no min/max).
+        grouped_rows = sorted(
+            idx for idx, d in ws.row_dimensions.items() if d.outline_level == 1
+        )
+        assert grouped_rows == list(range(1, layout.header_row)), (
+            "every row above the header must be in the collapsible group"
+        )
+        # Header row itself must stay visible when the group collapses.
+        assert ws.row_dimensions[layout.header_row].outline_level == 0
+        assert all(ws.row_dimensions[i].hidden is False for i in grouped_rows)
+
+    def test_column_widths_and_freeze_panes(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+
+        # dsArticulo holds long text -> widest identity column.
+        assert ws.column_dimensions["B"].width > ws.column_dimensions["A"].width
+        assert ws.column_dimensions["E"].width is not None
+
+        # Freeze identity columns + everything above the first data row.
+        assert ws.freeze_panes == f"E{layout.data_start_row}"
+
+    def test_band_rows_are_visually_distinct(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+
+        band_cell = ws.cell(row=layout.band_start_row, column=5)
+        data_cell = ws.cell(row=layout.data_start_row, column=5)
+        assert band_cell.fill.fill_type == "solid"
+        assert band_cell.fill.start_color.rgb != data_cell.fill.start_color.rgb
+        # The generico label itself reads as a heading.
+        assert ws.cell(row=layout.band_start_row, column=3).font.bold is True
+
+    def test_dias_stock_param_is_highlighted_as_editable(self):
+        wide_df = self._wide_df()
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+
+        assert ws.cell(row=1, column=2).fill.fill_type == "solid"
+        assert ws.cell(row=1, column=1).font.bold is True
+
+
 class TestNumberFormatAndConditionalFormatting:
     def _wide_df(self):
         universe_df = pd.DataFrame(
@@ -1463,15 +1610,47 @@ class TestDeliveryWiring:
         assert len(cfg.reportes) >= 1
 
     def test_config_has_expected_recipients(self):
-        """The 4 named recipients the spec requires are all in enviar_a."""
+        """The 3 named recipients receive by BOTH email and WhatsApp, with
+        Nahuel in email copy.
+
+        M Bravo was deliberately dropped (2026-07-28): the request was
+        email+WhatsApp for these three, and M Bravo has no `telefono` in
+        contactos.json so he cannot receive WhatsApp at all.
+        """
         cfg = self._load_config()
         report = cfg.reportes[0]
         assert report.enviar_a is not None
-        expected = {"M Bravo", "Fabian Gallardo", "Sebastian Dellamea", "Gonzalo Farah"}
+        expected = {"Sebastian Dellamea", "Fabian Gallardo", "Gonzalo Farah"}
         actual = set(report.enviar_a.keys())
         assert expected.issubset(actual), (
             f"Missing recipients in enviar_a: {expected - actual}"
         )
+        for nombre in expected:
+            via = set(report.enviar_a[nombre].via)
+            assert via == {"email", "whatsapp"}, (
+                f"{nombre} must receive by email AND whatsapp; got {via}"
+            )
+
+    def test_whatsapp_sends_the_xlsx_as_a_file_not_an_image(self):
+        """A 64-column sheet rendered as a WhatsApp image is unreadable, so
+        the workbook must go out as an attached file."""
+        cfg = self._load_config()
+        assert cfg.filtros.enviar_whatsapp is True
+        assert cfg.filtros.whatsapp_enviar_como == "archivo"
+
+    def test_all_recipients_have_a_phone_for_whatsapp(self):
+        """Guard: a recipient routed to WhatsApp without a `telefono` in the
+        catalog is silently dropped by the delivery pipeline."""
+        from src.config.resolver import load_contacts
+
+        cfg = self._load_config()
+        contactos = load_contacts(self.CONTACTOS_PATH)
+        for nombre, target in cfg.reportes[0].enviar_a.items():
+            if "whatsapp" in target.via:
+                assert contactos[nombre].telefono, (
+                    f"{nombre} is routed to WhatsApp but has no telefono in "
+                    f"contactos.json — the send would be silently dropped"
+                )
 
     def test_all_recipients_exist_in_contactos_catalog(self):
         """validate_contacts must NOT raise for the 4 recipients.
@@ -1488,12 +1667,11 @@ class TestDeliveryWiring:
         # Must not raise — the 4 recipients must be in the catalog.
         cfg.validate_contacts(contactos)
 
-    def test_config_dormant_by_default(self):
-        """DORMANT-by-default: configs/daily_overrides.json sets enviar=false
-        so the live cron generates the .xlsx but suppresses email/whatsapp.
-
-        The user explicitly chose 'DORMIDO PRIMERO' so the file can be
-        inspected in production before flipping the switch.
+    def test_delivery_is_live(self):
+        """Delivery is ACTIVE (2026-07-28), after the dormant phase: the
+        generated .xlsx was reviewed in WPS and the formatting signed off,
+        so configs/daily_overrides.json now sets enviar=true and the daily
+        cron delivers by email + WhatsApp.
         """
         overrides_path = (
             Path(__file__).resolve().parent.parent
@@ -1509,12 +1687,11 @@ class TestDeliveryWiring:
             "explicitly disabled on the live cron"
         )
         entry = overrides["stock-badie"]
-        # The override must suppress delivery. Either via ejecutar=false
-        # (service skipped entirely) or enviar=false (generate, no send).
-        # We want the latter — the file MUST be produced so it can be
-        # inspected — so this test only accepts enviar=false.
-        assert entry.get("enviar") is False, (
-            f"stock-badie override must set enviar=false (dormant-by-default); "
+        assert entry.get("ejecutar") is True, (
+            f"stock-badie must run on the daily cron; got: {entry}"
+        )
+        assert entry.get("enviar") is True, (
+            f"stock-badie delivery is live — the override must set enviar=true; "
             f"got: {entry}"
         )
 

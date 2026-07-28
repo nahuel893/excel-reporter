@@ -1,12 +1,13 @@
 {
-    "_note": "Stock BADIE — alcance en dias vs. ventas del mes en curso. Fechas parchadas en runtime por scripts/run_daily.py (fecha_modo=mes_a_hoy); los valores aqui son referencia. GO-LIVE DORMIDO: configs/daily_overrides.json pone enviar=false hasta validar el primer .xlsx en disco, luego se flipea con un cambio de una linea.",
+    "_note": "Stock BADIE — alcance en dias vs. ventas del mes en curso. Fechas parchadas en runtime por scripts/run_daily.py (fecha_modo=mes_completo, ventana half-open); los valores aqui son referencia. Entrega por email + WhatsApp; el xlsx va como ARCHIVO por WhatsApp (whatsapp_enviar_como=archivo) porque una captura de 64 columnas es ilegible.",
     "tipo": "stock-badie",
     "filtros": {
         "fecha_desde": "2026-07-01",
-        "fecha_hasta": "2026-07-31",
+        "fecha_hasta": "2026-08-01",
         "dias_stock": 15,
         "enviar_email": true,
-        "enviar_whatsapp": false,
+        "enviar_whatsapp": true,
+        "whatsapp_enviar_como": "archivo",
         "email_adjuntos": [
             "excel"
         ]
@@ -18,24 +19,22 @@
             "cuerpo_email": "Adjunto el reporte de alcance de stock BADIE (stock actual vs. ventas del mes, alcance en dias).",
             "filtros": {},
             "enviar_a": {
-                "M Bravo": {
+                "Sebastian Dellamea": {
                     "via": [
-                        "email"
+                        "email",
+                        "whatsapp"
                     ]
                 },
                 "Fabian Gallardo": {
                     "via": [
-                        "email"
-                    ]
-                },
-                "Sebastian Dellamea": {
-                    "via": [
-                        "email"
+                        "email",
+                        "whatsapp"
                     ]
                 },
                 "Gonzalo Farah": {
                     "via": [
-                        "email"
+                        "email",
+                        "whatsapp"
                     ]
                 },
                 "Nahuel Aguirre": {
