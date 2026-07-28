@@ -22,6 +22,7 @@ every formula below is generated relative to ``compute_layout``'s output.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 import pandas as pd
 from openpyxl import Workbook
@@ -39,6 +40,14 @@ PARAM_LABEL_COL = 1
 PARAM_VALUE_COL = 2
 DIAS_STOCK_CELL = f"{get_column_letter(PARAM_VALUE_COL)}{DIAS_STOCK_ROW}"
 DIAS_VENTA_CELL = f"{get_column_letter(PARAM_VALUE_COL)}{DIAS_VENTA_ROW}"
+
+# Row 3 documents WHICH data the sheet holds: the stock snapshot date and
+# the sales window. Without it a reader cannot tell whether the stock is
+# today's or a stale D-1 snapshot (the cron runs at 07:00, around when the
+# stock ETL loads, so a late ETL silently yields yesterday's stock).
+INFO_ROW = 3
+FECHA_STOCK_CELL = f"{get_column_letter(PARAM_VALUE_COL)}{INFO_ROW}"
+_DATE_FORMAT = "DD/MM/YYYY"
 
 # Row 3 is always a blank spacer below the params. The per-generico band
 # (RF-08) starts right below it — this is the ONLY row number below the
@@ -427,7 +436,14 @@ def _apply_stock_vs_pedido_conditional_formatting(
         )
 
 
-def build_workbook(wide_df: pd.DataFrame, dias_venta: int, dias_stock: int = 15) -> Workbook:
+def build_workbook(
+    wide_df: pd.DataFrame,
+    dias_venta: int,
+    dias_stock: int = 15,
+    fecha_stock: date | None = None,
+    periodo_desde: date | None = None,
+    periodo_hasta: date | None = None,
+) -> Workbook:
     """Build the STOCK sheet: params, per-generico band, header, one row per
     article (Stock/VENTA values plus live PEDIDO/ALCANCE/Total-block
     formulas), the TOTAL GENERAL row, number formatting, and Stock-vs-Pedido
@@ -467,6 +483,24 @@ def build_workbook(wide_df: pd.DataFrame, dias_venta: int, dias_stock: int = 15)
         value_cell.font = _PARAM_LABEL_FONT
         value_cell.border = _CELL_BORDER
     ws.cell(row=DIAS_STOCK_ROW, column=PARAM_VALUE_COL).fill = _PARAM_VALUE_FILL
+
+    # ── Row 3: what data is this? (stock snapshot date + sales window) ──
+    if fecha_stock is not None:
+        ws.cell(row=INFO_ROW, column=PARAM_LABEL_COL, value="Fecha stock:").font = _PARAM_LABEL_FONT
+        celda_fecha = ws.cell(row=INFO_ROW, column=PARAM_VALUE_COL, value=fecha_stock)
+        celda_fecha.number_format = _DATE_FORMAT
+        celda_fecha.font = _PARAM_LABEL_FONT
+        celda_fecha.border = _CELL_BORDER
+    if periodo_desde is not None and periodo_hasta is not None:
+        ws.cell(row=INFO_ROW, column=3, value="Ventas del:").font = _PARAM_LABEL_FONT
+        # periodo_hasta is the INCLUSIVE last day of the window the sales
+        # cover (the caller already converted the exclusive SQL bound).
+        celda_periodo = ws.cell(
+            row=INFO_ROW, column=4,
+            value=f"{periodo_desde:%d/%m/%Y} al {periodo_hasta:%d/%m/%Y}",
+        )
+        celda_periodo.font = _PARAM_LABEL_FONT
+        celda_periodo.border = _CELL_BORDER
 
     _param_col_letter = get_column_letter(PARAM_VALUE_COL)
     wb.defined_names["DiasStock"] = DefinedName(

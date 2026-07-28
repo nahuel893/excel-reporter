@@ -1213,6 +1213,31 @@ class TestVisualStyling:
         assert grouped, "no collapsible groups found"
         assert all(d.hidden is False for d in grouped)
 
+    def test_sheet_documents_stock_date_and_sales_window(self):
+        """Row 3 must state WHICH data the sheet holds. Without it a reader
+        cannot tell today's stock from a stale D-1 snapshot (the cron runs
+        at 07:00, around when the stock ETL loads)."""
+        wide_df = self._wide_df()
+        ws = build_workbook(
+            wide_df, dias_venta=20, dias_stock=15,
+            fecha_stock=date(2026, 7, 28),
+            periodo_desde=date(2026, 7, 1),
+            periodo_hasta=date(2026, 7, 28),
+        )["STOCK"]
+
+        assert ws.cell(row=3, column=1).value == "Fecha stock:"
+        assert ws.cell(row=3, column=2).value == date(2026, 7, 28)
+        assert "DD/MM/YYYY" in ws.cell(row=3, column=2).number_format.upper()
+        assert ws.cell(row=3, column=3).value == "Ventas del:"
+        assert ws.cell(row=3, column=4).value == "01/07/2026 al 28/07/2026"
+
+    def test_sheet_without_dates_still_builds(self):
+        """The metadata is optional — omitting it must not crash (guards
+        direct build_workbook callers and older tests)."""
+        wide_df = self._wide_df()
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+        assert ws.cell(row=3, column=1).value is None
+
     def test_totals_band_has_its_own_header_identical_to_the_stock_table(self):
         """The summary band must read as a self-contained table: same header
         labels as the article table right above it, not bare numbers whose

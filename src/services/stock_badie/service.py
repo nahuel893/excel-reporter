@@ -100,7 +100,16 @@ class StockBadieService(BaseService):
         ref = max(primer_dia, min(ref, ultimo_dia))
         dias_venta = compute_dias_venta(ref)
 
-        wb = build_workbook(wide, dias_venta, config.dias_stock)
+        # `ref` is the effective last day the sales cover (clamped into the
+        # period), so it — not `ultimo_dia` — is what the sheet should show.
+        wb = build_workbook(
+            wide,
+            dias_venta,
+            config.dias_stock,
+            fecha_stock=fecha_stock,
+            periodo_desde=primer_dia,
+            periodo_hasta=ref,
+        )
 
         out_dir = self._output_dir(config.fecha_desde)
         out_dir.mkdir(parents=True, exist_ok=True)
