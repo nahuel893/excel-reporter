@@ -141,3 +141,52 @@ class TestWhatsAppClientBaseUrl:
     def test_trailing_slash_stripped(self):
         client = WhatsAppClient("http://localhost:3000/")
         assert client.base_url == "http://localhost:3000"
+
+
+class TestWhatsAppClientSendText:
+    """The /send-text endpoint rejects (400) any `to` that does not end in
+    '@s.whatsapp.net' (see whatsapp-service lib/api.js). send_text must
+    normalize bare phone numbers so callers can pass either form."""
+
+    @staticmethod
+    def _mock_httpx():
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"ok": True}
+        mock_client_instance = MagicMock()
+        mock_client_instance.post.return_value = mock_response
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_httpx = MagicMock()
+        mock_httpx.Client.return_value = mock_client_instance
+        mock_httpx.ConnectError = ConnectionError
+        mock_httpx.HTTPError = Exception
+        return mock_httpx, mock_client_instance
+
+    def test_bare_phone_number_gets_jid_suffix(self):
+        """REGRESSION: a bare number used to 400 — the RAM-guard alert never
+        reached Nahuel on 2026-07-28 because of this."""
+        mock_httpx, mock_client = self._mock_httpx()
+        with patch.dict("sys.modules", {"httpx": mock_httpx}):
+            WhatsAppClient(BASE_URL).send_text(target="5493876008331", text="hola")
+
+        body = mock_client.post.call_args[1]["json"]
+        assert body["to"] == "5493876008331@s.whatsapp.net"
+        assert body["text"] == "hola"
+
+    def test_existing_jid_is_not_double_suffixed(self):
+        mock_httpx, mock_client = self._mock_httpx()
+        with patch.dict("sys.modules", {"httpx": mock_httpx}):
+            WhatsAppClient(BASE_URL).send_text(
+                target="5493876008331@s.whatsapp.net", text="hola"
+            )
+
+        assert mock_client.post.call_args[1]["json"]["to"] == "5493876008331@s.whatsapp.net"
+
+    def test_group_name_path_is_untouched(self):
+        mock_httpx, mock_client = self._mock_httpx()
+        with patch.dict("sys.modules", {"httpx": mock_httpx}):
+            WhatsAppClient(BASE_URL).send_text(text="hola", group_name="Preventa Salta")
+
+        body = mock_client.post.call_args[1]["json"]
+        assert body["group_name"] == "Preventa Salta"
+        assert "to" not in body

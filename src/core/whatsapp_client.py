@@ -37,7 +37,7 @@ class WhatsAppClient:
         if group_name:
             data["group_name"] = group_name
         else:
-            data["to"] = target
+            data["to"] = self._normalize_dm_jid(target)
         data["text"] = text
 
         try:
@@ -51,6 +51,20 @@ class WhatsAppClient:
             ) from exc
         except httpx.HTTPError as exc:
             raise ConnectionError(f"Error HTTP al enviar WhatsApp: {exc}") from exc
+
+    @staticmethod
+    def _normalize_dm_jid(target: str) -> str:
+        """Append the DM JID domain to a bare phone number.
+
+        The /send-text endpoint rejects with 400 any `to` that does not end in
+        '@s.whatsapp.net' (whatsapp-service lib/api.js). Callers naturally pass
+        the bare number from the contacts catalog, so normalize here. Targets
+        that already carry a JID domain (including group '@g.us') pass through
+        untouched.
+        """
+        if target and "@" not in target:
+            return f"{target}@s.whatsapp.net"
+        return target
 
     def send_image(
         self,
