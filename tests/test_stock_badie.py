@@ -1213,6 +1213,37 @@ class TestVisualStyling:
         assert grouped, "no collapsible groups found"
         assert all(d.hidden is False for d in grouped)
 
+    def test_totals_band_has_its_own_header_identical_to_the_stock_table(self):
+        """The summary band must read as a self-contained table: same header
+        labels as the article table right above it, not bare numbers whose
+        columns are only labelled further down the sheet."""
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+
+        assert layout.band_header_row < layout.band_start_row
+
+        last_col = 64
+        band_hdr = [ws.cell(row=layout.band_header_row, column=c).value for c in range(1, last_col + 1)]
+        table_hdr = [ws.cell(row=layout.header_row, column=c).value for c in range(1, last_col + 1)]
+        assert band_hdr == table_hdr, "band header must match the stock table header"
+        assert band_hdr[0] == "idArticulo"
+        assert band_hdr[4] == "CASA CENTRAL"
+        assert band_hdr[60] == "Total"
+
+    def test_band_header_is_styled_like_the_table_header(self):
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+
+        for col in (1, 5, 6, 61):
+            band = ws.cell(row=layout.band_header_row, column=col)
+            table = ws.cell(row=layout.header_row, column=col)
+            assert band.fill.start_color.rgb == table.fill.start_color.rgb
+            assert band.font.bold is True
+            assert band.alignment.wrap_text is True
+            assert band.border.left.style == "thin"
+
     def test_top_rows_are_grouped_so_the_summary_zone_collapses(self):
         """Params + per-generico band (everything above the header) sit in a
         collapsible row group, so the article table can jump to the top."""

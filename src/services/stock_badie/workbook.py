@@ -109,6 +109,7 @@ class SheetLayout:
     genericos and articulo rows a given run produces. Column letters are
     NEVER affected by this — only row numbers shift."""
 
+    band_header_row: int
     band_start_row: int
     band_end_row: int
     header_row: int
@@ -125,16 +126,20 @@ def compute_layout(n_genericos: int, n_articulos: int) -> SheetLayout:
     """Compute the STOCK sheet's row layout.
 
     Row 1-2: DiasStock/DiasVenta params. Row 3: blank spacer (fixed,
-    BAND_START_ROW - 1). band_start_row..band_end_row: one row per distinct
-    generico — an EMPTY range when n_genericos == 0 (e.g. an empty
-    universe), never a crash. One blank spacer row follows the band.
-    header_row: table header. data_start_row..data_end_row: one row per
-    articulo — an empty range when n_articulos == 0 (header-only sheet).
-    total_general_row sits directly below the last data row (or directly
-    below the header when there are no data rows, via the same
-    ``data_end_row + 1`` formula — no special-casing needed).
+    BAND_START_ROW - 1). band_header_row: the totals band carries its OWN
+    copy of the table header, so the summary reads as a self-contained
+    table instead of bare numbers whose columns are only labelled further
+    down. band_start_row..band_end_row: one row per distinct generico — an
+    EMPTY range when n_genericos == 0 (e.g. an empty universe), never a
+    crash. One blank spacer row follows the band. header_row: table header.
+    data_start_row..data_end_row: one row per articulo — an empty range
+    when n_articulos == 0 (header-only sheet). total_general_row sits
+    directly below the last data row (or directly below the header when
+    there are no data rows, via the same ``data_end_row + 1`` formula — no
+    special-casing needed).
     """
-    band_start_row = BAND_START_ROW
+    band_header_row = BAND_START_ROW
+    band_start_row = band_header_row + 1
     band_end_row = band_start_row + n_genericos - 1
     header_row = band_end_row + 2  # +1 blank spacer row between band and header
     data_start_row = header_row + 1
@@ -142,6 +147,7 @@ def compute_layout(n_genericos: int, n_articulos: int) -> SheetLayout:
     total_general_row = data_end_row + 1
 
     return SheetLayout(
+        band_header_row=band_header_row,
         band_start_row=band_start_row,
         band_end_row=band_end_row,
         header_row=header_row,
@@ -186,6 +192,31 @@ def _apply_borders_row(ws, row: int, last_col: int) -> None:
     """Thin border on every cell of `row` from column A through `last_col`."""
     for col in range(PARAM_LABEL_COL, last_col + 1):
         ws.cell(row=row, column=col).border = _CELL_BORDER
+
+
+def _write_header_labels(
+    ws,
+    row: int,
+    sucursales: list[str],
+    block_col_of: dict[str, int],
+    total_col: int,
+) -> None:
+    """Write the table header labels on `row`: identity columns, then each
+    sucursal's name over its Stock column with VENTA/PEDIDO/ALCANCE beside
+    it, then the Total block. Used for BOTH the per-generico band header
+    and the article-table header so the two tables read identically."""
+    for i, label in enumerate(_IDENTITY_HEADERS, 1):
+        ws.cell(row=row, column=i, value=label)
+
+    for sucursal in sucursales:
+        col = block_col_of[sucursal]
+        ws.cell(row=row, column=col, value=sucursal)
+        ws.cell(row=row, column=col + 1, value="VENTA")
+        ws.cell(row=row, column=col + 2, value="PEDIDO")
+        ws.cell(row=row, column=col + 3, value="ALCANCE")
+
+    for i, label in enumerate(_TOTAL_HEADERS):
+        ws.cell(row=row, column=total_col + i, value=label)
 
 
 def _style_header_row(
@@ -445,23 +476,19 @@ def build_workbook(wide_df: pd.DataFrame, dias_venta: int, dias_stock: int = 15)
         "DiasVenta", attr_text=f"'{SHEET_NAME}'!${_param_col_letter}${DIAS_VENTA_ROW}"
     )
 
-    # ── Header row ──
-    for i, label in enumerate(_IDENTITY_HEADERS, 1):
-        ws.cell(row=layout.header_row, column=i, value=label)
-
+    # ── Column map + header rows ──
     block_col_of: dict[str, int] = {}  # sucursal -> first (Stock) column of its block
     col = _FIRST_BLOCK_COL
     for sucursal in sucursales:
         block_col_of[sucursal] = col
-        ws.cell(row=layout.header_row, column=col, value=sucursal)
-        ws.cell(row=layout.header_row, column=col + 1, value="VENTA")
-        ws.cell(row=layout.header_row, column=col + 2, value="PEDIDO")
-        ws.cell(row=layout.header_row, column=col + 3, value="ALCANCE")
         col += _BLOCK_WIDTH
-
     total_col = col  # first column of the Total block
-    for i, label in enumerate(_TOTAL_HEADERS):
-        ws.cell(row=layout.header_row, column=total_col + i, value=label)
+
+    # The same header is written TWICE: once above the per-generico totals
+    # band and once above the article table, so each reads as a
+    # self-contained table instead of bare numbers.
+    _write_header_labels(ws, layout.band_header_row, sucursales, block_col_of, total_col)
+    _write_header_labels(ws, layout.header_row, sucursales, block_col_of, total_col)
 
     total_stock_col = total_col
     total_venta_col = total_col + 1
@@ -567,8 +594,9 @@ def build_workbook(wide_df: pd.DataFrame, dias_venta: int, dias_stock: int = 15)
         )
 
     # ── Visual styling: colored headers, borders, widths, groups, panes ──
-    _style_header_row(ws, layout.header_row, sucursales, block_col_of, total_col)
-    _apply_borders_row(ws, layout.header_row, total_alcance_col)
+    for hdr_row in (layout.band_header_row, layout.header_row):
+        _style_header_row(ws, hdr_row, sucursales, block_col_of, total_col)
+        _apply_borders_row(ws, hdr_row, total_alcance_col)
     _set_column_widths(ws, sucursales, block_col_of, total_alcance_col)
     _group_block_detail_columns(ws, sucursales, block_col_of)
     _group_top_rows(ws, layout.header_row)
