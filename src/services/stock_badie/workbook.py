@@ -84,7 +84,11 @@ _TOTAL_GENERAL_LABEL = "TOTAL GENERAL"
 # reader can tell block boundaries apart at a glance across 64 columns.
 # The Total block gets the darkest tone to read as "this is the rollup".
 _HEADER_FILL_DARK = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
-_HEADER_FILL_MEDIUM = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+# VENTA/PEDIDO/ALCANCE share ONE distinctive tone (green): they are exactly
+# the columns that collapse into each sucursal's outline group, so colouring
+# them apart from the blue Stock/identity headers makes that structure
+# obvious at a glance.
+_HEADER_FILL_MEDIUM = PatternFill(start_color="548235", end_color="548235", fill_type="solid")
 _HEADER_FILL_TOTAL = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
 _HEADER_FONT = Font(bold=True, color="FFFFFF", size=10)
 _HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -121,7 +125,9 @@ class SheetLayout:
     band_header_row: int
     band_start_row: int
     band_end_row: int
+    band_total_row: int
     header_row: int
+    table_total_row: int
     data_start_row: int
     data_end_row: int
     total_general_row: int
@@ -150,8 +156,10 @@ def compute_layout(n_genericos: int, n_articulos: int) -> SheetLayout:
     band_header_row = BAND_START_ROW
     band_start_row = band_header_row + 1
     band_end_row = band_start_row + n_genericos - 1
-    header_row = band_end_row + 2  # +1 blank spacer row between band and header
-    data_start_row = header_row + 1
+    band_total_row = band_end_row + 1  # closes the band table
+    header_row = band_total_row + 2  # +1 blank spacer row between band and header
+    table_total_row = header_row + 1  # opens the article table
+    data_start_row = table_total_row + 1
     data_end_row = data_start_row + n_articulos - 1
     total_general_row = data_end_row + 1
 
@@ -159,7 +167,9 @@ def compute_layout(n_genericos: int, n_articulos: int) -> SheetLayout:
         band_header_row=band_header_row,
         band_start_row=band_start_row,
         band_end_row=band_end_row,
+        band_total_row=band_total_row,
         header_row=header_row,
+        table_total_row=table_total_row,
         data_start_row=data_start_row,
         data_end_row=data_end_row,
         total_general_row=total_general_row,
@@ -209,12 +219,20 @@ def _write_header_labels(
     sucursales: list[str],
     block_col_of: dict[str, int],
     total_col: int,
+    solo_generico: bool = False,
 ) -> None:
     """Write the table header labels on `row`: identity columns, then each
     sucursal's name over its Stock column with VENTA/PEDIDO/ALCANCE beside
     it, then the Total block. Used for BOTH the per-generico band header
-    and the article-table header so the two tables read identically."""
+    and the article-table header so the two tables read identically.
+
+    `solo_generico` keeps only the GENERICO identity header — the band is
+    keyed by generico, so idArticulo/dsArticulo/MARCA would be meaningless
+    labels over its rows.
+    """
     for i, label in enumerate(_IDENTITY_HEADERS, 1):
+        if solo_generico and i != _GENERICO_COL:
+            continue
         ws.cell(row=row, column=i, value=label)
 
     for sucursal in sucursales:
@@ -290,17 +308,18 @@ def _group_block_detail_columns(ws, sucursales: list[str], block_col_of: dict[st
         )
 
 
-def _group_top_rows(ws, header_row: int) -> None:
-    """Outline-group every row ABOVE the table header (params, spacer, the
-    per-generico band, spacer) so the whole summary zone collapses to a
-    single control and the article table jumps to the top of the screen.
+def _group_top_rows(ws, band_header_row: int, header_row: int) -> None:
+    """Outline-group ONLY the per-generico band table (its header, its rows
+    and its totals row), so collapsing it hides the summary table without
+    touching the DiasStock/DiasVenta/Fecha-stock cells above it — those must
+    stay visible because DiasStock is the interactive knob.
 
     Left EXPANDED on open (hidden=False) — the control is there, the reader
     collapses with one click.
     """
-    if header_row <= 1:
+    if header_row - 1 < band_header_row:
         return
-    ws.row_dimensions.group(1, header_row - 1, outline_level=1, hidden=False)
+    ws.row_dimensions.group(band_header_row, header_row - 1, outline_level=1, hidden=False)
 
 
 def _set_column_widths(ws, sucursales: list[str], block_col_of: dict[str, int], last_col: int) -> None:
@@ -521,7 +540,9 @@ def build_workbook(
     # The same header is written TWICE: once above the per-generico totals
     # band and once above the article table, so each reads as a
     # self-contained table instead of bare numbers.
-    _write_header_labels(ws, layout.band_header_row, sucursales, block_col_of, total_col)
+    _write_header_labels(
+        ws, layout.band_header_row, sucursales, block_col_of, total_col, solo_generico=True
+    )
     _write_header_labels(ws, layout.header_row, sucursales, block_col_of, total_col)
 
     total_stock_col = total_col
@@ -616,29 +637,36 @@ def build_workbook(
     # over a header-only sheet is meaningless and would emit a malformed
     # reversed range.
     if layout.has_data:
-        _write_total_general_row(
-            ws, layout.total_general_row, all_blocks, layout.data_start_row, layout.data_end_row,
-        )
-        _apply_number_format_row(ws, layout.total_general_row, numeric_cols)
-        _apply_borders_row(ws, layout.total_general_row, total_alcance_col)
+        # Three totals rows, all identical in content (SUM over the article
+        # data range, alcance as ratio-of-sums): one closing the band table,
+        # one opening the article table and one closing it. The totals stay
+        # on screen whether the reader is at the top or the bottom.
+        for total_row in (
+            layout.band_total_row,
+            layout.table_total_row,
+            layout.total_general_row,
+        ):
+            _write_total_general_row(
+                ws, total_row, all_blocks, layout.data_start_row, layout.data_end_row,
+            )
+            _apply_number_format_row(ws, total_row, numeric_cols)
+            _apply_borders_row(ws, total_row, total_alcance_col)
 
         stock_cols = [block_col_of[s] for s in sucursales] + [total_stock_col]
         _apply_stock_vs_pedido_conditional_formatting(
             ws, stock_cols, layout.data_start_row, layout.data_end_row,
         )
 
-    # ── Visual styling: colored headers, borders, widths, groups, panes ──
+    # ── Visual styling: colored headers, borders, widths, groups ──
     for hdr_row in (layout.band_header_row, layout.header_row):
         _style_header_row(ws, hdr_row, sucursales, block_col_of, total_col)
         _apply_borders_row(ws, hdr_row, total_alcance_col)
     _set_column_widths(ws, sucursales, block_col_of, total_alcance_col)
     _group_block_detail_columns(ws, sucursales, block_col_of)
-    _group_top_rows(ws, layout.header_row)
+    _group_top_rows(ws, layout.band_header_row, layout.header_row)
 
-    # Freeze the identity columns and everything above the first data row,
-    # so scrolling a 64-column x N-row sheet keeps both the article name and
-    # the sucursal headers on screen.
-    ws.freeze_panes = f"{get_column_letter(_FIRST_BLOCK_COL)}{layout.data_start_row}"
+    # No freeze panes: with totals rows at the top AND bottom of the article
+    # table, the key figures are always reachable without locking the view.
     ws.sheet_view.showGridLines = False
 
     return wb

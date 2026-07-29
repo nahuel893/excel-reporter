@@ -1251,10 +1251,54 @@ class TestVisualStyling:
         last_col = 64
         band_hdr = [ws.cell(row=layout.band_header_row, column=c).value for c in range(1, last_col + 1)]
         table_hdr = [ws.cell(row=layout.header_row, column=c).value for c in range(1, last_col + 1)]
-        assert band_hdr == table_hdr, "band header must match the stock table header"
-        assert band_hdr[0] == "idArticulo"
+
+        # From column E on (sucursal blocks + Total) both headers are identical.
+        assert band_hdr[4:] == table_hdr[4:], "band header must match the stock table from col E on"
         assert band_hdr[4] == "CASA CENTRAL"
         assert band_hdr[60] == "Total"
+
+        # Identity area: the band is keyed by GENERICO, so idArticulo /
+        # dsArticulo / MARCA would be meaningless labels over its rows.
+        assert band_hdr[2] == "GENERICO"
+        assert band_hdr[0] is None, "idArticulo must not be labelled on the band"
+        assert band_hdr[1] is None, "dsArticulo must not be labelled on the band"
+        assert band_hdr[3] is None, "MARCA must not be labelled on the band"
+        assert table_hdr[0] == "idArticulo"
+
+    def test_venta_pedido_alcance_headers_have_a_distinct_colour(self):
+        """The 3 collapsible detail columns share one tone, different from
+        the Stock/identity headers, so the outline groups read visually."""
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+
+        stock_hdr = ws.cell(row=layout.header_row, column=5).fill.start_color.rgb
+        venta = ws.cell(row=layout.header_row, column=6).fill.start_color.rgb
+        pedido = ws.cell(row=layout.header_row, column=7).fill.start_color.rgb
+        alcance = ws.cell(row=layout.header_row, column=8).fill.start_color.rgb
+
+        assert venta == pedido == alcance, "the 3 detail headers share one tone"
+        assert venta != stock_hdr, "detail headers must differ from the Stock header"
+
+    def test_totals_rows_close_the_band_and_bracket_the_article_table(self):
+        """Totals appear three times: closing the band, opening the article
+        table and closing it — so they are on screen from either end."""
+        wide_df = self._wide_df()
+        layout = _layout_for(wide_df)
+        ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
+
+        assert layout.band_total_row == layout.band_end_row + 1
+        assert layout.table_total_row == layout.header_row + 1
+        assert layout.data_start_row == layout.table_total_row + 1
+        assert layout.total_general_row == layout.data_end_row + 1
+
+        ds, de = layout.data_start_row, layout.data_end_row
+        for row in (layout.band_total_row, layout.table_total_row, layout.total_general_row):
+            assert ws.cell(row=row, column=1).value == "TOTAL GENERAL"
+            # Same content in all three: SUM over the article data range.
+            assert ws.cell(row=row, column=5).value == f"=SUM(E{ds}:E{de})"
+            # Alcance stays the corrected ratio, never a SUM.
+            assert ws.cell(row=row, column=8).value == f"=IFERROR(E{row}/(F{row}/DiasVenta),0)"
 
     def test_band_header_is_styled_like_the_table_header(self):
         wide_df = self._wide_df()
@@ -1280,24 +1324,31 @@ class TestVisualStyling:
         grouped_rows = sorted(
             idx for idx, d in ws.row_dimensions.items() if d.outline_level == 1
         )
-        assert grouped_rows == list(range(1, layout.header_row)), (
-            "every row above the header must be in the collapsible group"
+        # The group covers ONLY the band table (header + rows + its totals
+        # row + spacer) — never the DiasStock/DiasVenta/Fecha-stock cells,
+        # because DiasStock is the interactive knob and must stay visible.
+        assert grouped_rows == list(range(layout.band_header_row, layout.header_row)), (
+            "the group must span the band table only"
         )
+        for param_row in (1, 2, 3):
+            assert ws.row_dimensions[param_row].outline_level == 0, (
+                f"row {param_row} (params/fecha) must NOT collapse with the band"
+            )
         # Header row itself must stay visible when the group collapses.
         assert ws.row_dimensions[layout.header_row].outline_level == 0
         assert all(ws.row_dimensions[i].hidden is False for i in grouped_rows)
 
-    def test_column_widths_and_freeze_panes(self):
+    def test_column_widths_and_no_freeze_panes(self):
         wide_df = self._wide_df()
-        layout = _layout_for(wide_df)
         ws = build_workbook(wide_df, dias_venta=20, dias_stock=15)["STOCK"]
 
         # dsArticulo holds long text -> widest identity column.
         assert ws.column_dimensions["B"].width > ws.column_dimensions["A"].width
         assert ws.column_dimensions["E"].width is not None
 
-        # Freeze identity columns + everything above the first data row.
-        assert ws.freeze_panes == f"E{layout.data_start_row}"
+        # No freeze panes: the totals rows bracket the article table, so the
+        # key figures are reachable from either end without locking the view.
+        assert ws.freeze_panes is None
 
     def test_band_rows_are_visually_distinct(self):
         wide_df = self._wide_df()
