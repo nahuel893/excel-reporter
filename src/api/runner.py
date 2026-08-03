@@ -251,9 +251,16 @@ class RunRegistry:
             exit_code = -1
 
         # Finalize via asyncio event loop
-        self._loop.call_soon_threadsafe(
-            self._finalize_sync, session, exit_code, lock, engine
-        )
+        try:
+            self._loop.call_soon_threadsafe(
+                self._finalize_sync, session, exit_code, lock, engine
+            )
+        except RuntimeError as e:
+            logger.warning(
+                "Could not schedule finalize for run %s — event loop closed: %s",
+                session.run_id,
+                e,
+            )
 
     def _finalize_sync(
         self,

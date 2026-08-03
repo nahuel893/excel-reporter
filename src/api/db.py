@@ -7,6 +7,7 @@ Table: runs — run history (RF-301)
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -78,7 +79,21 @@ def engine_from_url(url: str):
 
 
 def get_default_engine():
-    """Return the default engine pointing to data/mgmt.db."""
+    """Return the default engine pointing to data/mgmt.db.
+
+    Refuses to run while pytest is executing (RF-08): tests must inject
+    their own engine= (see engine_from_url()) instead of writing to the
+    production data/mgmt.db. This guard exists because previous test runs
+    silently polluted the production 'runs' table (139/139 rows were
+    pytest artifacts) — see sdd/admin-panel-daily.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        raise RuntimeError(
+            "get_default_engine() was called while running under pytest "
+            "(PYTEST_CURRENT_TEST is set). Tests must inject their own "
+            "engine= via engine_from_url(f\"sqlite:///{tmp_path}/test.db\") "
+            "instead of writing to the production data/mgmt.db."
+        )
     db_path = _DEFAULT_DB_PATH
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return engine_from_url(f"sqlite:///{db_path}")
