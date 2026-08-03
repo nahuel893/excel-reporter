@@ -14,9 +14,14 @@
         "razon": "Activado: cupos de julio (2026-07) cargados y verificados en gold.fact_cupos (2046 filas). Envio diario por WhatsApp al grupo Preventa + Vinos Bodega E (CC Nahuel)."
     },
     "avance-guemes": {
-        "ejecutar": true,
-        "enviar": true,
-        "razon": "Activo. Template listo y verificado. El envio lo controla el gate de objetivo (esperar_objetivo=true en el config): solo entrega cuando los cupos del mes estan cargados en gold, si no genera pero no envia."
+        "ejecutar": false,
+        "enviar": false,
+        "razon": "PAUSADO (2026-08-03) a pedido de Nahuel: queda parado hasta que esten cargados los cupos del mes. El daily NO ejecuta el servicio (no genera, no renderiza, no envia). Para reactivar: ejecutar=true y enviar=true. El config (configs/avances_guemes.json) queda intacto, con esperar_objetivo=true: una vez reactivado, el gate de objetivo sigue reteniendo el envio hasta que los cupos esten en gold."
+    },
+    "champions-league": {
+        "ejecutar": false,
+        "enviar": false,
+        "razon": "PAUSADO (2026-08-03) a pedido de Nahuel: queda parado hasta que esten cargados los cupos del mes. El daily NO ejecuta el servicio (no genera, no renderiza, no envia). Para reactivar: ejecutar=true y enviar=true. El config (configs/champions_league.json) queda intacto."
     },
     "stock-badie": {
         "ejecutar": true,
