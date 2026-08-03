@@ -5,8 +5,8 @@
     },
     "avance-badie": {
         "ejecutar": true,
-        "enviar": true,
-        "razon": "GO-LIVE (2026-07-24): enviar_whatsapp:true — envio automatico diario de imagenes al grupo Preventa Salta ACTIVO. Bug de cupo resuelto (commit 052b6e2): CuposVolumen!Codigo (id_ruta) se guardaba con formato de fecha; el round-trip de openpyxl del render reserializaba y el bug del bisiesto 1900 corria los seriales >=60 un dia, rompiendo el VLOOKUP a AvanceR -> cerveza daba 82.574 en imagenes vs 83.000 real. Guard de RAM en run_daily: si a las 07:00 hay <3GB disponibles, se OMITE el render de imagenes, se envia el xlsx por email igual, y se alerta a Nahuel por WhatsApp (nunca falla en silencio)."
+        "enviar": false,
+        "razon": "ENTREGA PAUSADA (2026-08-03) a pedido de Nahuel: el archivo se sigue generando/cargando todos los dias en data/output/avances/{YYYY-MM}/, pero NO se envia a nadie (ni email a supervisores ni imagenes al grupo Preventa Salta). enviar=false limpia enviar_a, y sin canal que consuma imagenes CaptureImageStep se omite ANTES del render — no se gastan los ~40 min ni los ~3.400 MB de RAM. Para reactivar: poner enviar=true (el resto del config de avances_badie.json queda intacto). Historia: GO-LIVE fue 2026-07-24 tras resolver el bug de cupo (commit 052b6e2): CuposVolumen!Codigo (id_ruta) se guardaba con formato de fecha; el round-trip de openpyxl del render reserializaba y el bug del bisiesto 1900 corria los seriales >=60 un dia, rompiendo el VLOOKUP a AvanceR -> cerveza daba 82.574 en imagenes vs 83.000 real. Guard de RAM en run_daily sigue vigente para los demas reportes con imagenes."
     },
     "avance-branca": {
         "ejecutar": true,
