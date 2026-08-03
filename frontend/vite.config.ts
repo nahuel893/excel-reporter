@@ -14,29 +14,29 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
+        target: process.env.VITE_API_TARGET ?? "http://localhost:8010",
         changeOrigin: true,
         // Strip /api prefix — backend routes are at /mgmt/..., /ventas/..., etc.
         rewrite: (p) => p.replace(/^\/api/, ""),
       },
       "/mgmt": {
-        target: "http://localhost:8000",
+        target: process.env.VITE_API_TARGET ?? "http://localhost:8010",
         changeOrigin: true,
       },
       "/ventas": {
-        target: "http://localhost:8000",
+        target: process.env.VITE_API_TARGET ?? "http://localhost:8010",
         changeOrigin: true,
       },
       "/resumen-mensual": {
-        target: "http://localhost:8000",
+        target: process.env.VITE_API_TARGET ?? "http://localhost:8010",
         changeOrigin: true,
       },
       "/graficos-cobertura": {
-        target: "http://localhost:8000",
+        target: process.env.VITE_API_TARGET ?? "http://localhost:8010",
         changeOrigin: true,
       },
       "/health": {
-        target: "http://localhost:8000",
+        target: process.env.VITE_API_TARGET ?? "http://localhost:8010",
         changeOrigin: true,
       },
     },
