@@ -4,9 +4,9 @@
         "razon": "Incentivo ON PREMISE vencido el 13/06/2026. Envio final realizado con datos hasta esa fecha. No volver a enviar para no mandar datos obsoletos."
     },
     "avance-badie": {
-        "ejecutar": true,
+        "ejecutar": false,
         "enviar": false,
-        "razon": "ENTREGA PAUSADA (2026-08-03) a pedido de Nahuel: el archivo se sigue generando/cargando todos los dias en data/output/avances/{YYYY-MM}/, pero NO se envia a nadie (ni email a supervisores ni imagenes al grupo Preventa Salta). enviar=false limpia enviar_a, y sin canal que consuma imagenes CaptureImageStep se omite ANTES del render — no se gastan los ~40 min ni los ~3.400 MB de RAM. Para reactivar: poner enviar=true (el resto del config de avances_badie.json queda intacto). Historia: GO-LIVE fue 2026-07-24 tras resolver el bug de cupo (commit 052b6e2): CuposVolumen!Codigo (id_ruta) se guardaba con formato de fecha; el round-trip de openpyxl del render reserializaba y el bug del bisiesto 1900 corria los seriales >=60 un dia, rompiendo el VLOOKUP a AvanceR -> cerveza daba 82.574 en imagenes vs 83.000 real. Guard de RAM en run_daily sigue vigente para los demas reportes con imagenes."
+        "razon": "PARADO POR COMPLETO (2026-08-03) a pedido de Nahuel: el daily NO ejecuta el servicio. No se genera el xlsx, no se carga nada, no se renderizan imagenes y no se envia ni email ni WhatsApp. Para reactivar: poner ejecutar=true y enviar=true (configs/avances_badie.json quedo intacto: enviar_whatsapp true, 22 capture_images -> 25 imagenes, destinatarios completos). Historia: GO-LIVE fue 2026-07-24 tras resolver el bug de cupo (commit 052b6e2): CuposVolumen!Codigo (id_ruta) se guardaba con formato de fecha; el round-trip de openpyxl del render reserializaba y el bug del bisiesto 1900 corria los seriales >=60 un dia, rompiendo el VLOOKUP a AvanceR -> cerveza daba 82.574 en imagenes vs 83.000 real. Guard de RAM en run_daily sigue vigente para los demas reportes con imagenes."
     },
     "avance-branca": {
         "ejecutar": true,
