@@ -799,12 +799,21 @@ def _run_ventas_marca_report(report, merged: dict) -> list[tuple[Path, dict]]:
         fecha_hasta=merged.get("fecha_hasta"),
         id_sucursal=merged.get("id_sucursal") or 1,
         nombre_archivo=report.nombre,
+        incluir_mes_anterior=bool(merged.get("incluir_mes_anterior")),
     )
 
     result = VentasMarcaService().generar_reporte(config)
     print(f"Venta por Marca '{report.nombre}' generada exitosamente:")
     print(f"  - Archivo: {result.ruta_archivo}")
-    print(f"  - Marcas: {result.marcas} | Total bultos: {result.total_bultos}")
+    print(
+        f"  - Marcas: {result.marcas} | Total bultos: {result.total_bultos} "
+        f"| Cobertura: {result.cobertura_total}"
+    )
+    if result.total_bultos_prev is not None:
+        print(
+            f"  - {result.etiqueta_prev} (mes anterior): "
+            f"Bultos: {result.total_bultos_prev} | Cobertura: {result.cobertura_prev}"
+        )
     return [
         (
             Path(result.ruta_archivo),
@@ -831,12 +840,18 @@ def _run_ventas_cober_preventista_marca_report(report, merged: dict) -> list[tup
         fecha_hasta=merged.get("fecha_hasta") or merged["fecha_desde"],
         id_sucursal=merged.get("id_sucursal") or 1,
         nombre_archivo=report.nombre,
+        incluir_mes_anterior=bool(merged.get("incluir_mes_anterior")),
     )
 
     result = VentasCoberPreventistaMarcaService().generar_reporte(config)
     print(f"Ventas+Cobertura por Preventista '{report.nombre}' generado exitosamente:")
     print(f"  - Archivo: {result.ruta_archivo}")
     print(f"  - Preventistas: {result.preventistas} | Bultos: {result.total_bultos} | Cobertura: {result.cobertura_total}")
+    if result.total_bultos_prev is not None:
+        print(
+            f"  - {result.etiqueta_prev} (mes anterior): "
+            f"Bultos: {result.total_bultos_prev} | Cobertura: {result.cobertura_prev}"
+        )
     return [
         (
             Path(result.ruta_archivo),

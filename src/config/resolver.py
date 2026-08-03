@@ -264,6 +264,7 @@ def merge_filters(
         "marcas_completas": False,
         "genericos_universo": None,
         "con_lista_precio": True,
+        "incluir_mes_anterior": False,
     }
     if report_f:
         if report_f.genericos is not None:
@@ -302,6 +303,8 @@ def merge_filters(
             merged["genericos_universo"] = report_f.genericos_universo
         if getattr(report_f, "con_lista_precio", None) is not None:
             merged["con_lista_precio"] = report_f.con_lista_precio
+        if getattr(report_f, "incluir_mes_anterior", None) is not None:
+            merged["incluir_mes_anterior"] = report_f.incluir_mes_anterior
 
     # no_delivery overrides everything — forces delivery off
     if no_delivery:

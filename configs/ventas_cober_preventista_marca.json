@@ -12,17 +12,18 @@
         {
             "nombre": "Ventas y Cobertura FULL SPORT por Preventista",
             "filtros": {
-                "marcas": ["FULL SPORT"]
+                "marcas": ["FULL SPORT"],
+                "incluir_mes_anterior": true
             },
             "capture_images": [
                 {
                     "hoja": "Ventas Cob x Preventista",
-                    "rango": "A1:D55",
+                    "rango": "A1:F52",
                     "renderer": "libreoffice"
                 }
             ],
             "enviar_a": {
-                "Gonzalo Farah": {
+                "Preventa Salta": {
                     "via": ["whatsapp"]
                 }
             }

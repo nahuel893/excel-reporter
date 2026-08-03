@@ -119,6 +119,9 @@ class ReportFilters(BaseModel):
     marcas_completas: bool | None = None      # historico-cliente: fill full marca universe (0 if not bought)
     genericos_universo: list[str] | None = None  # genericos whose full marca set defines the universe
     con_lista_precio: bool | None = None      # descuentos: si False, no genera la hoja "lista_precio"
+    # ventas-marca / ventas-cober-preventista-marca: agrega una columna con el mes
+    # anterior completo, DERIVADO de fecha_desde (nunca escrito en el config).
+    incluir_mes_anterior: bool | None = None
 
 
 class ReportEntry(BaseModel):

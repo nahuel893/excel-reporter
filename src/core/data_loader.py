@@ -889,6 +889,10 @@ class DataLoader:
 
         Returns:
             DataFrame con columnas [marca, bultos], ordenado por bultos desc.
+
+        Solo volumen. La cobertura NO se calcula desde este fact: sale de
+        `gold.cob_*`, que es la definicion oficial del negocio (ver
+        `get_cobertura_marca_de_generico`).
         """
         query = """
         SELECT
@@ -909,6 +913,85 @@ class DataLoader:
             "id_sucursal": id_sucursal,
         }
         return self.execute_query(query, params)
+
+    def get_cobertura_marca_de_generico(
+        self,
+        generico: str,
+        periodo: str,
+        id_sucursal: int = 1,
+    ) -> pd.DataFrame:
+        """Cobertura oficial por marca, desde `gold.cob_sucursal_marca`.
+
+        La cobertura NO se recalcula desde `fact_ventas`: la definicion del
+        negocio vive en las tablas `cob_*` del ETL y esa es la unica fuente.
+        Recontar clientes a mano da otro numero y ademas empieza a discutir
+        reglas (bonificados, anulados) que el ETL ya resolvio.
+
+        Args:
+            generico: Nombre exacto del generico (ej. 'PERNOD RICARD').
+            periodo: Primer dia del mes 'YYYY-MM-01'. La tabla es MENSUAL: para
+                un mes en curso trae el acumulado hasta la ultima corrida del
+                ETL, no el recorte exacto de un rango de dias.
+            id_sucursal: Sucursal a filtrar (default 1 = CASA CENTRAL).
+
+        Returns:
+            DataFrame con columnas [marca, cobertura].
+        """
+        query = """
+        SELECT
+            csm.marca                  AS marca,
+            csm.clientes_compradores   AS cobertura
+        FROM gold.cob_sucursal_marca csm
+        WHERE csm.periodo = :periodo
+          AND csm.id_sucursal = :id_sucursal
+          AND csm.marca IN (
+              SELECT DISTINCT da.marca
+              FROM gold.dim_articulo da
+              WHERE da.generico = :generico
+          )
+        ORDER BY csm.clientes_compradores DESC, csm.marca
+        """
+        return self.execute_query(
+            query,
+            {"generico": generico, "periodo": periodo, "id_sucursal": id_sucursal},
+        )
+
+    def get_cobertura_generico(
+        self,
+        generico: str,
+        periodo: str,
+        id_sucursal: int = 1,
+    ) -> int:
+        """Cobertura total del generico, desde `gold.cob_sucursal_generico`.
+
+        Se lee la tabla ya agregada en vez de sumar las marcas: la cobertura SI
+        es aditiva entre rutas y preventistas (cada cliente pertenece a una sola
+        ruta), pero NO entre marcas — el mismo cliente compra varias. Sumar las
+        marcas de PERNOD en julio-2026 da 1083 contra los 721 reales.
+
+        Returns:
+            Cantidad de clientes compradores, o 0 si no hay fila para el periodo.
+        """
+        query = """
+        SELECT csg.clientes_compradores AS cobertura
+        FROM gold.cob_sucursal_generico csg
+        WHERE csg.periodo = :periodo
+          AND csg.id_sucursal = :id_sucursal
+          AND csg.generico = :generico
+        """
+        df = self.execute_query(
+            query,
+            {"generico": generico, "periodo": periodo, "id_sucursal": id_sucursal},
+        )
+        if df is None or df.empty:
+            import logging  # local, como el resto de este modulo
+
+            logging.warning(
+                "Sin cobertura en cob_sucursal_generico para %s periodo=%s suc=%s",
+                generico, periodo, id_sucursal,
+            )
+            return 0
+        return int(df["cobertura"].iloc[0])
 
     def get_ventas_cobertura_por_vendedor(
         self,
