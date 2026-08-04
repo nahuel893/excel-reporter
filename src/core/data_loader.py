@@ -1605,6 +1605,59 @@ class DataLoader:
 
     # ── Ventas Articulo Diario ──────────────────────────────────
 
+    _SABOR_SQL = """
+        CASE
+            WHEN da.des_articulo ILIKE '%%NEGR%%'  THEN 'NEGRA'
+            WHEN da.des_articulo ILIKE '%%ROJA%%'  THEN 'ROJA'
+            WHEN da.des_articulo ILIKE '%%BLANC%%'
+              OR da.des_articulo ILIKE '%%RUBIA%%'
+              OR da.des_articulo ILIKE '%%RUB %%'
+              OR da.des_articulo ILIKE '%%BCA%%'   THEN 'BLANCA (rubia)'
+            ELSE 'OTRO'
+        END
+    """
+
+    def get_ventas_cliente_sabor_mes(
+        self, marca: str, fecha_desde: str, fecha_hasta: str
+    ) -> pd.DataFrame:
+        """Ventas de una marca al grano CLIENTE x SABOR x CALIBRE x MES.
+
+        Grano fino a proposito: la cobertura es un conteo de clientes
+        distintos y no se puede sumar entre meses ni entre cortes. El anual NO es
+        la suma de los doce meses — quien compra todos los meses cuenta una vez.
+
+        Returns:
+            DataFrame con columnas: id_cliente, id_sucursal, sucursal, id_ruta,
+            preventista, sabor, calibre, mes ('YYYY-MM'), bultos.
+        """
+        query = f"""
+        SELECT
+            fv.id_cliente,
+            fv.id_sucursal,
+            ds.descripcion                              AS sucursal,
+            dc.id_ruta_fv1                              AS id_ruta,
+            dc.des_personal_fv1                         AS preventista,
+            {self._SABOR_SQL}                           AS sabor,
+            REPLACE(COALESCE(da.calibre, 'S/C'), 'CC', '') AS calibre,
+            TO_CHAR(fv.fecha_comprobante, 'YYYY-MM')    AS mes,
+            SUM(fv.cantidades_total)                    AS bultos
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+        LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+        LEFT JOIN gold.dim_cliente dc
+               ON fv.id_cliente  = dc.id_cliente
+              AND fv.id_sucursal = dc.id_sucursal
+        WHERE da.marca = :marca
+          AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+        GROUP BY
+            fv.id_cliente, fv.id_sucursal, ds.descripcion, dc.id_ruta_fv1,
+            dc.des_personal_fv1, sabor, calibre, mes
+        """
+        return self.execute_query(
+            query,
+            {"marca": marca, "fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
+
     def get_ventas_diarias_articulo(
         self,
         id_articulo: int,

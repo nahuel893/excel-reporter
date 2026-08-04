@@ -269,6 +269,13 @@ SERVICIOS: list[Servicio] = [
         fecha_modo="mes_a_hoy",
     ),
     Servicio(
+        nombre="incentivo-salta",
+        config_path=CONFIGS_DIR / "incentivo_salta.json",
+        # `hoy`: el servicio solo necesita la fecha de corte. Los meses de cada
+        # bloque salen del xlsx de objetivos, no de la ventana del daily.
+        fecha_modo="hoy",
+    ),
+    Servicio(
         nombre="comparativo-salta",
         config_path=CONFIGS_DIR / "comparativo_salta.json",
         fecha_modo="mes_a_hoy",

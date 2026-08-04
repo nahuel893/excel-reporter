@@ -83,6 +83,7 @@ REPORT_HANDLERS: dict[str, str] = {
     "stock-suria-control": "_run_stock_suria_control_report",
     "ventas-marca": "_run_ventas_marca_report",
     "ventas-cober-preventista-marca": "_run_ventas_cober_preventista_marca_report",
+    "incentivo-salta": "_run_incentivo_salta_report",
     "stock-badie": "_run_stock_badie_report",
     "cobertura": "_run_cobertura_report",
 }
@@ -861,6 +862,36 @@ def _run_ventas_cober_preventista_marca_report(report, merged: dict) -> list[tup
             {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
         )
     ]
+
+
+def _run_incentivo_salta_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate the incentivo preventa SALTA report.
+
+    Los bloques y los cupos salen del xlsx de objetivos, no del config: ahi vive
+    el acuerdo con el negocio y se edita sin tocar codigo.
+    """
+    from src.services.incentivo_salta import IncentivoSaltaConfig, IncentivoSaltaService
+
+    objetivos = merged.get("objetivos_path")
+    if not objetivos:
+        print("Error: incentivo-salta requiere 'objetivos_path' en filtros")
+        return []
+
+    config = IncentivoSaltaConfig(
+        fecha_hasta=merged.get("fecha_hasta") or merged["fecha_desde"],
+        objetivos_path=objetivos,
+        id_sucursal=merged.get("id_sucursal") or 1,
+        excluir_vendedores=merged.get("excluir_vendedores") or [],
+        nombre_archivo=report.nombre,
+    )
+
+    result = IncentivoSaltaService().generar_reporte(config)
+    print(f"Incentivo SALTA '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Bloques: {result.bloques} ({len(result.bloques_activos)} con datos) "
+          f"| Preventistas: {result.preventistas}")
+    return [(Path(result.ruta_archivo), {"nombre": report.nombre,
+                                         "fecha": result.fecha_hasta})]
 
 
 def _run_historico_cliente_report(report, merged: dict) -> list[tuple[Path, dict]]:

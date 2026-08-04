@@ -127,6 +127,8 @@ class ReportFilters(BaseModel):
     objetivo_cobertura: dict | None = None
     # ventas-cober-preventista-marca: piso de VOLUMEN al pie del bloque de preventistas.
     clausula_gatillo: float | None = None
+    # incentivo-salta: xlsx con los bloques y los cupos fijos por preventista.
+    objetivos_path: str | None = None
     # cobertura: apertura del informe (que columnas forman el index del pivot).
     apertura_cobertura: Literal[
         "preventista_generico", "preventista_marca", "sucursal_marca"
@@ -159,7 +161,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "stock-badie", "cobertura"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "incentivo-salta", "stock-badie", "cobertura"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 
