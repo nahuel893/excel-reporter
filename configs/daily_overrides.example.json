@@ -8,5 +8,11 @@
         "ejecutar": true,
         "enviar": false,
         "razon": "esperando cupos del mes — generamos para revisar local"
+    },
+    "_ejemplo_recien_desde_el_dia_8": {
+        "ejecutar": true,
+        "enviar": true,
+        "desde_dia_del_mes": 8,
+        "razon": "se saltea los primeros 7 dias del mes y del dia 8 en adelante corre solo — margen para cargar los objetivos"
     }
 }

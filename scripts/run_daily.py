@@ -27,6 +27,7 @@ Daily overrides (configs/daily_overrides.json):
             "<servicio>": {
                 "ejecutar": true | false,   // default: true
                 "enviar":   true | false,   // default: true
+                "desde_dia_del_mes": 8,     // optional day-of-month gate
                 "razon":    "string"        // optional log note
             }
         }
@@ -34,6 +35,9 @@ Daily overrides (configs/daily_overrides.json):
     `ejecutar=false` → skip the service entirely.
     `ejecutar=true, enviar=false` → generate the file but suppress delivery
     (clears `enviar_a` in the patched config).
+    `desde_dia_del_mes=N` → skip the service until day N of the month, then run
+    normally with no manual intervention (see `_resolver_flags`). Used to hold the
+    avances/champions while the month's objetivos are still being loaded.
 """
 from __future__ import annotations
 
@@ -265,6 +269,11 @@ SERVICIOS: list[Servicio] = [
         fecha_modo="mes_a_hoy",
     ),
     Servicio(
+        nombre="comparativo-salta",
+        config_path=CONFIGS_DIR / "comparativo_salta.json",
+        fecha_modo="mes_a_hoy",
+    ),
+    Servicio(
         nombre="resumen-mensual",
         config_path=CONFIGS_DIR / "resumen_mensual.json",
         fecha_modo="mes_a_hoy",
@@ -319,6 +328,37 @@ def _load_overrides() -> dict[str, dict]:
     except json.JSONDecodeError as exc:
         print(f"⚠️  daily_overrides.json invalido ({exc}) — se ignora")
         return {}
+
+
+def _resolver_flags(ov: dict, hoy: date) -> tuple[bool, bool, str]:
+    """Resolve (ejecutar, enviar, razon) for one service from its override + today.
+
+    On top of the static `ejecutar`/`enviar` flags, `desde_dia_del_mes: N` gates
+    the service on the day of month: before day N it is skipped entirely, and from
+    day N on it runs normally with no manual intervention.
+
+    Why: the avances and champions-league read the month's objetivos from gold.
+    During the first days of the month those cupos are still being loaded, so the
+    reports would go out with wrong or empty targets.
+
+    An explicit `ejecutar: false` wins over the gate — a report turned off on
+    purpose stays off. An invalid `desde_dia_del_mes` is ignored with a warning
+    (fail-open): a typo must never silently kill a report forever.
+    """
+    ejecutar = ov.get("ejecutar", True)
+    enviar = ov.get("enviar", True)
+    razon = ov.get("razon", "")
+
+    desde = ov.get("desde_dia_del_mes")
+    if desde is not None:
+        if isinstance(desde, bool) or not isinstance(desde, int) or not 1 <= desde <= 31:
+            print(f"  ⚠️  desde_dia_del_mes invalido ({desde!r}) — se ignora")
+        elif ejecutar and hoy.day < desde:
+            ejecutar = False
+            espera = f"dia {hoy.day} < {desde}: margen para cargar los objetivos del mes"
+            razon = f"{espera} — {razon}" if razon else espera
+
+    return ejecutar, enviar, razon
 
 
 def _strip_delivery(patched: dict) -> dict:
@@ -589,10 +629,7 @@ def main() -> int:
     if args.dry_run:
         print("\n=== DRY RUN (no se ejecuta nada) ===")
         for svc in servicios:
-            ov = overrides.get(svc.nombre, {})
-            ejecutar = ov.get("ejecutar", True)
-            enviar = ov.get("enviar", True)
-            razon = ov.get("razon", "")
+            ejecutar, enviar, razon = _resolver_flags(overrides.get(svc.nombre, {}), hoy)
             raw = json.loads(svc.config_path.read_text(encoding="utf-8"))
             patched = svc.patch(raw, hoy)
             f = patched["filtros"]
@@ -603,10 +640,7 @@ def main() -> int:
 
     errores: list[str] = []
     for svc in servicios:
-        ov = overrides.get(svc.nombre, {})
-        ejecutar = ov.get("ejecutar", True)
-        enviar = ov.get("enviar", True)
-        razon = ov.get("razon", "")
+        ejecutar, enviar, razon = _resolver_flags(overrides.get(svc.nombre, {}), hoy)
 
         print(f"\n{'=' * 60}")
         if not ejecutar:

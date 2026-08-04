@@ -4,24 +4,28 @@
         "razon": "Incentivo ON PREMISE vencido el 13/06/2026. Envio final realizado con datos hasta esa fecha. No volver a enviar para no mandar datos obsoletos."
     },
     "avance-badie": {
-        "ejecutar": false,
-        "enviar": false,
-        "razon": "PARADO POR COMPLETO (2026-08-03) a pedido de Nahuel: el daily NO ejecuta el servicio. No se genera el xlsx, no se carga nada, no se renderizan imagenes y no se envia ni email ni WhatsApp. Para reactivar: poner ejecutar=true y enviar=true (configs/avances_badie.json quedo intacto: enviar_whatsapp true, 22 capture_images -> 25 imagenes, destinatarios completos). Historia: GO-LIVE fue 2026-07-24 tras resolver el bug de cupo (commit 052b6e2): CuposVolumen!Codigo (id_ruta) se guardaba con formato de fecha; el round-trip de openpyxl del render reserializaba y el bug del bisiesto 1900 corria los seriales >=60 un dia, rompiendo el VLOOKUP a AvanceR -> cerveza daba 82.574 en imagenes vs 83.000 real. Guard de RAM en run_daily sigue vigente para los demas reportes con imagenes."
+        "ejecutar": true,
+        "enviar": true,
+        "desde_dia_del_mes": 8,
+        "razon": "Retenido los primeros 7 dias de cada mes (2026-08-04, pedido de Nahuel): necesita ese margen para cargar los objetivos del mes en gold. Del dia 8 en adelante se ejecuta y envia solo, sin tocar nada. Config intacto: enviar_whatsapp true, 22 capture_images -> 25 imagenes al grupo Preventa Salta + email a supervisores. Historia: GO-LIVE 2026-07-24 tras resolver el bug de cupo (commit 052b6e2): CuposVolumen!Codigo (id_ruta) se guardaba con formato de fecha; el round-trip de openpyxl del render reserializaba y el bug del bisiesto 1900 corria los seriales >=60 un dia, rompiendo el VLOOKUP a AvanceR -> cerveza daba 82.574 en imagenes vs 83.000 real."
     },
     "avance-branca": {
-        "ejecutar": false,
-        "enviar": false,
-        "razon": "PARADO POR COMPLETO (2026-08-04) a pedido de Nahuel: deshabilitar TODOS los avances. Era el unico avance que habia quedado activo (badie y guemes ya estaban parados desde el 03/08) y el 04/08 igual mando su imagen al grupo. El daily NO ejecuta el servicio: no genera, no renderiza imagenes y no envia nada al grupo Preventa + Vinos Bodega E (CC Nahuel). Para reactivar: ejecutar=true y enviar=true (configs/avances_branca.json quedo intacto). Historia: estaba activo desde que se cargaron y verificaron los cupos de julio (2026-07) en gold.fact_cupos (2046 filas)."
+        "ejecutar": true,
+        "enviar": true,
+        "desde_dia_del_mes": 8,
+        "razon": "Retenido los primeros 7 dias de cada mes (2026-08-04, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 8 en adelante se ejecuta y envia solo. Envio por WhatsApp al grupo Preventa + Vinos Bodega E (CC Nahuel)."
     },
     "avance-guemes": {
-        "ejecutar": false,
-        "enviar": false,
-        "razon": "PAUSADO (2026-08-03) a pedido de Nahuel: queda parado hasta que esten cargados los cupos del mes. El daily NO ejecuta el servicio (no genera, no renderiza, no envia). Para reactivar: ejecutar=true y enviar=true. El config (configs/avances_guemes.json) queda intacto, con esperar_objetivo=true: una vez reactivado, el gate de objetivo sigue reteniendo el envio hasta que los cupos esten en gold."
+        "ejecutar": true,
+        "enviar": true,
+        "desde_dia_del_mes": 8,
+        "razon": "Retenido los primeros 7 dias de cada mes (2026-08-04, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 8 en adelante se ejecuta solo, y el envio sigue bajo el gate de objetivo (esperar_objetivo=true en el config): si los cupos todavia no estan en gold, genera pero no envia. Doble red."
     },
     "champions-league": {
-        "ejecutar": false,
-        "enviar": false,
-        "razon": "PAUSADO (2026-08-03) a pedido de Nahuel: queda parado hasta que esten cargados los cupos del mes. El daily NO ejecuta el servicio (no genera, no renderiza, no envia). Para reactivar: ejecutar=true y enviar=true. El config (configs/champions_league.json) queda intacto."
+        "ejecutar": true,
+        "enviar": true,
+        "desde_dia_del_mes": 8,
+        "razon": "Retenido los primeros 7 dias de cada mes (2026-08-04, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 8 en adelante se ejecuta y envia solo."
     },
     "stock-badie": {
         "ejecutar": true,
@@ -29,4 +33,3 @@
         "razon": "GO-LIVE (2026-07-28): entrega ACTIVA tras validar el .xlsx en WPS (formato: cabeceras con color, bordes, grupos colapsables por sucursal). Envio diario por email + WhatsApp (xlsx como archivo) a Sebastian Dellamea, Fabian Gallardo y Gonzalo Farah, con Nahuel en copia por email. M Bravo quedo fuera de la lista: no tiene telefono cargado en contactos.json y el pedido fue email+wpp para los tres."
     }
 }
-

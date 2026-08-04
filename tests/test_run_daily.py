@@ -198,3 +198,70 @@ class TestObjetivoGate:
         assert rc == 0
         assert "reportes" in captured, "_run_reportes must still run (report is generated)"
         assert all(not (r.enviar_a or {}) for r in captured["reportes"]), "delivery must be stripped"
+
+
+class TestGraciaInicioDeMes:
+    """`desde_dia_del_mes: N` holds a service until day N of the month.
+
+    Business need: the avances and champions-league read the month's objetivos
+    from gold. During the first days of the month those cupos are still being
+    loaded, so the reports would go out with wrong/empty targets. This gate
+    keeps them off until the data is in.
+    """
+
+    def test_sin_override_ejecuta_y_envia(self):
+        assert run_daily._resolver_flags({}, date(2026, 8, 4)) == (True, True, "")
+
+    def test_dia_1_queda_deshabilitado(self):
+        ejecutar, _, razon = run_daily._resolver_flags(
+            {"desde_dia_del_mes": 8}, date(2026, 8, 1)
+        )
+        assert ejecutar is False
+        assert "8" in razon
+
+    def test_dia_7_todavia_deshabilitado(self):
+        ejecutar, _, _ = run_daily._resolver_flags(
+            {"desde_dia_del_mes": 8}, date(2026, 8, 7)
+        )
+        assert ejecutar is False
+
+    def test_dia_8_se_habilita_solo(self):
+        ejecutar, enviar, _ = run_daily._resolver_flags(
+            {"desde_dia_del_mes": 8}, date(2026, 8, 8)
+        )
+        assert ejecutar is True
+        assert enviar is True
+
+    def test_dia_15_ejecuta_normal(self):
+        ejecutar, _, _ = run_daily._resolver_flags(
+            {"desde_dia_del_mes": 8}, date(2026, 8, 15)
+        )
+        assert ejecutar is True
+
+    def test_apagado_manual_gana_sobre_la_fecha(self):
+        """An explicit `ejecutar: false` stays off even past the gate day."""
+        ejecutar, _, _ = run_daily._resolver_flags(
+            {"ejecutar": False, "desde_dia_del_mes": 8}, date(2026, 8, 20)
+        )
+        assert ejecutar is False
+
+    def test_el_gate_no_toca_enviar(self):
+        """The gate skips the whole service; it must not silently flip `enviar`."""
+        _, enviar, _ = run_daily._resolver_flags(
+            {"desde_dia_del_mes": 8, "enviar": False}, date(2026, 8, 3)
+        )
+        assert enviar is False
+
+    def test_razon_original_se_conserva(self):
+        _, _, razon = run_daily._resolver_flags(
+            {"desde_dia_del_mes": 8, "razon": "motivo original"}, date(2026, 8, 2)
+        )
+        assert "motivo original" in razon
+
+    def test_valor_invalido_se_ignora_y_no_apaga_el_reporte(self):
+        """A typo in the config must not silently kill a report forever."""
+        for malo in ["8", None, 0, -1, 32, True]:
+            ejecutar, _, _ = run_daily._resolver_flags(
+                {"desde_dia_del_mes": malo}, date(2026, 8, 1)
+            )
+            assert ejecutar is True, f"valor {malo!r} no debe apagar el servicio"
