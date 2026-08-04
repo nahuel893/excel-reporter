@@ -9,9 +9,9 @@
         "razon": "PARADO POR COMPLETO (2026-08-03) a pedido de Nahuel: el daily NO ejecuta el servicio. No se genera el xlsx, no se carga nada, no se renderizan imagenes y no se envia ni email ni WhatsApp. Para reactivar: poner ejecutar=true y enviar=true (configs/avances_badie.json quedo intacto: enviar_whatsapp true, 22 capture_images -> 25 imagenes, destinatarios completos). Historia: GO-LIVE fue 2026-07-24 tras resolver el bug de cupo (commit 052b6e2): CuposVolumen!Codigo (id_ruta) se guardaba con formato de fecha; el round-trip de openpyxl del render reserializaba y el bug del bisiesto 1900 corria los seriales >=60 un dia, rompiendo el VLOOKUP a AvanceR -> cerveza daba 82.574 en imagenes vs 83.000 real. Guard de RAM en run_daily sigue vigente para los demas reportes con imagenes."
     },
     "avance-branca": {
-        "ejecutar": true,
-        "enviar": true,
-        "razon": "Activado: cupos de julio (2026-07) cargados y verificados en gold.fact_cupos (2046 filas). Envio diario por WhatsApp al grupo Preventa + Vinos Bodega E (CC Nahuel)."
+        "ejecutar": false,
+        "enviar": false,
+        "razon": "PARADO POR COMPLETO (2026-08-04) a pedido de Nahuel: deshabilitar TODOS los avances. Era el unico avance que habia quedado activo (badie y guemes ya estaban parados desde el 03/08) y el 04/08 igual mando su imagen al grupo. El daily NO ejecuta el servicio: no genera, no renderiza imagenes y no envia nada al grupo Preventa + Vinos Bodega E (CC Nahuel). Para reactivar: ejecutar=true y enviar=true (configs/avances_branca.json quedo intacto). Historia: estaba activo desde que se cargaron y verificaron los cupos de julio (2026-07) en gold.fact_cupos (2046 filas)."
     },
     "avance-guemes": {
         "ejecutar": false,
