@@ -1,0 +1,30 @@
+{
+    "tipo": "cobertura",
+    "filtros": {
+        "fecha_desde": "2026-08-01",
+        "fecha_hasta": "2026-08-31",
+        "con_slicers": false,
+        "enviar_email": false,
+        "enviar_whatsapp": false
+    },
+    "reportes": [
+        {
+            "nombre": "Cobertura por Preventista y Generico",
+            "filtros": {
+                "apertura_cobertura": "preventista_generico"
+            }
+        },
+        {
+            "nombre": "Cobertura por Preventista y Marca",
+            "filtros": {
+                "apertura_cobertura": "preventista_marca"
+            }
+        },
+        {
+            "nombre": "Cobertura por Sucursal y Marca",
+            "filtros": {
+                "apertura_cobertura": "sucursal_marca"
+            }
+        }
+    ]
+}

@@ -127,6 +127,15 @@ class ReportFilters(BaseModel):
     objetivo_cobertura: dict | None = None
     # ventas-cober-preventista-marca: piso de VOLUMEN al pie del bloque de preventistas.
     clausula_gatillo: float | None = None
+    # cobertura: apertura del informe (que columnas forman el index del pivot).
+    apertura_cobertura: Literal[
+        "preventista_generico", "preventista_marca", "sucursal_marca"
+    ] | None = None
+    # cobertura: offsets en meses respecto del mes de fecha_desde, uno por columna
+    # de periodo. Default [13, 1] = mismo mes del año anterior contra el mes
+    # cerrado. NUNCA se escriben periodos literales: el daily patchea fechas pero
+    # no el resto del JSON, y un mes a mano se desincroniza al cambiar de mes.
+    meses_atras: list[int] | None = None
 
 
 class ReportEntry(BaseModel):
@@ -150,7 +159,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "stock-badie"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "stock-badie", "cobertura"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

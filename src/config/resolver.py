@@ -267,6 +267,10 @@ def merge_filters(
         "incluir_mes_anterior": False,
         "objetivo_cobertura": None,
         "clausula_gatillo": None,
+        # cobertura: None -> el servicio aplica su default (preventista_generico
+        # y los offsets [13, 1]). Ver ReporteCoberturaConfig.
+        "apertura_cobertura": None,
+        "meses_atras": None,
     }
     if report_f:
         if report_f.genericos is not None:
@@ -307,7 +311,8 @@ def merge_filters(
             merged["con_lista_precio"] = report_f.con_lista_precio
         if getattr(report_f, "incluir_mes_anterior", None) is not None:
             merged["incluir_mes_anterior"] = report_f.incluir_mes_anterior
-        for clave in ("objetivo_cobertura", "clausula_gatillo"):
+        for clave in ("objetivo_cobertura", "clausula_gatillo",
+                      "apertura_cobertura", "meses_atras"):
             if getattr(report_f, clave, None) is not None:
                 merged[clave] = getattr(report_f, clave)
 

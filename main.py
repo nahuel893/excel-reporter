@@ -84,6 +84,7 @@ REPORT_HANDLERS: dict[str, str] = {
     "ventas-marca": "_run_ventas_marca_report",
     "ventas-cober-preventista-marca": "_run_ventas_cober_preventista_marca_report",
     "stock-badie": "_run_stock_badie_report",
+    "cobertura": "_run_cobertura_report",
 }
 
 
@@ -1321,6 +1322,61 @@ def cmd_stock_badie(args, test_mode: bool = False) -> int:
         return 1
 
 
+def cmd_cobertura(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando cobertura."""
+    if not args.config:
+        print("Error: cobertura requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    print("Error: cobertura solo soporta el nuevo formato de configuracion JSON.")
+    return 1
+
+
+def _run_cobertura_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate cobertura report (historico de cobertura por periodo)."""
+    from src.services.cobertura import CoberturaService, ReporteCoberturaConfig
+
+    kwargs = {}
+    # Se omiten SOLO cuando vienen en None, para que el default del servicio
+    # gane; pasarlos explicitamente en None romperia la derivacion de periodos.
+    # El chequeo es contra None y no por verdad: un `"meses_atras": []` escrito
+    # en el config tiene que llegar al servicio y explotar ahi, no caer al
+    # default en silencio.
+    if merged.get("apertura_cobertura") is not None:
+        kwargs["tipo"] = merged["apertura_cobertura"]
+    if merged.get("meses_atras") is not None:
+        kwargs["meses_atras"] = merged["meses_atras"]
+
+    try:
+        config = ReporteCoberturaConfig(
+            fecha_desde=merged["fecha_desde"],
+            sucursales=merged.get("sucursales"),
+            nombre_archivo=report.nombre,
+            con_slicers=bool(merged.get("con_slicers")),
+            **kwargs,
+        )
+    except ValueError as exc:
+        print(f"Error: config invalida para cobertura: {exc}")
+        return []
+
+    result = CoberturaService().generar_reporte(config)
+    print(f"Cobertura '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Apertura: {result.tipo} | Periodos: {', '.join(result.periodos)}")
+    print(f"  - Registros: {result.registros_raw} crudos -> {result.registros_procesados} filas")
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
 def cmd_cartesiano(args, test_mode: bool = False) -> int:
     """Ejecuta el comando cartesiano."""
     if not args.config:
@@ -1701,6 +1757,20 @@ Ejemplos:
         help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
     )
     stock_badie_parser.set_defaults(func=cmd_stock_badie)
+
+    # Subcomando: cobertura (historico de cobertura, N periodos lado a lado)
+    cobertura_parser = subparsers.add_parser(
+        "cobertura",
+        help="Cobertura de N periodos lado a lado (mes cerrado vs mismo mes del año anterior)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    cobertura_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    cobertura_parser.set_defaults(func=cmd_cobertura)
 
     # check-delivery: mostrar estado de envios del dia
     check_parser = subparsers.add_parser(

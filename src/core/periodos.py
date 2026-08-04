@@ -47,6 +47,26 @@ def periodo_mes(fecha: str) -> str:
     return date.fromisoformat(fecha).replace(day=1).isoformat()
 
 
+def periodo_meses_atras(fecha: str, meses: int) -> str:
+    """Return the first day of the month ``meses`` months before ``fecha``'s month.
+
+    The generalization of :func:`periodo_mes` used by reports that compare more
+    than two windows. ``meses=1`` is the previous month, ``meses=12`` the same
+    month a year earlier, ``meses=13`` the month before that one. Arithmetic runs
+    over a month ordinal, so year rollovers need no special case.
+
+    Raises:
+        ValueError: if ``fecha`` is not an ISO date or ``meses`` is negative.
+    """
+    if meses < 0:
+        raise ValueError(f"meses debe ser >= 0, recibido {meses}")
+    d = date.fromisoformat(fecha)
+    ordinal = d.year * 12 + (d.month - 1) - meses
+    if ordinal < 0:
+        raise ValueError(f"meses={meses} cae antes del año 0 desde {fecha}")
+    return date(ordinal // 12, ordinal % 12 + 1, 1).isoformat()
+
+
 def etiqueta_mes(fecha: str) -> str:
     """Return the uppercase Spanish month label, e.g. ``"JULIO 2026"``.
 
