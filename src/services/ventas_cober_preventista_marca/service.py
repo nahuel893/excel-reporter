@@ -26,6 +26,7 @@ Notas clave:
 """
 import logging
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import pandas as pd
@@ -53,12 +54,28 @@ _SHEET_TITLE = "Ventas Cob x Preventista"
 
 @dataclass
 class VentasCoberPreventistaMarcaConfig:
+    """Config del informe.
+
+    `objetivo_cobertura` agrega una columna Objetivo por bloque, calculada como
+    un porcentaje de la cobertura de OTRA marca de referencia:
+
+        {"marca": "SALTA", "pct_anterior": 0.20, "pct_actual": 0.25,
+         "base_actual": "anterior" | "propio"}
+
+    `base_actual` decide contra que mes se mide el bloque actual — el negocio lo
+    fijo en el mes anterior, pero puede cambiar al propio sin tocar codigo.
+
+    `clausula_gatillo` agrega una fila al pie con ese objetivo de VOLUMEN y el
+    porcentaje que cada mes lleva alcanzado.
+    """
     marca: str
     fecha_desde: str
     fecha_hasta: str
     id_sucursal: int = ID_SUCURSAL_CASA_CENTRAL
     nombre_archivo: str | None = None
     incluir_mes_anterior: bool = False
+    objetivo_cobertura: dict | None = None
+    clausula_gatillo: float | None = None
 
 
 @dataclass
@@ -91,6 +108,7 @@ class _Periodo:
     by_sup: pd.DataFrame
     total_bultos: float
     cobertura_total: int
+    objetivo_total: int | None = None
 
 
 def _vendor_to_supervisor() -> dict[str, str]:
@@ -120,6 +138,26 @@ def _agg(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
     return out.sort_values("bultos", ascending=False)
 
 
+def _redondear(valor: float) -> int:
+    """Redondeo medio-arriba, como la funcion ROUND de Excel.
+
+    El `round()` de Python usa banker's rounding: `round(2.5)` devuelve 2. Un
+    objetivo que el usuario recalcula a mano en Excel le daria 3 y no cerraria
+    contra el informe.
+    """
+    return int(Decimal(str(valor)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+_MEDIDAS_BASE = ["bultos", "cobertura"]
+_FMT_MEDIDA = {"bultos": _FMT_BULTOS, "cobertura": _FMT_COB, "objetivo": _FMT_COB}
+
+
+def _medidas(periodos: list["_Periodo"]) -> list[str]:
+    """Medidas por bloque: se agrega `objetivo` solo si el config lo pidio."""
+    extra = ["objetivo"] if "objetivo" in periodos[0].by_vend.columns else []
+    return _MEDIDAS_BASE + extra
+
+
 def _combinar(periodos: list["_Periodo"], keys: list[str], atributo: str) -> pd.DataFrame:
     """Outer-join one aggregation level across periods, one column pair each.
 
@@ -130,16 +168,19 @@ def _combinar(periodos: list["_Periodo"], keys: list[str], atributo: str) -> pd.
     Outer, not inner: a preventista who sold in only one of the months must still
     appear, with 0 in the other. Those are precisely the rows worth reading.
     """
+    medidas = _medidas(periodos)
     wide: pd.DataFrame | None = None
     for i, p in enumerate(periodos):
-        parcial = getattr(p, atributo)[keys + ["bultos", "cobertura"]].rename(
-            columns={"bultos": f"{i}|bultos", "cobertura": f"{i}|cobertura"}
+        parcial = getattr(p, atributo)[keys + medidas].rename(
+            columns={m: f"{i}|{m}" for m in medidas}
         )
         wide = parcial if wide is None else wide.merge(parcial, on=keys, how="outer")
     assert wide is not None  # `periodos` nunca viene vacio
     wide = wide.fillna(0.0)
     for i in range(len(periodos)):
-        wide[f"{i}|cobertura"] = wide[f"{i}|cobertura"].astype(int)
+        for m in medidas:
+            if m != "bultos":
+                wide[f"{i}|{m}"] = wide[f"{i}|{m}"].astype(int)
     # Orden estable por el primer periodo (el mes cerrado), desempatando por el
     # siguiente y por nombre para que no baile entre corridas.
     orden = [f"{i}|bultos" for i in range(len(periodos))]
@@ -151,13 +192,13 @@ class VentasCoberPreventistaMarcaService(BaseService):
     SERVICE_SLUG = "ventas-cober-preventista-marca"
     GRANULARITY = "month"
 
-    def _periodo(
-        self, config: VentasCoberPreventistaMarcaConfig,
-        desde: str, hasta: str, etiqueta: str,
-    ) -> _Periodo:
-        """Query one window and aggregate it at both levels independently."""
+    def _traer(
+        self, marca: str, config: VentasCoberPreventistaMarcaConfig,
+        desde: str, hasta: str,
+    ) -> pd.DataFrame:
+        """Query one window at client grain and normalize vendedor/supervisor."""
         raw = self.data_loader.get_ventas_cobertura_por_vendedor(
-            marca=config.marca,
+            marca=marca,
             fecha_desde=desde,
             fecha_hasta=hasta,
             id_sucursal=config.id_sucursal,
@@ -165,7 +206,7 @@ class VentasCoberPreventistaMarcaService(BaseService):
         if raw is None or raw.empty:
             logger.warning(
                 "Sin ventas para marca=%s fechas=%s..%s suc=%s",
-                config.marca, desde, hasta, config.id_sucursal,
+                marca, desde, hasta, config.id_sucursal,
             )
             raw = pd.DataFrame(columns=["vendedor", "id_cliente", "bultos"])
 
@@ -173,7 +214,41 @@ class VentasCoberPreventistaMarcaService(BaseService):
         raw["vendedor"] = raw["vendedor"].fillna("(sin vendedor)")
         raw["bultos"] = raw["bultos"].fillna(0.0)
         raw["supervisor"] = raw["vendedor"].str.upper().map(_vendor_to_supervisor()).fillna(SIN_SUPERVISOR)
+        return raw
 
+    def _cobertura_de_referencia(
+        self, config: VentasCoberPreventistaMarcaConfig, desde: str, hasta: str,
+    ) -> dict:
+        """Cobertura de la marca de referencia, por vendedor / supervisor / total.
+
+        Usa el MISMO umbral que el resto del informe (`> 0`, dentro de `_agg`).
+        Medir el objetivo con un umbral y el logro con otro compararia contra dos
+        varas distintas e inflaria el cumplimiento.
+        """
+        raw = self._traer(config.objetivo_cobertura["marca"], config, desde, hasta)
+        return {
+            "vendedor": _agg(raw, ["vendedor"]).set_index("vendedor")["cobertura"].to_dict(),
+            "supervisor": _agg(raw, ["supervisor"]).set_index("supervisor")["cobertura"].to_dict(),
+            "total": int(raw[raw["bultos"] > 0]["id_cliente"].nunique()) if not raw.empty else 0,
+        }
+
+    @staticmethod
+    def _aplicar_objetivo(p: _Periodo, base: dict, pct: float) -> None:
+        """Escribe la columna `objetivo` en los dos niveles del periodo."""
+        p.by_vend["objetivo"] = [
+            _redondear(base["vendedor"].get(v, 0) * pct) for v in p.by_vend["vendedor"]
+        ]
+        p.by_sup["objetivo"] = [
+            _redondear(base["supervisor"].get(s, 0) * pct) for s in p.by_sup["supervisor"]
+        ]
+        p.objetivo_total = _redondear(base["total"] * pct)
+
+    def _periodo(
+        self, config: VentasCoberPreventistaMarcaConfig,
+        desde: str, hasta: str, etiqueta: str,
+    ) -> _Periodo:
+        """Query one window and aggregate it at both levels independently."""
+        raw = self._traer(config.marca, config, desde, hasta)
         return _Periodo(
             etiqueta=etiqueta,
             by_vend=_agg(raw, ["vendedor", "supervisor"]),
@@ -197,8 +272,27 @@ class VentasCoberPreventistaMarcaService(BaseService):
             # Mes cerrado primero: es la referencia contra la que se lee el parcial.
             periodos = [previo, actual]
         else:
+            prev_desde = prev_hasta = None
             previo = None
             periodos = [actual]
+
+        if config.objetivo_cobertura:
+            cfg = config.objetivo_cobertura
+            if previo is not None:
+                self._aplicar_objetivo(
+                    previo,
+                    self._cobertura_de_referencia(config, prev_desde, prev_hasta),
+                    cfg.get("pct_anterior", 0.0),
+                )
+            # El bloque actual se mide contra el mes anterior salvo que se pida el
+            # propio; sin mes anterior cargado, cae al propio para no quedar en 0.
+            usa_anterior = cfg.get("base_actual", "anterior") == "anterior" and previo is not None
+            ventana = (prev_desde, prev_hasta) if usa_anterior else (config.fecha_desde, config.fecha_hasta)
+            self._aplicar_objetivo(
+                actual,
+                self._cobertura_de_referencia(config, *ventana),
+                cfg.get("pct_actual", 0.0),
+            )
 
         nombre = config.nombre_archivo or f"Ventas y Cobertura {config.marca} por Preventista"
         out_dir = service_output_dir(self.SERVICE_SLUG, config.fecha_desde, granularity="month")
@@ -230,7 +324,13 @@ class VentasCoberPreventistaMarcaService(BaseService):
 
         n = len(periodos)
         multi = n > 1
-        ultima_col = 2 + 2 * n
+        medidas = _medidas(periodos)
+        ancho = len(medidas)                       # columnas por bloque de mes
+        ultima_col = 2 + ancho * n
+
+        def col_de(i: int, medida: str) -> int:
+            """Columna de una medida dentro del bloque del periodo `i`."""
+            return 3 + ancho * i + medidas.index(medida)
 
         fecha_txt = (
             config.fecha_desde if config.fecha_desde == config.fecha_hasta
@@ -250,13 +350,14 @@ class VentasCoberPreventistaMarcaService(BaseService):
                 ws.cell(r, c).fill = section_fill
             r += 1
             if multi:
-                # Fila de grupo: el nombre del mes cubre sus dos medidas.
+                # Fila de grupo: el nombre del mes cubre todas sus medidas.
                 for i, p in enumerate(periodos):
-                    col = 3 + 2 * i
-                    ws.merge_cells(start_row=r, start_column=col, end_row=r, end_column=col + 1)
+                    col = col_de(i, medidas[0])
+                    ws.merge_cells(start_row=r, start_column=col,
+                                   end_row=r, end_column=col + ancho - 1)
                     cell = ws.cell(r, col, p.etiqueta)
                     cell.alignment = Alignment(horizontal="center")
-                    for c in (col, col + 1):
+                    for c in range(col, col + ancho):
                         ws.cell(r, c).fill = header_fill
                         ws.cell(r, c).font = Font(bold=True, color=HEADER_FONT)
                         ws.cell(r, c).border = border
@@ -264,7 +365,7 @@ class VentasCoberPreventistaMarcaService(BaseService):
                     ws.cell(r, c).fill = header_fill
                     ws.cell(r, c).border = border
                 r += 1
-            headers = [primera, segunda] + ["Bultos", "Cobertura"] * n
+            headers = [primera, segunda] + [m.capitalize() for m in medidas] * n
             for c, h in enumerate(headers, 1):
                 cell = ws.cell(r, c, h)
                 cell.fill = header_fill
@@ -273,13 +374,17 @@ class VentasCoberPreventistaMarcaService(BaseService):
                 cell.border = border
             return r + 1
 
-        def measure_cells(r: int, valores: list[tuple[float, int]]) -> None:
-            for i, (bultos, cob) in enumerate(valores):
-                col = 3 + 2 * i
-                cb = ws.cell(r, col, float(bultos)); cb.number_format = _FMT_BULTOS
-                cb.border = border; cb.alignment = Alignment(horizontal="right")
-                cc = ws.cell(r, col + 1, int(cob)); cc.number_format = _FMT_COB
-                cc.border = border; cc.alignment = Alignment(horizontal="right")
+        def measure_cells(r: int, valores: list[dict]) -> None:
+            for i, vals in enumerate(valores):
+                for m in medidas:
+                    v = vals.get(m)
+                    if v is None:
+                        continue
+                    c = ws.cell(r, col_de(i, m),
+                                float(v) if m == "bultos" else int(v))
+                    c.number_format = _FMT_MEDIDA[m]
+                    c.border = border
+                    c.alignment = Alignment(horizontal="right")
 
         def total_row(r: int) -> int:
             ws.cell(r, 1, "TOTAL GENERAL").font = Font(bold=True)
@@ -289,17 +394,42 @@ class VentasCoberPreventistaMarcaService(BaseService):
                 ws.cell(r, c).font = Font(bold=True)
             # Cada periodo aporta SU total de clientes distintos, contado desde el
             # grano. No se suma entre meses ni entre niveles.
-            measure_cells(r, [(p.total_bultos, p.cobertura_total) for p in periodos])
+            measure_cells(r, [{"bultos": p.total_bultos, "cobertura": p.cobertura_total,
+                               "objetivo": p.objetivo_total} for p in periodos])
             for i in range(n):
-                ws.cell(r, 3 + 2 * i).fill = total_fill
-                ws.cell(r, 4 + 2 * i).fill = total_fill
+                for m in medidas:
+                    ws.cell(r, col_de(i, m)).fill = total_fill
+            return r + 2
+
+        def gatillo_row(r: int) -> int:
+            """Objetivo de VOLUMEN al pie, con lo alcanzado por cada mes.
+
+            Compara contra `bultos`, no contra cobertura: es un piso de cajas.
+            """
+            meta = float(config.clausula_gatillo)
+            ws.cell(r, 1, "CLAUSULA GATILLO").font = Font(bold=True)
+            for c in range(1, ultima_col + 1):
+                ws.cell(r, c).fill = total_fill
+                ws.cell(r, c).border = border
+                ws.cell(r, c).font = Font(bold=True)
+            for i, p in enumerate(periodos):
+                cm = ws.cell(r, col_de(i, "bultos"), meta)
+                cm.number_format = _FMT_BULTOS
+                cm.alignment = Alignment(horizontal="right")
+                cp = ws.cell(r, col_de(i, "cobertura"),
+                             p.total_bultos / meta if meta else None)
+                cp.number_format = "0.0%"
+                cp.alignment = Alignment(horizontal="right")
+                for m in medidas:
+                    ws.cell(r, col_de(i, m)).fill = total_fill
+                    ws.cell(r, col_de(i, m)).font = Font(bold=True)
             return r + 2
 
         def volcar(r: int, wide: pd.DataFrame, cols_texto: list[str]) -> int:
             for _, row in wide.iterrows():
                 for c, key in enumerate(cols_texto, 1):
                     ws.cell(r, c, row[key] if key else "").border = border
-                measure_cells(r, [(row[f"{i}|bultos"], row[f"{i}|cobertura"]) for i in range(n)])
+                measure_cells(r, [{m: row[f"{i}|{m}"] for m in medidas} for i in range(n)])
                 r += 1
             return r
 
@@ -308,12 +438,16 @@ class VentasCoberPreventistaMarcaService(BaseService):
         r = volcar(r, _combinar(periodos, ["vendedor", "supervisor"], "by_vend"),
                    ["vendedor", "supervisor"])
         r = total_row(r)
+        # La clausula va debajo de los preventistas, separada por la fila en
+        # blanco que ya deja `total_row`.
+        if config.clausula_gatillo:
+            r = gatillo_row(r)
 
         r = section(r, "POR SUPERVISOR", "Supervisor", "")
         r = volcar(r, _combinar(periodos, ["supervisor"], "by_sup"), ["supervisor", ""])
         r = total_row(r)
 
-        anchos = [26, 16] + [12, 12] * n
+        anchos = [26, 16] + [12] * (ancho * n)
         for c, w in enumerate(anchos, 1):
             ws.column_dimensions[get_column_letter(c)].width = w
         ws.freeze_panes = f"A{6 if multi else 5}"

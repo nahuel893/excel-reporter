@@ -13,12 +13,19 @@
             "nombre": "Ventas y Cobertura FULL SPORT por Preventista",
             "filtros": {
                 "marcas": ["FULL SPORT"],
-                "incluir_mes_anterior": true
+                "incluir_mes_anterior": true,
+                "objetivo_cobertura": {
+                    "marca": "SALTA",
+                    "pct_anterior": 0.20,
+                    "pct_actual": 0.25,
+                    "base_actual": "anterior"
+                },
+                "clausula_gatillo": 1800
             },
             "capture_images": [
                 {
                     "hoja": "Ventas Cob x Preventista",
-                    "rango": "A1:F52",
+                    "rango": "A1:H55",
                     "renderer": "libreoffice"
                 }
             ],

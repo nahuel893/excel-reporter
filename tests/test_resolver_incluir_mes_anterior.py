@@ -32,3 +32,24 @@ def test_report_filter_false_is_not_swallowed_as_none():
     """False is a real value, not 'inherit' — `is not None` must let it through."""
     merged = merge_filters(_global(), ReportFilters(incluir_mes_anterior=False))
     assert merged["incluir_mes_anterior"] is False
+
+
+# ── objetivo_cobertura / clausula_gatillo ────────────────────────────────────
+# Misma regla de 4 lugares: modelo, defaults, rama del merge y handler.
+
+def test_objetivo_y_gatillo_default_a_none():
+    merged = merge_filters(_global(), ReportFilters(marcas=["FULL SPORT"]))
+    assert merged["objetivo_cobertura"] is None
+    assert merged["clausula_gatillo"] is None
+
+
+def test_objetivo_cobertura_llega_al_merged():
+    obj = {"marca": "SALTA", "pct_anterior": 0.20, "pct_actual": 0.25,
+           "base_actual": "anterior"}
+    merged = merge_filters(_global(), ReportFilters(objetivo_cobertura=obj))
+    assert merged["objetivo_cobertura"] == obj
+
+
+def test_clausula_gatillo_llega_al_merged():
+    merged = merge_filters(_global(), ReportFilters(clausula_gatillo=1800))
+    assert merged["clausula_gatillo"] == 1800

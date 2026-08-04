@@ -183,3 +183,138 @@ def test_un_solo_periodo_mantiene_el_layout_original(tmp_path):
         "Vendedor", "Supervisor", "Bultos", "Cobertura",
     ]
     assert loader.get_ventas_cobertura_por_vendedor.call_count == 1
+
+
+# ── Objetivo de cobertura + clausula gatillo ─────────────────────────────────
+
+def _raw_marca_base(mes: str):
+    """Cobertura de la marca de referencia (SALTA). Julio mas ancha que agosto."""
+    if mes.startswith("2026-08"):
+        return pd.DataFrame({
+            "vendedor": ["LORENA TARITOLAY"] * 2,
+            "id_cliente": [1, 2],
+            "bultos": [5.0, 5.0],
+        })
+    return pd.DataFrame({                       # julio: 10 pdv LORENA, 5 NAHUEL
+        "vendedor": ["LORENA TARITOLAY"] * 10 + ["NAHUEL RUEDA"] * 5,
+        "id_cliente": list(range(1, 11)) + list(range(11, 16)),
+        "bultos": [3.0] * 15,
+    })
+
+
+def _make_objetivo(tmp_path, *, base_actual="anterior", gatillo=1800.0):
+    loader = MagicMock(spec=DataLoader)
+
+    def por_marca(*, marca, fecha_desde, fecha_hasta, id_sucursal):
+        if marca == "SALTA":
+            return _raw_marca_base(fecha_desde)
+        return _raw_agosto() if fecha_desde.startswith("2026-08") else _raw_julio()
+
+    loader.get_ventas_cobertura_por_vendedor.side_effect = por_marca
+    service = VentasCoberPreventistaMarcaService(data_loader=loader)
+    config = VentasCoberPreventistaMarcaConfig(
+        marca="FULL SPORT",
+        fecha_desde="2026-08-01", fecha_hasta="2026-08-04", id_sucursal=1,
+        incluir_mes_anterior=True,
+        objetivo_cobertura={"marca": "SALTA", "pct_anterior": 0.20,
+                            "pct_actual": 0.25, "base_actual": base_actual},
+        clausula_gatillo=gatillo,
+    )
+    with patch("src.services.ventas_cober_preventista_marca.service.service_output_dir",
+               return_value=tmp_path):
+        return service.generar_reporte(config), loader
+
+
+def _fila(ws, etiqueta, col=1):
+    return next(r for r in range(1, ws.max_row + 1) if ws.cell(r, col).value == etiqueta)
+
+
+def test_objetivo_agrega_una_columna_por_bloque(tmp_path):
+    result, _ = _make_objetivo(tmp_path)
+    ws = load_workbook(result.ruta_archivo).active
+    assert [ws.cell(6, c).value for c in range(1, 9)] == [
+        "Vendedor", "Supervisor", "Bultos", "Cobertura", "Objetivo",
+        "Bultos", "Cobertura", "Objetivo",
+    ]
+
+
+def test_objetivo_del_mes_anterior_es_el_pct_de_su_propio_mes(tmp_path):
+    """Julio: 20% de la cobertura SALTA de julio (10 pdv LORENA -> 2)."""
+    result, _ = _make_objetivo(tmp_path)
+    ws = load_workbook(result.ruta_archivo).active
+    r = _fila(ws, "LORENA TARITOLAY")
+    assert ws.cell(r, 5).value == 2            # round(10 * 0.20)
+
+
+def test_objetivo_del_mes_actual_usa_la_cobertura_del_mes_anterior(tmp_path):
+    """Agosto: 25% de la cobertura SALTA de JULIO (10 pdv -> 3), no de agosto (2)."""
+    result, _ = _make_objetivo(tmp_path, base_actual="anterior")
+    ws = load_workbook(result.ruta_archivo).active
+    r = _fila(ws, "LORENA TARITOLAY")
+    assert ws.cell(r, 8).value == 3            # round(10 * 0.25), no round(2 * 0.25)
+
+
+def test_objetivo_del_mes_actual_puede_usar_su_propio_mes(tmp_path):
+    """`base_actual='propio'` cambia la referencia a agosto (2 pdv -> 1)."""
+    result, _ = _make_objetivo(tmp_path, base_actual="propio")
+    ws = load_workbook(result.ruta_archivo).active
+    r = _fila(ws, "LORENA TARITOLAY")
+    assert ws.cell(r, 8).value == 1            # round(2 * 0.25)
+
+
+def test_objetivo_usa_umbral_mayor_a_cero_no_medio_bulto(tmp_path):
+    """Este informe cuenta con `> 0`; el 0.5 es criterio de otro informe."""
+    loader = MagicMock(spec=DataLoader)
+
+    def por_marca(*, marca, fecha_desde, fecha_hasta, id_sucursal):
+        if marca == "SALTA":
+            # 4 pdv de LORENA, dos de ellos por debajo de medio bulto
+            return pd.DataFrame({
+                "vendedor": ["LORENA TARITOLAY"] * 4,
+                "id_cliente": [1, 2, 3, 4],
+                "bultos": [3.0, 3.0, 0.25, 0.1],
+            })
+        return _raw_julio()
+
+    loader.get_ventas_cobertura_por_vendedor.side_effect = por_marca
+    service = VentasCoberPreventistaMarcaService(data_loader=loader)
+    config = VentasCoberPreventistaMarcaConfig(
+        marca="FULL SPORT", fecha_desde="2026-07-01", fecha_hasta="2026-07-31",
+        objetivo_cobertura={"marca": "SALTA", "pct_anterior": 0.5,
+                            "pct_actual": 0.5, "base_actual": "propio"},
+    )
+    with patch("src.services.ventas_cober_preventista_marca.service.service_output_dir",
+               return_value=tmp_path):
+        result = service.generar_reporte(config)
+    ws = load_workbook(result.ruta_archivo).active
+    r = _fila(ws, "LORENA TARITOLAY")
+    assert ws.cell(r, 5).value == 2            # round(4 * 0.5); con >=0.5 seria round(2*0.5)=1
+
+
+def test_clausula_gatillo_compara_el_volumen_de_cada_mes(tmp_path):
+    result, _ = _make_objetivo(tmp_path, gatillo=1800.0)
+    ws = load_workbook(result.ruta_archivo).active
+    r = _fila(ws, "CLAUSULA GATILLO")
+    assert ws.cell(r, 3).value == 1800.0                        # julio
+    assert abs(ws.cell(r, 4).value - 26.0 / 1800.0) < 1e-9      # % sobre el volumen
+    assert ws.cell(r, 6).value == 1800.0                        # agosto
+    assert abs(ws.cell(r, 7).value - 4.0 / 1800.0) < 1e-9
+
+
+def test_clausula_gatillo_deja_una_fila_en_blanco_encima(tmp_path):
+    result, _ = _make_objetivo(tmp_path)
+    ws = load_workbook(result.ruta_archivo).active
+    r = _fila(ws, "CLAUSULA GATILLO")
+    assert all(ws.cell(r - 1, c).value in (None, "") for c in range(1, 9))
+
+
+def test_sin_objetivo_ni_gatillo_el_layout_no_cambia(tmp_path):
+    """Regression: los informes que no los configuran quedan igual que antes."""
+    result, _ = _make_dos_periodos(tmp_path)
+    ws = load_workbook(result.ruta_archivo).active
+    assert [ws.cell(6, c).value for c in range(1, 7)] == [
+        "Vendedor", "Supervisor", "Bultos", "Cobertura", "Bultos", "Cobertura",
+    ]
+    assert ws.max_column == 6
+    assert not any(ws.cell(r, 1).value == "CLAUSULA GATILLO"
+                   for r in range(1, ws.max_row + 1))

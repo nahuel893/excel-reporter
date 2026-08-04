@@ -841,6 +841,8 @@ def _run_ventas_cober_preventista_marca_report(report, merged: dict) -> list[tup
         id_sucursal=merged.get("id_sucursal") or 1,
         nombre_archivo=report.nombre,
         incluir_mes_anterior=bool(merged.get("incluir_mes_anterior")),
+        objetivo_cobertura=merged.get("objetivo_cobertura"),
+        clausula_gatillo=merged.get("clausula_gatillo"),
     )
 
     result = VentasCoberPreventistaMarcaService().generar_reporte(config)

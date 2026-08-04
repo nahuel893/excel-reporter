@@ -122,6 +122,11 @@ class ReportFilters(BaseModel):
     # ventas-marca / ventas-cober-preventista-marca: agrega una columna con el mes
     # anterior completo, DERIVADO de fecha_desde (nunca escrito en el config).
     incluir_mes_anterior: bool | None = None
+    # ventas-cober-preventista-marca: columna Objetivo = % de la cobertura de otra
+    # marca. {"marca","pct_anterior","pct_actual","base_actual"} — ver el servicio.
+    objetivo_cobertura: dict | None = None
+    # ventas-cober-preventista-marca: piso de VOLUMEN al pie del bloque de preventistas.
+    clausula_gatillo: float | None = None
 
 
 class ReportEntry(BaseModel):
