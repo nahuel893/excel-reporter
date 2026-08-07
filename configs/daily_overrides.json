@@ -6,26 +6,26 @@
     "avance-badie": {
         "ejecutar": true,
         "enviar": true,
-        "desde_dia_del_mes": 8,
-        "razon": "Retenido los primeros 7 dias de cada mes (2026-08-04, pedido de Nahuel): necesita ese margen para cargar los objetivos del mes en gold. Del dia 8 en adelante se ejecuta y envia solo, sin tocar nada. Config intacto: enviar_whatsapp true, 22 capture_images -> 25 imagenes al grupo Preventa Salta + email a supervisores. Historia: GO-LIVE 2026-07-24 tras resolver el bug de cupo (commit 052b6e2): CuposVolumen!Codigo (id_ruta) se guardaba con formato de fecha; el round-trip de openpyxl del render reserializaba y el bug del bisiesto 1900 corria los seriales >=60 un dia, rompiendo el VLOOKUP a AvanceR -> cerveza daba 82.574 en imagenes vs 83.000 real."
+        "desde_dia_del_mes": 5,
+        "razon": "Retenido los primeros 4 dias de cada mes (margen bajado de 7 a 4 el 2026-08-07, pedido de Nahuel): necesita ese margen para cargar los objetivos del mes en gold. Del dia 5 en adelante se ejecuta y envia solo, sin tocar nada. Config intacto: enviar_whatsapp true, 22 capture_images -> 25 imagenes al grupo Preventa Salta + email a supervisores. Historia: GO-LIVE 2026-07-24 tras resolver el bug de cupo (commit 052b6e2): CuposVolumen!Codigo (id_ruta) se guardaba con formato de fecha; el round-trip de openpyxl del render reserializaba y el bug del bisiesto 1900 corria los seriales >=60 un dia, rompiendo el VLOOKUP a AvanceR -> cerveza daba 82.574 en imagenes vs 83.000 real."
     },
     "avance-branca": {
         "ejecutar": true,
         "enviar": true,
-        "desde_dia_del_mes": 8,
-        "razon": "Retenido los primeros 7 dias de cada mes (2026-08-04, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 8 en adelante se ejecuta y envia solo. Envio por WhatsApp al grupo Preventa + Vinos Bodega E (CC Nahuel)."
+        "desde_dia_del_mes": 5,
+        "razon": "Retenido los primeros 4 dias de cada mes (margen bajado de 7 a 4 el 2026-08-07, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 5 en adelante se ejecuta y envia solo. Envio por WhatsApp al grupo Preventa + Vinos Bodega E (CC Nahuel)."
     },
     "avance-guemes": {
         "ejecutar": true,
         "enviar": true,
-        "desde_dia_del_mes": 8,
-        "razon": "Retenido los primeros 7 dias de cada mes (2026-08-04, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 8 en adelante se ejecuta solo, y el envio sigue bajo el gate de objetivo (esperar_objetivo=true en el config): si los cupos todavia no estan en gold, genera pero no envia. Doble red."
+        "desde_dia_del_mes": 5,
+        "razon": "Retenido los primeros 4 dias de cada mes (margen bajado de 7 a 4 el 2026-08-07, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 5 en adelante se ejecuta solo, y el envio sigue bajo el gate de objetivo (esperar_objetivo=true en el config): si los cupos todavia no estan en gold, genera pero no envia. Doble red."
     },
     "champions-league": {
         "ejecutar": true,
         "enviar": true,
-        "desde_dia_del_mes": 8,
-        "razon": "Retenido los primeros 7 dias de cada mes (2026-08-04, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 8 en adelante se ejecuta y envia solo."
+        "desde_dia_del_mes": 5,
+        "razon": "Retenido los primeros 4 dias de cada mes (margen bajado de 7 a 4 el 2026-08-07, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 5 en adelante se ejecuta y envia solo."
     },
     "stock-badie": {
         "ejecutar": true,
