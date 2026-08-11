@@ -7,7 +7,7 @@
         "id_sucursal": 1,
         "id_fuerza_ventas": 4,
         "enviar_email": false,
-        "enviar_whatsapp": true
+        "enviar_whatsapp": false
     },
     "reportes": [
         {

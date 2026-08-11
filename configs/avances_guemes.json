@@ -8,7 +8,7 @@
         "id_sucursal": 16,
         "id_fuerza_ventas": 1,
         "enviar_email": true,
-        "enviar_whatsapp": true,
+        "enviar_whatsapp": false,
         "email_adjuntos": ["excel"],
         "esperar_objetivo": true
     },
