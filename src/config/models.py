@@ -97,6 +97,19 @@ class GlobalFilters(BaseModel):
     todos_los_articulos: bool = False
     # stock-badie: dias de stock objetivo (alcance en dias = stock / venta_dia).
     dias_stock: int = 15
+    # stock-valorizado: xlsx exportado del ERP con la lista de precios de
+    # referencia (columnas "Articulo" y "Precio Base"). No hay precio en gold,
+    # asi que sin este archivo no hay valorizacion.
+    lista_precios_path: str | None = None
+    # stock-valorizado: fecha del snapshot de stock. None -> ultima disponible
+    # en gold.fact_stock (NO se deriva de fecha_desde/fecha_hasta, que el daily
+    # parchea al mes en curso y no describen un snapshot).
+    fecha_stock: str | None = None
+    # stock-valorizado: antiguedad en dias a partir de la cual la lista de
+    # precios se marca como VENCIDA (banner rojo en las hojas + aviso en la CLI).
+    # Los precios se exportan a mano del ERP: sin esto, una lista de hace cuatro
+    # meses produce un informe que parece tan valido como uno fresco.
+    lista_precios_max_dias: int | None = None
 
 
 class ReportFilters(BaseModel):
@@ -161,7 +174,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "incentivo-salta", "stock-badie", "cobertura"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "incentivo-salta", "stock-badie", "stock-valorizado", "cobertura"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

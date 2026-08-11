@@ -256,6 +256,9 @@ def merge_filters(
         "cupos_manuales": global_f.cupos_manuales,
         "todos_los_articulos": global_f.todos_los_articulos,
         "dias_stock": global_f.dias_stock,
+        "lista_precios_path": global_f.lista_precios_path,
+        "fecha_stock": global_f.fecha_stock,
+        "lista_precios_max_dias": global_f.lista_precios_max_dias,
         # Per-client report filters (only meaningful per-report; no global fallback)
         "clientes": None,
         "articulos": None,

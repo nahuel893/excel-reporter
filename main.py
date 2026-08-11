@@ -85,6 +85,7 @@ REPORT_HANDLERS: dict[str, str] = {
     "ventas-cober-preventista-marca": "_run_ventas_cober_preventista_marca_report",
     "incentivo-salta": "_run_incentivo_salta_report",
     "stock-badie": "_run_stock_badie_report",
+    "stock-valorizado": "_run_stock_valorizado_report",
     "cobertura": "_run_cobertura_report",
 }
 
@@ -416,6 +417,74 @@ def _run_stock_badie_report(report, merged: dict) -> list[tuple[Path, dict]]:
         (
             Path(result.archivo_generado),
             {"nombre": nombre_periodo, "fecha": result.fecha_stock.isoformat()},
+        )
+    ]
+
+
+def _run_stock_valorizado_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate stock-valorizado report. Returns list of (path, metadata) tuples.
+
+    Snapshot date comes from `fecha_stock` when present, otherwise the latest
+    date in gold.fact_stock — deliberately NOT from fecha_desde/fecha_hasta,
+    which the daily patches to the running month and do not describe a snapshot.
+    """
+    from src.services.stock_valorizado import (
+        StockValorizadoConfig,
+        StockValorizadoService,
+    )
+
+    lista_precios_path = merged.get("lista_precios_path")
+    if not lista_precios_path:
+        print(
+            "Error: stock-valorizado requiere 'lista_precios_path' en los filtros "
+            "(xlsx exportado del ERP con las columnas 'Articulo' y 'Precio Base')."
+        )
+        raise ValueError("stock-valorizado: falta lista_precios_path")
+
+    kwargs = {}
+    if merged.get("lista_precios_max_dias") is not None:
+        kwargs["lista_precios_max_dias"] = merged["lista_precios_max_dias"]
+
+    config = StockValorizadoConfig(
+        lista_precios_path=lista_precios_path,
+        fecha_stock=merged.get("fecha_stock"),
+        genericos=merged.get("genericos"),
+        genericos_excluidos=merged.get("genericos_excluidos"),
+        nombre_archivo=report.nombre,
+        **kwargs,
+    )
+
+    result = StockValorizadoService().generar_reporte(config)
+
+    print("Stock Valorizado generado exitosamente:")
+    print(f"  - Archivo: {result.archivo_generado.name}")
+    print(f"  - Fecha stock: {result.fecha_stock.isoformat()}")
+    print(f"  - Articulos: {result.n_articulos} en {result.n_sucursales} sucursales")
+    print(f"  - Total bultos: {result.total_bultos:,.0f}")
+    print(f"  - Total valorizado (base):  $ {result.total_valorizado:,.2f}")
+    print(f"  - Total valorizado (final): $ {result.total_valorizado_final:,.2f}")
+    print(
+        f"  - Lista de precios: {result.lista_precios_path.name} "
+        f"(actualizada {result.lista_precios_mtime.strftime('%d-%m-%Y %H:%M')}, "
+        f"hace {result.lista_precios_dias} dias)"
+    )
+
+    # The price list is maintained by hand; nothing upstream notices when that
+    # stops happening. Make the CLI impossible to skim past when it goes stale.
+    if result.lista_precios_vencida:
+        print("")
+        print("=" * 72)
+        print("  ATENCION: LA LISTA DE PRECIOS ESTA DESACTUALIZADA")
+        print(f"  {result.lista_precios_path} tiene {result.lista_precios_dias} dias.")
+        print("  Los precios se cargan A MANO: exportalos del ERP, reemplaza el")
+        print("  archivo y volve a generar el informe antes de usar estos importes.")
+        print("=" * 72)
+        print("")
+
+    return [
+        (
+            Path(result.archivo_generado),
+            {"nombre": report.nombre, "fecha": result.fecha_stock.isoformat()},
         )
     ]
 
@@ -1353,6 +1422,21 @@ def cmd_stock_badie(args, test_mode: bool = False) -> int:
         return 1
 
 
+def cmd_stock_valorizado(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando stock-valorizado."""
+    if not args.config:
+        print("Error: stock-valorizado requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    print("Error: stock-valorizado solo soporta el nuevo formato de configuracion JSON.")
+    return 1
+
+
 def cmd_cobertura(args, test_mode: bool = False) -> int:
     """Ejecuta el comando cobertura."""
     if not args.config:
@@ -1788,6 +1872,20 @@ Ejemplos:
         help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
     )
     stock_badie_parser.set_defaults(func=cmd_stock_badie)
+
+    # Subcomando: stock-valorizado (bultos + pesos por articulo y sucursal)
+    stock_valorizado_parser = subparsers.add_parser(
+        "stock-valorizado",
+        help="Stock por articulo y sucursal en bultos y pesos (lista de precios del ERP)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    stock_valorizado_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    stock_valorizado_parser.set_defaults(func=cmd_stock_valorizado)
 
     # Subcomando: cobertura (historico de cobertura, N periodos lado a lado)
     cobertura_parser = subparsers.add_parser(
