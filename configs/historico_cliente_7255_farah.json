@@ -1,0 +1,38 @@
+{
+    "tipo": "historico-cliente",
+    "filtros": {
+        "fecha_desde": "2025-08-01",
+        "fecha_hasta": "2026-07-31",
+        "enviar_email": false,
+        "enviar_whatsapp": true,
+        "whatsapp_enviar_como": "ambos"
+    },
+    "reportes": [
+        {
+            "nombre": "Historico Ventas - EL ENCUENTRO 7255 (con cargo)",
+            "filtros": {
+                "clientes": [
+                    {"id_cliente": 7255, "id_sucursal": 1}
+                ],
+                "agrupar_por_generico": true,
+                "marcas_completas": true,
+                "genericos_universo": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
+                "solo_con_cargo": true
+            },
+            "capture_images": [
+                {
+                    "hoja": "EL ENCUENTRO",
+                    "rango": "A1:O51",
+                    "renderer": "libreoffice",
+                    "recortar": true,
+                    "caption": "EL ENCUENTRO (7255) — histórico 08/2025 a 07/2026 · SOLO unidades con cargo"
+                }
+            ],
+            "enviar_a": {
+                "Gonzalo Farah": {
+                    "via": ["whatsapp"]
+                }
+            }
+        }
+    ]
+}

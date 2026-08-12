@@ -2347,11 +2347,15 @@ class DataLoader:
         SELECT
             fv.id_cliente,
             fv.id_sucursal,
-            COALESCE(dc.fantasia, dc.razon_social, CAST(fv.id_cliente AS TEXT)) AS nombre_cliente,
+            COALESCE(
+                NULLIF(TRIM(dc.fantasia), ''),
+                NULLIF(TRIM(dc.razon_social), ''),
+                CAST(fv.id_cliente AS TEXT)
+            ) AS nombre_cliente,
             da.generico AS generico,
             {row_key_expr} AS row_key,
             TO_CHAR(fv.fecha_comprobante, 'YYYY-MM') AS mes,
-            SUM(fv.cantidades_total) AS bultos
+            SUM({cantidad_expr}) AS bultos
         FROM gold.fact_ventas fv
         LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
         LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente
@@ -2643,6 +2647,7 @@ class DataLoader:
             label_param = f"label_{i}"
             params[label_param] = t["label"]
             # Lógica oficial (medallion-etl gold.cob_sucursal_lista_marca):
+        solo_con_cargo: bool = False,
             # primero agregamos por (vendedor, cliente) sumando cantidades del
             # período/marca, filtramos los clientes cuyo total neto > 0
             # (HAVING — NO se filtra a nivel línea), y recién después contamos
@@ -2656,6 +2661,12 @@ class DataLoader:
                     SELECT
                         dc.des_personal_fv1 AS vendedor,
                         fv.id_cliente,
+            solo_con_cargo: Cuando es True suma `cantidades_con_cargo` en vez de
+                    `cantidades_total`, excluyendo las unidades regaladas (lineas con
+                    bonificacion 100%). Verificado sobre toda la fact: siempre se
+                    cumple con_cargo + sin_cargo = total, y bonificacion >= 100
+                    equivale a con_cargo = 0, asi que la columna es equivalente a
+                    filtrar por `COALESCE(bonificacion, 0) < 100`.
                         SUM(fv.cantidades_total) AS total_qty
                     FROM gold.fact_ventas fv
                     JOIN gold.dim_articulo da ON fv.id_articulo  = da.id_articulo
@@ -2691,6 +2702,10 @@ class DataLoader:
         SELECT
             dv.des_vendedor                              AS vendedor,
             dv.id_fuerza_ventas,
+        cantidad_expr = (
+            "fv.cantidades_con_cargo" if solo_con_cargo else "fv.cantidades_total"
+        )
+
             da.generico,
             SUM(CASE WHEN fv.cantidades_total > 0 THEN fv.cantidades_total ELSE 0 END) AS bultos_vendidos,
             ABS(SUM(CASE WHEN fv.cantidades_total < 0 THEN fv.cantidades_total ELSE 0 END)) AS bultos_rechazados
