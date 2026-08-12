@@ -690,6 +690,108 @@ def test_subtitulo_no_habla_de_cargos_cuando_suma_todo(tmp_path):
     assert "con cargo" not in _subtitulo(ws).lower()
 
 
+def _multianio_workbook(tmp_path):
+    """Grouped sheet spanning 2024-2026 with one marca and known monthly values."""
+    loader = MagicMock(spec=DataLoader)
+    loader.get_ventas_historico_cliente.return_value = pd.DataFrame({
+        "id_cliente": [1] * 4,
+        "id_sucursal": [1] * 4,
+        "nombre_cliente": ["Cli A"] * 4,
+        "generico": ["CERVEZAS"] * 4,
+        "row_key": ["SALTA"] * 4,
+        "mes": ["2024-01", "2024-03", "2025-05", "2026-02"],
+        "bultos": [10.0, 5.0, 20.0, 7.0],
+    })
+
+    service = HistoricoClienteService(data_loader=loader)
+    config = _base_config(
+        fecha_desde="2024-01-01", fecha_hasta="2026-03-31",
+        clientes=[{"id_cliente": 1, "id_sucursal": 1}],
+        marcas=None, articulos=None, agrupar_por_generico=True,
+    )
+    with patch("src.services.historico_cliente.service.service_output_dir", return_value=tmp_path):
+        result = service.generar_reporte(config)
+
+    from openpyxl import load_workbook
+    return load_workbook(result.ruta_archivo).active
+
+
+def test_totales_por_anio_una_columna_por_anio(tmp_path):
+    """A window spanning several years gets one total column per year."""
+    ws = _multianio_workbook(tmp_path)
+    headers = _headers(ws)
+    for anio in ("2024", "2025", "2026"):
+        assert f"Total {anio}" in headers, f"falta la columna del {anio}"
+
+
+def test_total_del_anio_va_pegado_a_sus_meses(tmp_path):
+    """Each year total sits right after that year's last month, not at the end.
+
+    Reading a year as a block is the point; a column parked at the far right
+    forces the eye to travel across 30+ month columns to pair them up.
+    """
+    headers = _headers(_multianio_workbook(tmp_path))
+    assert headers[headers.index("Total 2024") - 1] == "12/24"
+    assert headers[headers.index("Total 2025") - 1] == "12/25"
+    # 2026 se corta en marzo por la ventana pedida
+    assert headers[headers.index("Total 2026") - 1] == "03/26"
+
+
+def test_total_del_anio_suma_solo_ese_anio(tmp_path):
+    """10 + 5 en 2024, 20 en 2025, 7 en 2026 — cada uno en su columna."""
+    ws = _multianio_workbook(tmp_path)
+    headers = _headers(ws)
+    fila = _header_row(ws) + 1  # primera fila de datos: SALTA
+
+    def _valor(col):
+        return ws.cell(row=fila, column=headers.index(col) + 1).value
+
+    assert _valor("Total 2024") == 15
+    assert _valor("Total 2025") == 20
+    assert _valor("Total 2026") == 7
+    assert _valor("Total") == 42
+
+
+def test_totales_por_anio_tambien_en_las_filas_resumen(tmp_path):
+    """Subtotal and grand-total rows carry the year columns too."""
+    ws = _multianio_workbook(tmp_path)
+    headers = _headers(ws)
+    col = headers.index("Total 2024") + 1
+    marca_col = headers.index("Marca") + 1
+
+    grand = next(
+        r for r in range(_header_row(ws) + 1, ws.max_row + 1)
+        if ws.cell(row=r, column=marca_col).value == "TOTAL GENERAL"
+    )
+    assert ws.cell(row=grand, column=col).value == 15
+
+
+def test_columna_de_anio_se_distingue_de_los_meses(tmp_path):
+    """Year totals get their own tint — otherwise they vanish among 30+ months."""
+    from src.services.historico_cliente.service import (
+        _TOTAL_ANIO_FILL, _TOTAL_COL_FILL,
+    )
+
+    ws = _multianio_workbook(tmp_path)
+    headers = _headers(ws)
+    fila = _header_row(ws) + 1
+
+    def _fill(col):
+        celda = ws.cell(row=fila, column=headers.index(col) + 1)
+        return (celda.fill.start_color.rgb or "")[-6:]
+
+    assert _fill("Total 2024") == _TOTAL_ANIO_FILL
+    assert _fill("01/24") != _TOTAL_ANIO_FILL
+    # y tampoco se confunde con el Total general de la derecha
+    assert _TOTAL_ANIO_FILL != _TOTAL_COL_FILL
+
+
+def test_un_solo_anio_no_agrega_columna_redundante(tmp_path):
+    """Within one calendar year the grand Total already is the year total."""
+    ws = _grouped_workbook(tmp_path)  # ventana 2026-01..2026-02
+    assert not [h for h in _headers(ws) if str(h).startswith("Total 20")]
+
+
 def test_rango_captura_cubre_toda_la_hoja(tmp_path):
     """The capture range is derived from the sheet, never hardcoded.
 

@@ -47,13 +47,40 @@ def test_ventana_cruza_el_anio():
     assert desde == "2025-09-01"
 
 
+def test_ventana_acepta_fechas_explicitas():
+    cli = _cli()
+    assert cli.ventana(desde="2024-01-01", hasta="2026-12-31") == (
+        "2024-01-01", "2026-12-31",
+    )
+
+
+def test_ventana_por_anios_arranca_en_enero_del_primero():
+    """`--anios 2024 2025 2026` cubre desde el 1 de enero del más viejo."""
+    cli = _cli()
+    desde, _ = cli.ventana(anios=[2025, 2024, 2026], hoy=date(2026, 8, 12))
+    assert desde == "2024-01-01"
+
+
+def test_ventana_por_anios_no_proyecta_al_futuro():
+    """Un año en curso corta hoy, no el 31 de diciembre."""
+    cli = _cli()
+    _, hasta = cli.ventana(anios=[2024, 2025, 2026], hoy=date(2026, 8, 12))
+    assert hasta == "2026-08-12"
+
+
+def test_ventana_por_anios_pasados_llega_a_fin_de_anio():
+    cli = _cli()
+    _, hasta = cli.ventana(anios=[2024, 2025], hoy=date(2026, 8, 12))
+    assert hasta == "2025-12-31"
+
+
 # ── Config ───────────────────────────────────────────────────────────────────
 
 def test_config_usa_el_universo_ccu_y_modo_agrupado():
     """The report only means anything with the grouped + full-universe combo."""
     cli = _cli()
     cfg = cli.construir_config(
-        id_cliente=7255, id_sucursal=1, desde="2025-08-01", hasta="2026-07-31",
+        clientes=[(7255, 1)], desde="2025-08-01", hasta="2026-07-31",
         solo_con_cargo=False, nombre="X",
     )
     assert cfg.agrupar_por_generico is True
@@ -67,19 +94,53 @@ def test_config_lleva_la_clave_compuesta():
     """id_cliente alone is not a key — id_sucursal must travel with it."""
     cli = _cli()
     cfg = cli.construir_config(
-        id_cliente=7255, id_sucursal=3, desde="2025-08-01", hasta="2026-07-31",
+        clientes=[(7255, 3)], desde="2025-08-01", hasta="2026-07-31",
         solo_con_cargo=False, nombre="X",
     )
     assert cfg.clientes == [{"id_cliente": 7255, "id_sucursal": 3}]
 
 
+def test_config_admite_varios_clientes_en_orden():
+    """One sheet per client, in the order given."""
+    cli = _cli()
+    cfg = cli.construir_config(
+        clientes=[(30158, 4), (30056, 4), (30253, 4)],
+        desde="2024-01-01", hasta="2026-08-12",
+        solo_con_cargo=True, nombre="X",
+    )
+    assert cfg.clientes == [
+        {"id_cliente": 30158, "id_sucursal": 4},
+        {"id_cliente": 30056, "id_sucursal": 4},
+        {"id_cliente": 30253, "id_sucursal": 4},
+    ]
+
+
 def test_config_propaga_solo_con_cargo():
     cli = _cli()
     cfg = cli.construir_config(
-        id_cliente=1, id_sucursal=1, desde="2025-08-01", hasta="2026-07-31",
+        clientes=[(1, 1)], desde="2025-08-01", hasta="2026-07-31",
         solo_con_cargo=True, nombre="X",
     )
     assert cfg.solo_con_cargo is True
+
+
+# ── Parseo de códigos ────────────────────────────────────────────────────────
+
+def test_parse_cliente_codigo_solo():
+    cli = _cli()
+    assert cli.parse_cliente("30158") == (30158, None)
+
+
+def test_parse_cliente_con_sucursal():
+    """`ID:SUC` fija la sucursal de ese código sin afectar a los otros."""
+    cli = _cli()
+    assert cli.parse_cliente("30158:4") == (30158, 4)
+
+
+def test_parse_cliente_basura_falla():
+    cli = _cli()
+    with pytest.raises(ValueError):
+        cli.parse_cliente("no-es-un-codigo")
 
 
 # ── Resolución de cliente ────────────────────────────────────────────────────

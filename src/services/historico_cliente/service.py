@@ -98,6 +98,7 @@ _SUBTOTAL_FONT = "1F3864"
 _GRAND_FILL = "1F3864"      # navy — grand total
 _GRAND_FONT = "FFFFFF"
 _TOTAL_COL_FILL = "EDF2FA"  # faint blue wash down the Total column
+_TOTAL_ANIO_FILL = "DCE6F5"  # year subtotal columns — a shade above the months
 _BANDA_FILL = "F7F9FC"      # zebra banding on alternating data rows
 _ZERO_FILL = "F4F6FA"       # marca sin venta (hueco de compra)
 _ZERO_FONT = "A3B0C4"
@@ -315,11 +316,42 @@ def _build_grouped_frame(
     )
 
     frame = pd.DataFrame(records, columns=[_GENERICO_COL, _MARCA_COL, *meses, _TOTAL_COL])
+    frame = _agregar_totales_anuales(frame, meses)
     # Twelve month columns drive the sheet width, so they carry the short label.
     # Only this grouped view is relabelled; the marca/articulo sheets keep the
     # full YYYY-MM, which is unambiguous and sorts lexicographically.
     frame = frame.rename(columns={m: _mes_label(m) for m in meses})
     return frame, subtotal_rows, grand_row, zero_rows
+
+
+def totales_anuales_de(meses: list[str]) -> list[str]:
+    """Year-total column labels for ``meses``; empty inside a single year.
+
+    Within one calendar year the grand ``Total`` already IS the year total, so
+    a second identical column would be noise.
+    """
+    anios = sorted({m[:4] for m in meses})
+    return [f"{_TOTAL_COL} {a}" for a in anios] if len(anios) > 1 else []
+
+
+def _agregar_totales_anuales(frame: pd.DataFrame, meses: list[str]) -> pd.DataFrame:
+    """Insert one total column per year, right after that year's last month.
+
+    Placed inline rather than parked at the far right: a year reads as a block,
+    and pairing a trailing column with its months means crossing 30+ columns.
+    """
+    etiquetas = totales_anuales_de(meses)
+    if not etiquetas:
+        return frame
+
+    orden: list[str] = [_GENERICO_COL, _MARCA_COL]
+    for anio in sorted({m[:4] for m in meses}):
+        del_anio = [m for m in meses if m.startswith(anio)]
+        etiqueta = f"{_TOTAL_COL} {anio}"
+        frame[etiqueta] = frame[del_anio].sum(axis=1)
+        orden.extend([*del_anio, etiqueta])
+    orden.append(_TOTAL_COL)
+    return frame[orden]
 
 
 def _mes_label(mes: str) -> str:
@@ -363,8 +395,17 @@ def _apply_corporate_layout(
     borde = Border(left=fino, right=fino, top=fino, bottom=fino)
 
     idx_total = columnas.index(_TOTAL_COL) + 1 if _TOTAL_COL in columnas else None
+    # Year-total columns sit inline among the months, so they need their own
+    # tint or they read as just another month.
+    idx_anio = {
+        i for i, c in enumerate(columnas, start=1)
+        if isinstance(c, str) and c.startswith(f"{_TOTAL_COL} ") and c != _TOTAL_COL
+    }
     banda = PatternFill(start_color=_BANDA_FILL, end_color=_BANDA_FILL, fill_type="solid")
     wash = PatternFill(start_color=_TOTAL_COL_FILL, end_color=_TOTAL_COL_FILL, fill_type="solid")
+    wash_anio = PatternFill(
+        start_color=_TOTAL_ANIO_FILL, end_color=_TOTAL_ANIO_FILL, fill_type="solid"
+    )
 
     for fila in range(fila_hdr, ws.max_row + 1):
         es_header = fila == fila_hdr
@@ -385,6 +426,8 @@ def _apply_corporate_layout(
                 celda.font = Font(name=_FONT_NAME, size=_FONT_SIZE)
                 if col == idx_total:
                     celda.fill = wash
+                elif col in idx_anio:
+                    celda.fill = wash_anio
                 elif raya:
                     celda.fill = banda
                 if col > 2:

@@ -60,17 +60,56 @@ class CapturaInvalida(Exception):
 
 # ── Ventana ──────────────────────────────────────────────────────────────────
 
-def ventana(meses: int, hoy: date | None = None) -> tuple[str, str]:
-    """Return (desde, hasta) covering the last ``meses`` months, inclusive.
+def ventana(
+    meses: int | None = None,
+    *,
+    desde: str | None = None,
+    hasta: str | None = None,
+    anios: list[int] | None = None,
+    hoy: date | None = None,
+) -> tuple[str, str]:
+    """Return (desde, hasta) for the requested window.
 
-    ``hasta`` is today, so the current month is included and partial. The
-    subtitle of the sheet prints the exact range, so a partial last month is
-    visible to whoever reads the image.
+    Three ways to ask, in order of precedence:
+
+    - ``desde`` / ``hasta`` explicit;
+    - ``anios``: whole calendar years, from January 1st of the earliest;
+    - ``meses``: the last N months, current one included and partial.
+
+    ``hasta`` never runs past today: projecting an in-progress year to
+    December 31st would show empty months as if they were zero sales.
     """
     hoy = hoy or date.today()
-    total = (hoy.year * 12 + hoy.month - 1) - (meses - 1)
+
+    if desde and hasta:
+        return desde, hasta
+
+    if anios:
+        primero, ultimo = min(anios), max(anios)
+        fin = date(ultimo, 12, 31)
+        return (
+            date(primero, 1, 1).isoformat(),
+            min(fin, hoy).isoformat(),
+        )
+
+    total = (hoy.year * 12 + hoy.month - 1) - ((meses or 12) - 1)
     anio, mes = divmod(total, 12)
     return f"{anio:04d}-{mes + 1:02d}-01", hoy.isoformat()
+
+
+def parse_cliente(txt: str) -> tuple[int, int | None]:
+    """Parse ``"30158"`` or ``"30158:4"`` into (id_cliente, id_sucursal|None).
+
+    The suffix pins the sucursal for that code only, so one ambiguous client
+    in a batch does not force the caller to pin every other one.
+    """
+    txt = str(txt).strip()
+    codigo, _, suc = txt.partition(":")
+    if not codigo.isdigit() or (suc and not suc.isdigit()):
+        raise ValueError(
+            f"Código de cliente inválido: {txt!r}. Se espera 'ID' o 'ID:SUCURSAL'."
+        )
+    return int(codigo), int(suc) if suc else None
 
 
 # ── Cliente ──────────────────────────────────────────────────────────────────
@@ -127,14 +166,20 @@ def resolver_cliente(
 # ── Config ───────────────────────────────────────────────────────────────────
 
 def construir_config(
-    *, id_cliente: int, id_sucursal: int, desde: str, hasta: str,
+    *, clientes: list[tuple[int, int]], desde: str, hasta: str,
     solo_con_cargo: bool, nombre: str,
 ) -> HistoricoClienteConfig:
-    """Build the config with the settings this report only works with."""
+    """Build the config with the settings this report only works with.
+
+    ``clientes`` is an ordered list of (id_cliente, id_sucursal); the service
+    writes one sheet per entry, in this order.
+    """
     return HistoricoClienteConfig(
         fecha_desde=desde,
         fecha_hasta=hasta,
-        clientes=[{"id_cliente": id_cliente, "id_sucursal": id_sucursal}],
+        clientes=[
+            {"id_cliente": c, "id_sucursal": s} for c, s in clientes
+        ],
         agrupar_por_generico=True,
         marcas_completas=True,
         genericos_universo=list(GENERICOS_UNIVERSO),
@@ -171,55 +216,93 @@ def _total_general(ws) -> float | None:
 
 
 def generar(
-    *, id_cliente: int, id_sucursal: int | None, meses: int,
-    solo_con_cargo: bool, con_imagen: bool, hoy: date | None = None,
+    *, clientes: list[str | tuple[int, int | None]],
+    meses: int | None = None, desde: str | None = None, hasta: str | None = None,
+    anios: list[int] | None = None,
+    solo_con_cargo: bool = False, con_imagen: bool = True,
+    nombre_archivo: str | None = None, hoy: date | None = None,
 ) -> dict:
-    """Resolve, generate, validate and (optionally) render. Returns the result dict."""
+    """Resolve every client, generate one workbook with a sheet each, render.
+
+    A single workbook — not one file per client — so the batch travels as one
+    attachment and the sheets can be compared side by side.
+    """
     from openpyxl import load_workbook
 
     from src.core.data_loader import DataLoader
     from src.services.historico_cliente.service import HistoricoClienteService
 
     loader = DataLoader()
-    id_cliente, id_sucursal, nombre = resolver_cliente(loader, id_cliente, id_sucursal)
 
-    desde, hasta = ventana(meses, hoy=hoy)
+    resueltos: list[tuple[int, int, str]] = []
+    for entrada in clientes:
+        cod, suc = parse_cliente(entrada) if isinstance(entrada, str) else entrada
+        resueltos.append(resolver_cliente(loader, cod, suc))
+
+    desde, hasta = ventana(meses, desde=desde, hasta=hasta, anios=anios, hoy=hoy)
     sufijo = " (con cargo)" if solo_con_cargo else ""
+
+    if nombre_archivo is None:
+        if len(resueltos) == 1:
+            nombre_archivo = f"Historico Ventas - {resueltos[0][2]} {resueltos[0][0]}{sufijo}"
+        else:
+            nombre_archivo = (
+                f"Historico Ventas - {len(resueltos)} clientes "
+                f"{desde[:7]} a {hasta[:7]}{sufijo}"
+            )
+
     config = construir_config(
-        id_cliente=id_cliente, id_sucursal=id_sucursal, desde=desde, hasta=hasta,
-        solo_con_cargo=solo_con_cargo,
-        nombre=f"Historico Ventas - {nombre} {id_cliente}{sufijo}",
+        clientes=[(c, s) for c, s, _ in resueltos],
+        desde=desde, hasta=hasta,
+        solo_con_cargo=solo_con_cargo, nombre=nombre_archivo,
     )
 
     resultado = HistoricoClienteService(data_loader=loader).generar_reporte(config)
     if not resultado.sheets_generated:
         raise ClienteNoEncontrado(
-            f"{nombre} ({id_cliente}) no tiene ventas entre {desde} y {hasta}."
+            f"Ningún cliente pedido tiene ventas entre {desde} y {hasta}."
         )
 
-    ws = load_workbook(resultado.ruta_archivo)[resultado.sheets_generated[0]]
-    validar_captura(ws)
-    rango = rango_de(ws)
-
-    png = None
+    wb = load_workbook(resultado.ruta_archivo)
+    renderer = None
     if con_imagen:
         from src.core.excel_renderers import get_renderer
 
-        png = get_renderer("libreoffice").render(
-            resultado.ruta_archivo, ws.title, rango,
-            resultado.ruta_archivo.parent, dpi=_DPI, crop=True,
-        )
+        renderer = get_renderer("libreoffice")
+
+    hojas: list[dict] = []
+    for hoja in resultado.sheets_generated:
+        ws = wb[hoja]
+        validar_captura(ws)
+        rango = rango_de(ws)
+        png = None
+        if renderer is not None:
+            png = renderer.render(
+                resultado.ruta_archivo, hoja, rango,
+                resultado.ruta_archivo.parent, dpi=_DPI, crop=True,
+            )
+        hojas.append({
+            "hoja": hoja,
+            "rango": rango,
+            "png": str(png) if png else None,
+            "total_general": _total_general(ws),
+        })
+
+    # Un cliente pedido sin ventas en la ventana no genera hoja: nombrarlo, en
+    # vez de dejar que el faltante pase inadvertido en un lote grande.
+    sin_datos = [
+        f"{nom} ({cod})" for cod, _, nom in resueltos
+        if nom[:31] not in resultado.sheets_generated
+    ]
 
     return {
         "ok": True,
-        "cliente": nombre,
-        "id_cliente": id_cliente,
-        "id_sucursal": id_sucursal,
         "xlsx": str(resultado.ruta_archivo),
-        "png": str(png) if png else None,
-        "hoja": ws.title,
-        "rango": rango,
-        "total_general": _total_general(ws),
+        "hojas": hojas,
+        "sin_datos": sin_datos,
+        "clientes": [
+            {"id_cliente": c, "id_sucursal": s, "nombre": n} for c, s, n in resueltos
+        ],
         "desde": desde,
         "hasta": hasta,
         "solo_con_cargo": solo_con_cargo,
@@ -230,12 +313,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Genera el histórico de compras por marca de un cliente."
     )
-    parser.add_argument("--cliente", type=int, required=True, help="id_cliente")
     parser.add_argument(
-        "--sucursal", type=int, default=None,
-        help="id_sucursal. Obligatorio si el código existe en más de una.",
+        "--cliente", nargs="+", required=True, metavar="ID[:SUC]",
+        help="Uno o más códigos. Una hoja por código. Sufijo ':N' fija la sucursal.",
     )
-    parser.add_argument("--meses", type=int, default=12, help="Meses hacia atrás (default 12)")
+    parser.add_argument("--meses", type=int, default=None, help="Meses hacia atrás (default 12)")
+    parser.add_argument("--desde", default=None, help="Fecha inicio YYYY-MM-DD")
+    parser.add_argument("--hasta", default=None, help="Fecha fin YYYY-MM-DD")
+    parser.add_argument(
+        "--anios", nargs="+", type=int, default=None, metavar="AAAA",
+        help="Años calendario completos, ej: --anios 2024 2025 2026",
+    )
+    parser.add_argument("--nombre", default=None, help="Nombre del archivo de salida")
     parser.add_argument(
         "--solo-con-cargo", action="store_true",
         help="Contar solo unidades facturadas; excluye bonificación 100%%.",
@@ -248,13 +337,16 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         salida = generar(
-            id_cliente=args.cliente,
-            id_sucursal=args.sucursal,
+            clientes=args.cliente,
             meses=args.meses,
+            desde=args.desde,
+            hasta=args.hasta,
+            anios=args.anios,
             solo_con_cargo=args.solo_con_cargo,
             con_imagen=not args.sin_imagen,
+            nombre_archivo=args.nombre,
         )
-    except (ClienteNoEncontrado, ClienteAmbiguo, CapturaInvalida) as exc:
+    except (ClienteNoEncontrado, ClienteAmbiguo, CapturaInvalida, ValueError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
         return 1
     except Exception as exc:  # noqa: BLE001
