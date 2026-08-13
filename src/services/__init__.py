@@ -10,10 +10,12 @@ from src.services.ventas import VentasService, ReporteVentasConfig, ReporteVenta
 from src.services.cobertura import CoberturaService, ReporteCoberturaConfig, ReporteCoberturaResult
 from src.services.resumen_mensual import ResumenMensualService, ResumenMensualConfig, ResumenMensualResult
 from src.services.subdistribuidores import SubdistribuidoresConfig, SubdistribuidoresResult, SubdistribuidoresService
+from src.services.cupo_desagregado import CupoDesagregadoConfig, CupoDesagregadoResult, CupoDesagregadoService
 
 __all__ = [
     "VentasService", "ReporteVentasConfig", "ReporteVentasResult",
     "CoberturaService", "ReporteCoberturaConfig", "ReporteCoberturaResult",
     "ResumenMensualService", "ResumenMensualConfig", "ResumenMensualResult",
     "SubdistribuidoresConfig", "SubdistribuidoresResult", "SubdistribuidoresService",
+    "CupoDesagregadoConfig", "CupoDesagregadoResult", "CupoDesagregadoService",
 ]

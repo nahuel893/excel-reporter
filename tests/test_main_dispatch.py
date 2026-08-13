@@ -24,6 +24,7 @@ DISPATCH_MATRIX = [
     ("ventas-articulo", "_run_ventas_articulo_report"),
     ("reporte-general-badie", "_run_reporte_general_badie_report"),
     ("reporte-rebotes", "_run_rebotes_report"),
+    ("cupo-desagregado", "_run_cupo_desagregado_report"),
 ]
 
 

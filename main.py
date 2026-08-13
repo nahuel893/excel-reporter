@@ -86,7 +86,12 @@ REPORT_HANDLERS: dict[str, str] = {
     "incentivo-salta": "_run_incentivo_salta_report",
     "stock-badie": "_run_stock_badie_report",
     "stock-valorizado": "_run_stock_valorizado_report",
+    "cupo-desagregado": "_run_cupo_desagregado_report",
+    "comparativo-salta": "_run_comparativo_salta_report",
     "cobertura": "_run_cobertura_report",
+    "cobertura-cupos": "_run_cobertura_cupos_report",
+    "cobertura-aguas": "_run_cobertura_aguas_report",
+    "quesos": "_run_quesos_report",
 }
 
 
@@ -106,6 +111,25 @@ def _run_report_config(
     except (FileNotFoundError, ValidationError) as exc:
         print(f"Error: config invalida en {config_path}:\n{exc}")
         return 1
+
+    # Ventana relativa: la resolvemos ANTES de ejecutar, con el mismo codigo que
+    # usa el daily. Sin esto, una corrida manual toma las fechas guardadas en el
+    # JSON, que envejecen y sacan el informe con el mes equivocado.
+    if report_config.filtros.fecha_modo:
+        from datetime import date as _date
+
+        from src.core.periodos import resolver_ventana
+
+        try:
+            desde, hasta = resolver_ventana(
+                report_config.filtros.fecha_modo, _date.today()
+            )
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            return 1
+        report_config.filtros.fecha_desde = desde
+        report_config.filtros.fecha_hasta = hasta
+        print(f"Ventana ({report_config.filtros.fecha_modo}): {desde} a {hasta}")
 
     # Load contacts from same dir or explicit path
     if contactos_path is None:
@@ -207,6 +231,13 @@ def _run_reportes(report_config, contactos, test_mode: bool = False, no_delivery
         # run's period (covers both the daily and manual runs — both dispatch
         # through here). Names without tokens pass through untouched.
         report.nombre = _resolver_nombre_periodo(report.nombre, merged.get("fecha_desde", ""))
+        # Same for the email subject: SendEmailStep uses `config.email.asunto`
+        # verbatim, so an unresolved "{MES} {AÑO}" ships literally in the
+        # subject line (affects avance-guemes, cupo-desagregado, stock-badie).
+        if report.asunto_email:
+            report.asunto_email = _resolver_nombre_periodo(
+                report.asunto_email, merged.get("fecha_desde", "")
+            )
 
         print(f"\nGenerando: {report.nombre}")
 
@@ -402,6 +433,7 @@ def _run_stock_badie_report(report, merged: dict) -> list[tuple[Path, dict]]:
         fecha_hasta=merged["fecha_hasta"],
         dias_stock=merged.get("dias_stock", 15),
         genericos=merged.get("genericos"),
+        genericos_excluidos=merged.get("genericos_excluidos"),
         nombre_archivo=nombre_periodo or None,
     )
 
@@ -893,6 +925,62 @@ def _run_ventas_marca_report(report, merged: dict) -> list[tuple[Path, dict]]:
     ]
 
 
+def _run_quesos_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate quesos report (volumen y cobertura por mes de LA HUERTA)."""
+    from src.services.quesos import QuesosConfig, QuesosService
+
+    config = QuesosConfig(
+        anios=merged.get("anios_mensual") or [2025, 2026],
+        factores_path=merged.get("lista_precios_path") or "factor_conversion_quesos.xlsx",
+        nombre_archivo=report.nombre,
+    )
+    result = QuesosService().generar_reporte(config)
+    print(f"Quesos '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Anios: {result.anios} | Bultos: {result.bultos:,.0f} | Kg: {result.kg:,.2f}")
+    if result.sin_factor:
+        print(f"  - OJO articulos sin factor (bultos si, kilos no): {result.sin_factor}")
+    return [(Path(result.ruta_archivo),
+             {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")})]
+
+
+def _run_cobertura_aguas_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate cobertura-aguas report (cobertura de aguas por sucursal y marca).
+
+    La cantidad de meses NO es un campo aparte: se DERIVA del rango
+    fecha_desde..fecha_hasta que ya trae el config. Un campo suelto habria que
+    mantenerlo sincronizado con las fechas a mano, y se desincroniza solo.
+    """
+    from src.core.periodos import meses_abarcados
+    from src.services.cobertura_aguas import (
+        CoberturaAguasConfig,
+        CoberturaAguasService,
+    )
+
+    fecha_hasta = merged.get("fecha_hasta") or merged["fecha_desde"]
+    config = CoberturaAguasConfig(
+        fecha=fecha_hasta,
+        meses=meses_abarcados(merged["fecha_desde"], fecha_hasta),
+        nombre_archivo=report.nombre,
+    )
+
+    result = CoberturaAguasService().generar_reporte(config)
+    print(f"Cobertura Aguas '{report.nombre}' generada exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Meses: {', '.join(result.meses)} | Sucursales: {result.sucursales}")
+    print(
+        f"  - Cobertura acumulada: {result.cobertura_acumulada:,} "
+        f"de un padron de {result.padron:,} "
+        f"({result.cobertura_acumulada / result.padron:.1%})"
+    )
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
 def _run_ventas_cober_preventista_marca_report(report, merged: dict) -> list[tuple[Path, dict]]:
     """Generate ventas-cober-preventista-marca report (ventas + cobertura por preventista)."""
     from src.services.ventas_cober_preventista_marca import (
@@ -988,6 +1076,7 @@ def _run_historico_cliente_report(report, merged: dict) -> list[tuple[Path, dict
         agrupar_por_generico=merged.get("agrupar_por_generico", False),
         marcas_completas=merged.get("marcas_completas", False),
         genericos_universo=merged.get("genericos_universo"),
+        solo_con_cargo=merged.get("solo_con_cargo", False),
         nombre_archivo=report.nombre,
     )
 
@@ -1136,6 +1225,7 @@ def _run_avances_report(report, merged: dict) -> list[tuple[Path, dict]]:
         id_sucursal=merged.get("id_sucursal") or 1,
         id_fuerza_ventas=merged.get("id_fuerza_ventas") or 1,
         nombre_archivo=report.nombre,
+        skip_cupos=merged.get("skip_cupos", False),
     )
 
     service = AvancesService()
@@ -1437,6 +1527,21 @@ def cmd_stock_valorizado(args, test_mode: bool = False) -> int:
     return 1
 
 
+def cmd_comparativo_salta(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando comparativo-salta."""
+    if not args.config:
+        print("Error: comparativo-salta requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    print("Error: comparativo-salta solo soporta el nuevo formato de configuracion JSON.")
+    return 1
+
+
 def cmd_cobertura(args, test_mode: bool = False) -> int:
     """Ejecuta el comando cobertura."""
     if not args.config:
@@ -1488,6 +1593,214 @@ def _run_cobertura_report(report, merged: dict) -> list[tuple[Path, dict]]:
         (
             Path(result.ruta_archivo),
             {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
+def cmd_cobertura_cupos(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando cobertura-cupos."""
+    if not args.config:
+        print("Error: cobertura-cupos requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    print("Error: cobertura-cupos solo soporta el nuevo formato de configuracion JSON.")
+    return 1
+
+
+def _run_cobertura_cupos_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate cobertura-cupos report (cobertura por generico y marca por zona)."""
+    from src.services.cobertura_cupos import CoberturaCuposConfig, CoberturaCuposService
+
+    config = CoberturaCuposConfig(
+        fecha_desde=merged["fecha_desde"],
+        # None -> los 5 genericos CCU (default del servicio).
+        genericos=merged.get("genericos"),
+        nombre_archivo=report.nombre,
+    )
+
+    result = CoberturaCuposService().generar_reporte(config)
+    print(f"Cobertura y Cupos '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Periodos: {' vs '.join(result.periodos)}")
+    print(f"  - Zonas: {', '.join(result.zonas)} | Filas de marca: {result.filas_marca}")
+    # La metadata `fecha` alimenta el caption de WhatsApp. Va el periodo del
+    # DATO (el mes anterior cerrado), no el de la corrida: con `fecha_hasta` el
+    # caption diria "Agosto 2026" sobre un informe de julio.
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": result.periodo_principal},
+        )
+    ]
+
+
+def cmd_inteligencia_comercial(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando inteligencia-comercial.
+
+    No pasa por el pipeline de delivery: es un informe pesado (~6 minutos, 35
+    hojas) que se corre a mano cuando se lo necesita, no todos los dias.
+    """
+    from src.services.inteligencia_comercial import (
+        InteligenciaComercialConfig,
+        InteligenciaComercialService,
+    )
+
+    modulos = None
+    if args.modulos:
+        modulos = [m.strip() for m in args.modulos.split(",") if m.strip()]
+
+    try:
+        config = InteligenciaComercialConfig(
+            fecha_hasta=args.hasta,
+            meses_ventana=args.meses,
+            meses_historia=args.historia,
+            nombre_archivo=args.nombre,
+            modulos=modulos,
+        )
+    except ValueError as exc:
+        print(f"Error de configuracion: {exc}")
+        return 1
+
+    print(f"Inteligencia Comercial — corte {config.fecha_hasta}, "
+          f"ventana {config.meses_ventana}m, historia {config.meses_historia}m")
+    print("Esto tarda varios minutos: son cinco familias de analisis sobre 8M de lineas.")
+
+    try:
+        resultado = InteligenciaComercialService().generar_reporte(config)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error generando el reporte: {exc}")
+        return 1
+
+    print(f"\nArchivo:   {resultado.ruta_archivo}")
+    print(f"Hojas:     {resultado.hojas}")
+    print(f"Alertas:   {resultado.alertas}")
+    print(f"Duracion:  {resultado.duracion_segundos:.0f}s")
+    if resultado.analisis_fallidos:
+        # El archivo se entrega igual, pero el usuario tiene que saber que le falta.
+        print(f"ATENCION — analisis que no corrieron: {', '.join(resultado.analisis_fallidos)}")
+        print("El motivo esta en la hoja Metodologia del libro.")
+    return 0
+
+
+def _run_comparativo_salta_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate comparativo-salta report. Returns list of (path, metadata) tuples."""
+    from src.services.comparativo_salta import (
+        ComparativoSaltaConfig,
+        ComparativoSaltaService,
+    )
+
+    fecha_desde = merged.get("fecha_desde")
+    fecha_hasta = merged.get("fecha_hasta")
+    if not fecha_desde or not fecha_hasta:
+        print("Error: comparativo-salta requiere fecha_desde y fecha_hasta")
+        return []
+
+    config = ComparativoSaltaConfig(
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        con_detalle_clientes=merged.get("con_detalle_clientes", True),
+        anios_mensual=merged.get("anios_mensual"),
+        sucursal_comparativa=merged.get("sucursal_comparativa"),
+        meses_vendedor=merged.get("meses_vendedor"),
+        bloques_vendedor=merged.get("bloques_vendedor"),
+        id_sucursal_vendedor=merged.get("id_sucursal_vendedor"),
+        excluir_vendedores=merged.get("excluir_vendedores"),
+        nombre_archivo=report.nombre,
+    )
+
+    service = ComparativoSaltaService()
+    result = service.generar_reporte(config)
+
+    print(f"Comparativo SALTA '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Periodo: {result.fecha_desde} al {result.fecha_hasta}")
+    print(f"  - Cobertura marca: {result.cobertura_total} clientes")
+    print(f"  - Calibres: {', '.join(result.calibres)}")
+    return [(
+        result.ruta_archivo,
+        {
+            "cobertura_total": result.cobertura_total,
+            "calibres": result.calibres,
+            "fecha_desde": result.fecha_desde,
+            "fecha_hasta": result.fecha_hasta,
+        },
+    )]
+
+
+def cmd_cupo_desagregado(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando cupo-desagregado."""
+    if not args.config:
+        print("Error: cupo-desagregado requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    else:
+        print("Error: cupo-desagregado solo soporta el nuevo formato de configuracion JSON.")
+        return 1
+
+
+def _run_cupo_desagregado_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate cupo-desagregado report. Returns list of (path, metadata) tuples."""
+    from src.services.cupo_desagregado import (
+        CupoDesagregadoConfig,
+        CupoDesagregadoService,
+    )
+
+    fecha_desde = merged.get("fecha_desde")
+    fecha_hasta = merged.get("fecha_hasta")
+    if not fecha_desde or not fecha_hasta:
+        print("Error: cupo-desagregado requiere fecha_desde y fecha_hasta (mes del cupo)")
+        return []
+    if not merged.get("cupos_source_path"):
+        print("Error: cupo-desagregado requiere cupos_source_path en los filtros")
+        return []
+
+    config = CupoDesagregadoConfig(
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        nombre_archivo=report.nombre,
+        cupos_source_path=merged["cupos_source_path"],
+        cupos_hoja=merged.get("cupos_hoja"),
+        historia_desde=merged.get("historia_desde"),
+        historia_hasta=merged.get("historia_hasta"),
+    )
+
+    try:
+        result = CupoDesagregadoService().generar_reporte(config)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error: {exc}")
+        return []
+
+    print(f"Cupo desagregado '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Preventistas: {result.vendedores}")
+    print(f"  - Filas por ruta: {result.filas_ruta}")
+    if result.sin_ruta:
+        print(f"  - Sin ruta asignada: {', '.join(result.sin_ruta)}")
+    if result.sin_historia:
+        print(f"  - Sin historia (reparto parejo): {', '.join(result.sin_historia)}")
+
+    # El reparto que no cierra contra el cupo es un error de datos: no se
+    # entrega un archivo mal abierto, se corta y se avisa.
+    if result.errores_validacion:
+        print("Error: la suma de las rutas no cierra con el cupo del preventista:")
+        for clave, diferencia in result.errores_validacion.items():
+            print(f"    {clave}: diferencia {diferencia}")
+        return []
+
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": fecha_hasta},
         )
     ]
 
@@ -1887,6 +2200,33 @@ Ejemplos:
     )
     stock_valorizado_parser.set_defaults(func=cmd_stock_valorizado)
 
+    # Subcomando: cupo-desagregado (abre el cupo del preventista por ruta)
+    cupo_desagregado_parser = subparsers.add_parser(
+        "cupo-desagregado",
+        help="Abre el cupo mensual de cada preventista entre sus rutas",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    cupo_desagregado_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    cupo_desagregado_parser.set_defaults(func=cmd_cupo_desagregado)
+
+    comparativo_salta_parser = subparsers.add_parser(
+        "comparativo-salta",
+        help="Cobertura de la marca SALTA abierta por calibre (1000, 1200, 473...)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    comparativo_salta_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    comparativo_salta_parser.set_defaults(func=cmd_comparativo_salta)
+
     # Subcomando: cobertura (historico de cobertura, N periodos lado a lado)
     cobertura_parser = subparsers.add_parser(
         "cobertura",
@@ -1900,6 +2240,58 @@ Ejemplos:
         help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
     )
     cobertura_parser.set_defaults(func=cmd_cobertura)
+
+    # Subcomando: cobertura-cupos (cobertura por generico y marca, para cupos)
+    cobertura_cupos_parser = subparsers.add_parser(
+        "cobertura-cupos",
+        help="Cobertura por generico y marca de los genericos CCU, por zona, con columna de cupo",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    cobertura_cupos_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    cobertura_cupos_parser.set_defaults(func=cmd_cobertura_cupos)
+
+    inteligencia_parser = subparsers.add_parser(
+        "inteligencia-comercial",
+        help="Informe analitico integral: RFM, fuga, portafolio, margen, pronostico y logistica.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Corre cinco familias de analisis sobre el esquema gold y las consolida en\n"
+            "un unico libro Excel con portada, KPIs, alertas, graficos y metodologia.\n\n"
+            "Ejemplos:\n"
+            "  python main.py inteligencia-comercial --hasta 2026-07-30\n"
+            "  python main.py inteligencia-comercial --hasta 2026-07-30 --modulos clientes,demanda\n"
+        ),
+    )
+    inteligencia_parser.add_argument(
+        "--hasta",
+        default=date.today().isoformat(),
+        metavar="YYYY-MM-DD",
+        help="Fecha de corte del analisis (inclusive). Por defecto, hoy.",
+    )
+    inteligencia_parser.add_argument(
+        "--meses", type=int, default=12, metavar="N",
+        help="Largo de la ventana principal en meses (default: 12).",
+    )
+    inteligencia_parser.add_argument(
+        "--historia", type=int, default=24, metavar="N",
+        help="Largo de la ventana de historia para estacionalidad y ritmos (default: 24).",
+    )
+    inteligencia_parser.add_argument(
+        "--modulos", default=None, metavar="a,b",
+        help=("Subconjunto de analisis a correr, separados por coma: "
+              "clientes, portafolio, rentabilidad, demanda, logistica. "
+              "Por defecto corre todos."),
+    )
+    inteligencia_parser.add_argument(
+        "--nombre", default=None, metavar="archivo",
+        help="Nombre del xlsx sin extension. Se deriva de la fecha si se omite.",
+    )
+    inteligencia_parser.set_defaults(func=cmd_inteligencia_comercial)
 
     # check-delivery: mostrar estado de envios del dia
     check_parser = subparsers.add_parser(
