@@ -96,6 +96,11 @@ configs/tmp*.json
 # CodeGraph index — regenerable, ~30 MB
 .codegraph/
 
+# dashboards/ — build output. dashboard.html comes out of build_dashboard.py and
+# the dated zips out of package.sh; the sources next to them are versioned.
+dashboards/**/dashboard.html
+dashboards/**/*.zip
+
 # Logs
 *.log
 bd_agent/errors.log
