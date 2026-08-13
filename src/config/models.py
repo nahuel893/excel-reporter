@@ -60,6 +60,16 @@ class GlobalFilters(BaseModel):
 
     fecha_desde: str
     fecha_hasta: str
+    # Ventana RELATIVA. Cuando esta puesto, main.py recalcula fecha_desde y
+    # fecha_hasta desde la fecha de hoy e IGNORA las de arriba, que pasan a ser
+    # solo documentacion del formato.
+    #
+    # Existe porque las fechas guardadas envejecen: el daily las patchea en cada
+    # corrida, pero una corrida manual usaba lo que quedo escrito. Asi salio el
+    # informe de FULL SPORT con junio-julio cuando tenia que ser julio-agosto.
+    # Es el mismo modo que declara scripts/run_daily.py, resuelto por el mismo
+    # codigo (src/core/periodos.resolver_ventana).
+    fecha_modo: Literal["mes_a_hoy", "mes_completo", "hoy"] | None = None
     genericos: list[str] | None = None
     categorias: dict[str, Any] | None = None
     con_slicers: bool = True
@@ -97,6 +107,9 @@ class GlobalFilters(BaseModel):
     todos_los_articulos: bool = False
     # stock-badie: dias de stock objetivo (alcance en dias = stock / venta_dia).
     dias_stock: int = 15
+    # stock-badie / stock-valorizado: genericos que NO forman parte del informe
+    # (envases, marketing, equipos de frio, dispensers — no son articulos de venta).
+    genericos_excluidos: list[str] | None = None
     # stock-valorizado: xlsx exportado del ERP con la lista de precios de
     # referencia (columnas "Articulo" y "Precio Base"). No hay precio en gold,
     # asi que sin este archivo no hay valorizacion.
@@ -110,6 +123,18 @@ class GlobalFilters(BaseModel):
     # Los precios se exportan a mano del ERP: sin esto, una lista de hace cuatro
     # meses produce un informe que parece tan valido como uno fresco.
     lista_precios_max_dias: int | None = None
+    # cupo-desagregado: archivo "Objetivo <MES> Badie" con los cupos por preventista.
+    cupos_source_path: str | None = None
+    # cupo-desagregado: hoja del archivo fuente. None -> nombre del mes de fecha_desde.
+    cupos_hoja: str | None = None
+    # cupo-desagregado: ventana de historia [desde, hasta) para abrir los cupos
+    # por ruta. None -> mes anterior completo al periodo del cupo.
+    historia_desde: str | None = None
+    historia_hasta: str | None = None
+    # avances: si True, NO regenera las hojas de cupos (CuposVolumen,
+    # CuposCoberGen, CuposCober) — preserva lo cargado a mano. Sirve para
+    # corridas de recarga cuando los objetivos aún no están en gold.
+    skip_cupos: bool = False
 
 
 class ReportFilters(BaseModel):
@@ -131,6 +156,16 @@ class ReportFilters(BaseModel):
     agrupar_por_generico: bool | None = None  # historico-cliente: all marcas grouped by generico
     marcas_completas: bool | None = None      # historico-cliente: fill full marca universe (0 if not bought)
     genericos_universo: list[str] | None = None  # genericos whose full marca set defines the universe
+    solo_con_cargo: bool | None = None         # historico-cliente: exclude 100%-discount (gift) units
+    con_detalle_clientes: bool | None = None   # comparativo-salta: include the per-client volume sheet
+    anios_mensual: list[int] | None = None     # comparativo-salta: años de la hoja mensual
+    sucursal_comparativa: str | None = None    # comparativo-salta: sucursal apilada año contra año
+    meses_vendedor: list[str] | None = None    # comparativo-salta: meses de la hoja por preventista
+    # comparativo-salta: bloques de columnas armados a mano. Cada uno:
+    # {"grupo": str, "sabor": str, "calibre": str, "meses": [str], "cupo": float|None}
+    bloques_vendedor: list[dict] | None = None
+    id_sucursal_vendedor: int | None = None    # comparativo-salta: sucursal de la hoja por preventista
+    excluir_vendedores: list[str] | None = None  # comparativo-salta: preventistas dados de baja
     con_lista_precio: bool | None = None      # descuentos: si False, no genera la hoja "lista_precio"
     # ventas-marca / ventas-cober-preventista-marca: agrega una columna con el mes
     # anterior completo, DERIVADO de fecha_desde (nunca escrito en el config).
@@ -151,6 +186,8 @@ class ReportFilters(BaseModel):
     # cerrado. NUNCA se escriben periodos literales: el daily patchea fechas pero
     # no el resto del JSON, y un mes a mano se desincroniza al cambiar de mes.
     meses_atras: list[int] | None = None
+    # avances: override per-report de skip_cupos (default: heredar del global).
+    skip_cupos: bool | None = None
 
 
 class ReportEntry(BaseModel):
@@ -174,7 +211,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "incentivo-salta", "stock-badie", "stock-valorizado", "cobertura"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "incentivo-salta", "stock-badie", "stock-valorizado", "cupo-desagregado", "comparativo-salta", "cobertura", "cobertura-cupos", "cobertura-aguas", "quesos"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

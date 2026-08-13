@@ -256,9 +256,15 @@ def merge_filters(
         "cupos_manuales": global_f.cupos_manuales,
         "todos_los_articulos": global_f.todos_los_articulos,
         "dias_stock": global_f.dias_stock,
+        "genericos_excluidos": global_f.genericos_excluidos,
         "lista_precios_path": global_f.lista_precios_path,
         "fecha_stock": global_f.fecha_stock,
         "lista_precios_max_dias": global_f.lista_precios_max_dias,
+        "cupos_source_path": global_f.cupos_source_path,
+        "cupos_hoja": global_f.cupos_hoja,
+        "historia_desde": global_f.historia_desde,
+        "historia_hasta": global_f.historia_hasta,
+        "skip_cupos": global_f.skip_cupos,
         # Per-client report filters (only meaningful per-report; no global fallback)
         "clientes": None,
         "articulos": None,
@@ -266,6 +272,14 @@ def merge_filters(
         "agrupar_por_generico": False,
         "marcas_completas": False,
         "genericos_universo": None,
+        "solo_con_cargo": False,
+        "con_detalle_clientes": True,
+        "anios_mensual": None,
+        "sucursal_comparativa": None,
+        "meses_vendedor": None,
+        "bloques_vendedor": None,
+        "id_sucursal_vendedor": None,
+        "excluir_vendedores": None,
         "con_lista_precio": True,
         "incluir_mes_anterior": False,
         "objetivo_cobertura": None,
@@ -311,6 +325,16 @@ def merge_filters(
             merged["marcas_completas"] = report_f.marcas_completas
         if getattr(report_f, "genericos_universo", None) is not None:
             merged["genericos_universo"] = report_f.genericos_universo
+        if getattr(report_f, "solo_con_cargo", None) is not None:
+            merged["solo_con_cargo"] = report_f.solo_con_cargo
+        if getattr(report_f, "con_detalle_clientes", None) is not None:
+            merged["con_detalle_clientes"] = report_f.con_detalle_clientes
+        # comparativo-salta: cada clave se copia a mano, como el resto de este
+        # merge. Olvidar una acá deja el flag en el default sin ningún error.
+        for clave in ("anios_mensual", "sucursal_comparativa", "meses_vendedor",
+                      "bloques_vendedor", "id_sucursal_vendedor", "excluir_vendedores"):
+            if getattr(report_f, clave, None) is not None:
+                merged[clave] = getattr(report_f, clave)
         if getattr(report_f, "con_lista_precio", None) is not None:
             merged["con_lista_precio"] = report_f.con_lista_precio
         if getattr(report_f, "incluir_mes_anterior", None) is not None:
@@ -319,6 +343,9 @@ def merge_filters(
                       "apertura_cobertura", "meses_atras", "objetivos_path"):
             if getattr(report_f, clave, None) is not None:
                 merged[clave] = getattr(report_f, clave)
+        # avances: override per-report del skip_cupos del global.
+        if getattr(report_f, "skip_cupos", None) is not None:
+            merged["skip_cupos"] = report_f.skip_cupos
 
     # no_delivery overrides everything — forces delivery off
     if no_delivery:
