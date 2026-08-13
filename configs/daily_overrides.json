@@ -1,35 +1,35 @@
 {
-    "incentivo-cobertura": {
-        "ejecutar": false,
-        "razon": "Incentivo ON PREMISE vencido el 13/06/2026. Envio final realizado con datos hasta esa fecha. No volver a enviar para no mandar datos obsoletos."
-    },
-    "avance-badie": {
-        "ejecutar": true,
-        "enviar": true,
-        "desde_dia_del_mes": 5,
-        "razon": "Retenido los primeros 4 dias de cada mes (margen bajado de 7 a 4 el 2026-08-07, pedido de Nahuel): necesita ese margen para cargar los objetivos del mes en gold. Del dia 5 en adelante se ejecuta y envia solo, sin tocar nada. Config intacto: enviar_whatsapp true, 22 capture_images -> 25 imagenes al grupo Preventa Salta + email a supervisores. Historia: GO-LIVE 2026-07-24 tras resolver el bug de cupo (commit 052b6e2): CuposVolumen!Codigo (id_ruta) se guardaba con formato de fecha; el round-trip de openpyxl del render reserializaba y el bug del bisiesto 1900 corria los seriales >=60 un dia, rompiendo el VLOOKUP a AvanceR -> cerveza daba 82.574 en imagenes vs 83.000 real."
-    },
-    "avance-branca": {
-        "ejecutar": true,
-        "enviar": true,
-        "desde_dia_del_mes": 5,
-        "razon": "Retenido los primeros 4 dias de cada mes (margen bajado de 7 a 4 el 2026-08-07, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 5 en adelante se ejecuta y envia solo. Envio por WhatsApp al grupo Preventa + Vinos Bodega E (CC Nahuel)."
-    },
-    "avance-guemes": {
-        "ejecutar": true,
-        "enviar": true,
-        "desde_dia_del_mes": 5,
-        "razon": "Retenido los primeros 4 dias de cada mes (margen bajado de 7 a 4 el 2026-08-07, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 5 en adelante se ejecuta solo, y el envio sigue bajo el gate de objetivo (esperar_objetivo=true en el config): si los cupos todavia no estan en gold, genera pero no envia. Doble red."
-    },
-    "champions-league": {
-        "ejecutar": true,
-        "enviar": true,
-        "desde_dia_del_mes": 5,
-        "razon": "Retenido los primeros 4 dias de cada mes (margen bajado de 7 a 4 el 2026-08-07, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 5 en adelante se ejecuta y envia solo."
-    },
-    "stock-badie": {
-        "ejecutar": true,
-        "enviar": true,
-        "razon": "GO-LIVE (2026-07-28): entrega ACTIVA tras validar el .xlsx en WPS (formato: cabeceras con color, bordes, grupos colapsables por sucursal). Envio diario por email + WhatsApp (xlsx como archivo) a Sebastian Dellamea, Fabian Gallardo y Gonzalo Farah, con Nahuel en copia por email. M Bravo quedo fuera de la lista: no tiene telefono cargado en contactos.json y el pedido fue email+wpp para los tres."
-    }
+  "incentivo-cobertura": {
+    "ejecutar": false,
+    "razon": "Incentivo ON PREMISE vencido el 13/06/2026. Envio final realizado con datos hasta esa fecha. No volver a enviar para no mandar datos obsoletos."
+  },
+  "avance-badie": {
+    "ejecutar": true,
+    "enviar": true,
+    "desde_dia_del_mes": 5,
+    "razon": "Retenido los primeros 4 dias de cada mes (margen bajado de 7 a 4 el 2026-08-07, pedido de Nahuel): necesita ese margen para cargar los objetivos del mes en gold. Del dia 5 en adelante se ejecuta y envia solo, sin tocar nada. Config intacto: enviar_whatsapp true, 22 capture_images -> 25 imagenes al grupo Preventa Salta + email a supervisores. Historia: GO-LIVE 2026-07-24 tras resolver el bug de cupo (commit 052b6e2): CuposVolumen!Codigo (id_ruta) se guardaba con formato de fecha; el round-trip de openpyxl del render reserializaba y el bug del bisiesto 1900 corria los seriales >=60 un dia, rompiendo el VLOOKUP a AvanceR -> cerveza daba 82.574 en imagenes vs 83.000 real."
+  },
+  "avance-branca": {
+    "ejecutar": true,
+    "enviar": true,
+    "desde_dia_del_mes": 5,
+    "razon": "Retenido los primeros 4 dias de cada mes (margen bajado de 7 a 4 el 2026-08-07, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 5 en adelante se ejecuta y envia solo. Envio por WhatsApp al grupo Preventa + Vinos Bodega E (CC Nahuel)."
+  },
+  "avance-guemes": {
+    "ejecutar": true,
+    "enviar": true,
+    "desde_dia_del_mes": 5,
+    "razon": "Retenido los primeros 4 dias de cada mes (margen bajado de 7 a 4 el 2026-08-07, pedido de Nahuel): margen para cargar los objetivos del mes. Del dia 5 en adelante se ejecuta solo, y el envio sigue bajo el gate de objetivo (esperar_objetivo=true en el config): si los cupos todavia no estan en gold, genera pero no envia. Doble red."
+  },
+  "champions-league": {
+    "ejecutar": true,
+    "enviar": false,
+    "desde_dia_del_mes": 5,
+    "razon": "ENVIO DESHABILITADO el 2026-08-13 a pedido de Nahuel. `ejecutar` queda en true a proposito: el informe se sigue generando en data/output todos los dias, asi el archivo esta disponible para revisar y para mandar a mano; lo unico que se corta es la entrega automatica. Para reactivarlo, poner enviar=true. | Historia: retenido los primeros 4 dias de cada mes (margen bajado de 7 a 4 el 2026-08-07): margen para cargar los objetivos del mes."
+  },
+  "stock-badie": {
+    "ejecutar": true,
+    "enviar": true,
+    "razon": "GO-LIVE (2026-07-28): entrega ACTIVA tras validar el .xlsx en WPS (formato: cabeceras con color, bordes, grupos colapsables por sucursal). Envio diario por email + WhatsApp (xlsx como archivo) a Sebastian Dellamea, Fabian Gallardo y Gonzalo Farah, con Nahuel en copia por email. M Bravo quedo fuera de la lista: no tiene telefono cargado en contactos.json y el pedido fue email+wpp para los tres."
+  }
 }

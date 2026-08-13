@@ -6,7 +6,8 @@
         "id_sucursal": 1,
         "enviar_email": false,
         "enviar_whatsapp": true,
-        "whatsapp_enviar_como": "imagen"
+        "whatsapp_enviar_como": "imagen",
+        "fecha_modo": "hoy"
     },
     "reportes": [
         {
@@ -25,12 +26,20 @@
                 {
                     "hoja": "Incentivo Preventa",
                     "rango": "A1:M40",
-                    "renderer": "libreoffice"
+                    "renderer": "libreoffice",
+                    "caption": "Corregido: Luciano Guzman (antes salia como Dario Lupaty, en cero)."
                 }
             ],
             "enviar_a": {
                 "Preventa Salta": {
-                    "via": ["whatsapp"]
+                    "via": [
+                        "whatsapp"
+                    ]
+                },
+                "Gonzalo Farah": {
+                    "via": [
+                        "whatsapp"
+                    ]
                 }
             }
         }

@@ -1,22 +1,25 @@
 {
     "tipo": "ventas-cober-preventista-marca",
     "filtros": {
-        "fecha_desde": "2026-07-01",
-        "fecha_hasta": "2026-07-31",
+        "fecha_desde": "2026-08-01",
+        "fecha_hasta": "2026-08-12",
         "id_sucursal": 1,
         "enviar_email": false,
         "enviar_whatsapp": true,
-        "whatsapp_enviar_como": "imagen"
+        "whatsapp_enviar_como": "imagen",
+        "fecha_modo": "mes_a_hoy"
     },
     "reportes": [
         {
             "nombre": "Ventas y Cobertura FULL SPORT por Preventista",
             "filtros": {
-                "marcas": ["FULL SPORT"],
+                "marcas": [
+                    "FULL SPORT"
+                ],
                 "incluir_mes_anterior": true,
                 "objetivo_cobertura": {
                     "marca": "SALTA",
-                    "pct_anterior": 0.20,
+                    "pct_anterior": 0.2,
                     "pct_actual": 0.25,
                     "base_actual": "anterior"
                 },
@@ -26,12 +29,20 @@
                 {
                     "hoja": "Ventas Cob x Preventista",
                     "rango": "A1:H55",
-                    "renderer": "libreoffice"
+                    "renderer": "libreoffice",
+                    "caption": "Corregido: Luciano Guzman"
                 }
             ],
             "enviar_a": {
                 "Preventa Salta": {
-                    "via": ["whatsapp"]
+                    "via": [
+                        "whatsapp"
+                    ]
+                },
+                "Gonzalo Farah": {
+                    "via": [
+                        "whatsapp"
+                    ]
                 }
             }
         }

@@ -20,9 +20,9 @@
                 "QUARA"
             ]
         },
-        "detalle_movimientos_path": "/home/nahuel/VM shared/archivos_diarios/2026-06/detalle_movimientos.xlsx",
-        "detalle_movimientos_ma_path": "/home/nahuel/VM shared/archivos_diarios/2026-06/detalle_movimientos_ma.xlsx",
-        "detalle_movimientos_mmaa_path": "/home/nahuel/VM shared/archivos_diarios/2026-06/detalle_movimientos_mmaa.xlsx",
+        "detalle_movimientos_path": "/home/nahuel/VM shared/archivos_diarios/2026-08/detalle_movimientos.xlsx",
+        "detalle_movimientos_ma_path": "/home/nahuel/VM shared/archivos_diarios/2026-08/detalle_movimientos_ma.xlsx",
+        "detalle_movimientos_mmaa_path": "/home/nahuel/VM shared/archivos_diarios/2026-08/detalle_movimientos_mmaa.xlsx",
         "categorias_deposito_path": "configs/categorias_deposito.json",
         "whatsapp_caption_imagenes": false,
         "enviar_email": false,
