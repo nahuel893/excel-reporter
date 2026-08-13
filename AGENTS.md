@@ -57,6 +57,7 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
     ├── ventas-articulo/{YYYY-MM}/
     ├── stock-diario/{YYYY-MM-DD}/  # StockDiarioService (diario)
     ├── graficos-cobertura/{YYYY-MM}/  # sin timestamp (reemplaza ejecucion anterior)
+    ├── cobertura-aguas/{YYYY-MM}/     # CoberturaAguasService (mensual)
     └── avances/              # AvancesService no escribe aqui (actualiza in-place)
 ```
 
@@ -208,6 +209,39 @@ distintos que coexisten.
 Tabla opcional: `gold.cob_sucursal_aguas` — si no existe en el ambiente se
 loguea WARN y las subdivisiones de AGUAS (SABORIZADAS/MINERAL) se omiten.
 Controlable tambien via `con_aguas: false` en el config.
+
+## Cobertura Aguas
+
+`python main.py --config configs/cobertura_aguas.json`
+
+Cobertura de AGUAS DANONE de los ultimos 2 meses, abierta por **sucursal y
+marca**. Tres hojas: `Resumen` (una fila por sucursal + consolidado por marca —
+es la que se captura como imagen), `Detalle` (sucursal x concepto) y `Criterio`
+(como se conto, para poder auditarlo sin preguntar).
+
+**Las 5 marcas del generico**: VILLA DEL SUR, VILLAVICENCIO, LEVITE, BRIO,
+FULL SPORT. Los grupos son `AGUA MINERAL` (VDS + VV) y `AGUA SABORIZADA`
+(LEVITE + BRIO). **FULL SPORT entra en TOTAL AGUAS pero en ningun grupo**: es
+isotonica, no agua saborizada.
+
+**El acumulado NO se lee de `gold.cob_*`.** Esas tablas son mensuales y la
+cobertura no es aditiva entre periodos, asi que el acumulado de dos meses no
+existe en ninguna y hay que calcularlo desde `fact_ventas`. Para que el calculo
+no invente un criterio propio, `get_ventas_cliente_marca_mes` joinea
+`dim_vendedor` por la clave compuesta y filtra `id_fuerza_ventas = 1`: con ese
+filtro reproduce `cob_sucursal_marca` EXACTO (julio-2026, aguas: 23.748 contra
+23.748, 0 filas de 65 con diferencia). Sin el se cuelan movimientos con
+`id_vendedor = 0`, un vendedor placeholder sin ficha en `dim_vendedor`.
+
+El acumulado **totaliza el neto sobre la ventana completa y recien ahi filtra**;
+no es la union de los conjuntos mensuales. Quien compra 5 en julio y devuelve 5
+en agosto queda cubierto en julio y fuera del acumulado. El corte manda.
+
+**Padron** = `gold.dim_cliente` con `anulado = false`. Es SCD tipo 1: foto de
+HOY, no del mes medido.
+
+Los meses se DERIVAN de `fecha_hasta` (ver `src/core/periodos.py`), nunca se
+escriben en el config.
 
 ## Zonas Virtuales (CASA CENTRAL / VALLE SALTA)
 
