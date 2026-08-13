@@ -252,3 +252,39 @@ def test_semaforo_en_las_columnas_de_porcentaje(tmp_path):
     assert regla.iconSet.iconSet == "3TrafficLights1"
     # Umbrales fijos del negocio, no percentiles.
     assert [c.val for c in regla.iconSet.cfvo] == [0.0, 0.5, 1.0]
+
+
+class TestRenombreDePreventistas:
+    """Un preventista renombrado en el maestro no puede salir en cero.
+
+    dim_vendedor es SCD tipo 1: al renombrarlo se pierde el nombre anterior,
+    pero el xlsx de objetivos lo mantiene otra persona y se queda con el viejo.
+    Sin traducir, la fila aparece con el nombre viejo y TODO en cero — peor que
+    si no apareciera, porque parece un preventista que no vendio nada.
+    """
+
+    def test_el_nombre_viejo_se_traduce_al_actual(self):
+        from src.core.vendedores import nombre_actual
+        assert nombre_actual("DARIO LUPATY") == "LUCIANO GUZMAN"
+
+    def test_no_distingue_mayusculas_ni_espacios(self):
+        from src.core.vendedores import nombre_actual
+        assert nombre_actual("  dario lupaty  ") == "LUCIANO GUZMAN"
+
+    def test_un_nombre_sin_renombre_pasa_igual(self):
+        from src.core.vendedores import nombre_actual
+        assert nombre_actual("GUANCA LUIS") == "GUANCA LUIS"
+
+    def test_none_no_rompe(self):
+        from src.core.vendedores import nombre_actual
+        assert nombre_actual(None) == ""
+
+    def test_los_cupos_del_xlsx_salen_con_el_nombre_actual(self):
+        """El contrato de punta a punta contra el archivo real."""
+        from pathlib import Path
+        from src.services.incentivo_salta.objetivos import leer_objetivos
+
+        bloques = leer_objetivos(Path("configs/objetivos_incentivo_salta.xlsx"))
+        todos = {v for b in bloques for v in b.cupos}
+        assert "LUCIANO GUZMAN" in todos
+        assert "DARIO LUPATY" not in todos

@@ -22,6 +22,8 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+from src.core.vendedores import nombre_actual
+
 # "SALTA RUBIA" es como lo llama el negocio; en dim_articulo el sabor derivado
 # es "BLANCA (rubia)". El mapeo vive aca y no en el servicio.
 _SABORES = {"NEGRA": "NEGRA", "RUBIA": "BLANCA (rubia)", "BLANCA": "BLANCA (rubia)"}
@@ -100,8 +102,12 @@ def leer_objetivos(ruta: str | Path) -> list[BloqueIncentivo]:
                 f"{ruta}: el bloque de la columna {col} no tiene fecha de mes "
                 f"a su derecha (encontrado: {fecha!r})"
             )
+        # `nombre_actual`: el xlsx lo mantiene otra persona y se queda con el
+        # nombre viejo cuando a un preventista se lo renombran en el maestro.
+        # Sin traducir, la fila sale con el nombre viejo y todo en cero porque
+        # la venta viene con el nuevo.
         cupos = {
-            str(ws.cell(r, 1).value).strip(): float(ws.cell(r, col).value)
+            nombre_actual(ws.cell(r, 1).value): float(ws.cell(r, col).value)
             for r in range(fila_ini, fila_fin)
             if ws.cell(r, 1).value and ws.cell(r, col).value is not None
         }
