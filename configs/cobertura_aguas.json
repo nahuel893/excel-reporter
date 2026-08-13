@@ -1,0 +1,27 @@
+{
+    "tipo": "cobertura-aguas",
+    "filtros": {
+        "fecha_desde": "2026-06-01",
+        "fecha_hasta": "2026-08-10",
+        "enviar_email": false,
+        "enviar_whatsapp": true,
+        "whatsapp_enviar_como": "ambos"
+    },
+    "reportes": [
+        {
+            "nombre": "Cobertura Aguas",
+            "capture_images": [
+                {
+                    "hoja": "Resumen",
+                    "rango": "A1:K32",
+                    "renderer": "libreoffice"
+                }
+            ],
+            "enviar_a": {
+                "Nahuel Aguirre": {
+                    "via": ["whatsapp"]
+                }
+            }
+        }
+    ]
+}
