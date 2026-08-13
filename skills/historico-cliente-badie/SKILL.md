@@ -24,15 +24,28 @@ cd "/home/nahuel/projects/work/Informes Badie"
 | Opción | Qué hace |
 |---|---|
 | `--cliente ID [ID...]` | **Obligatorio.** Uno o más códigos: **una hoja por código**, en ese orden. Sufijo `ID:SUC` fija la sucursal de ese código. |
-| `--meses N` | Meses hacia atrás, incluido el actual. Default 12. |
+| `--meses N` | Meses hacia atrás, incluido el actual. Solo si lo piden explícitamente. |
 | `--anios AAAA [AAAA...]` | Años calendario completos. `--anios 2024 2025 2026` arranca el 1/1/2024. Nunca proyecta al futuro: un año en curso corta hoy. |
 | `--desde` / `--hasta` | Fechas explícitas `YYYY-MM-DD`. Ganan sobre `--anios` y `--meses`. |
 | `--solo-con-cargo` | Cuenta solo unidades facturadas; excluye las bonificadas al 100%. |
-| `--sin-imagen` | Omite los PNG. Útil si solo necesitás los números: ahorra 30-60s por hoja. |
+| `--sin-imagen` | Omite los PNG. **No lo uses**: la entrega lleva imagen y Excel. Solo si el pedido dice que no quiere la imagen. |
 | `--nombre` | Nombre del archivo de salida. |
 
 Varios clientes van a **un solo Excel con una hoja cada uno**, no a un archivo
 por cliente: así el lote viaja como un adjunto y las hojas se comparan entre sí.
+
+### Rango por defecto
+
+**No pases ningún flag de rango salvo que el pedido lo diga.** Sin flags, la
+ventana es **el año pasado completo más el año en curso hasta hoy** — al 12/08/2026,
+del `2025-01-01` al `2026-08-12`.
+
+Es el default porque hace legible la comparación interanual: un año cerrado
+contra el mismo tramo del actual. Una ventana móvil de 12 meses parte los dos
+años por la mitad y las columnas `Total AAAA` dejan de significar algo.
+
+Solo usá `--meses`, `--anios` o `--desde/--hasta` cuando el pedido nombre un
+período distinto ("los últimos 6 meses", "2024 y 2025", "de marzo a junio").
 
 Devuelve un JSON en stdout:
 
@@ -93,14 +106,42 @@ dice nada porque no hay nada que aclarar.
 
 ## Qué entregar
 
-Con **un cliente y hasta ~12 meses**: mandá la imagen PNG. Es el cuadro
-formateado, listo para leer en el teléfono.
+**Se mandan SIEMPRE los dos: la imagen Y el Excel.** No es uno u otro, y
+ninguno es opcional. Son dos entregables con funciones distintas:
 
-Con **varios clientes o ventanas largas** (2-3 años son 24-36 columnas de mes):
-mandá el **xlsx**. Esa imagen entra en el teléfono tan achicada que no se lee.
+- **PNG** — se lee de un vistazo en el teléfono, sin abrir nada. Ya trae adentro
+  el nombre del cliente, el período y la base de cálculo, así que se entiende
+  solo aunque lo reenvíen fuera de la conversación.
+- **xlsx** — es el documento de respaldo: se abre, se audita, se filtra, se
+  archiva. Es la fuente de cualquier número que el usuario después repita.
 
-La imagen ya trae adentro el nombre del cliente, el período y la base de
-cálculo, así que se entiende sola aunque la reenvíen fuera de la conversación.
+Mandar solo uno es entregar a medias. Mandar solo texto describiendo los
+números, peor.
+
+**Nunca corras con `--sin-imagen`** salvo que el pedido diga explícitamente que
+no quiere la imagen. El PNG cuesta 30-60s por hoja: avisale al usuario que lo
+estás generando en vez de dejarlo esperando en silencio.
+
+Para adjuntarlos, poné **una línea `MEDIA:` por archivo**, cada una con la ruta
+absoluta tal cual vino en el JSON — `png` de cada entrada de `hojas`, y `xlsx`:
+
+```
+MEDIA:/ruta/exacta/que/devolvio/el/json.png
+MEDIA:/ruta/exacta/que/devolvio/el/json.xlsx
+```
+
+Ese es el mecanismo nativo del canal y manda los archivos como adjuntos. **No
+llames a ningún bridge por `curl`** para entregar este informe.
+
+Con varias hojas hay un PNG por hoja: mandalos todos, más el único xlsx que
+las contiene a todas.
+
+Única excepción: si el PNG salió con las celdas en `###` (ver Errores
+frecuentes), esa imagen no se manda y se avisa — pero el xlsx va igual.
+
+Acompañá los adjuntos con dos o tres líneas de texto: el total general, el
+período exacto y, si `sin_datos` no vino vacío, los clientes que no tuvieron
+ventas.
 
 ## Cómo leer el cuadro
 

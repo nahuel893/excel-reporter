@@ -45,8 +45,11 @@ class HistoricoClienteResult:
     registros_procesados: int
 
 
+# Los bultos se MUESTRAN enteros, pero el valor guardado conserva sus
+# decimales: el formato es de presentacion y nunca se redondea en Python.
+# Redondear haria que el xlsx dejara de coincidir con la base.
 _STYLE = SheetStyle(
-    numeric_format="#,##0.##",
+    numeric_format="#,##0",
     column_formats={},
     as_table=True,
     table_style="TableStyleMedium9",
@@ -60,7 +63,7 @@ _STYLE = SheetStyle(
 # plus slack, which on a 12-month sheet wastes most of the horizontal space in
 # the WhatsApp capture. `_apply_compact_layout` sets every width explicitly.
 _GROUPED_STYLE = SheetStyle(
-    numeric_format="#,##0.##",
+    numeric_format="#,##0",
     column_formats={},
     as_table=False,
     auto_width=False,
@@ -506,12 +509,15 @@ def _width_for_column(ws, idx: int, desde: int = 1) -> float:
 
 
 def _formato_visible(value) -> str:
-    """Render a cell value the way the '#,##0.##' number format shows it."""
+    """Render a cell value the way the '#,##0' number format shows it.
+
+    Only for measuring column width — it must mirror what the sheet DISPLAYS,
+    not what it stores. The stored value keeps every decimal.
+    """
     if value is None:
         return ""
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        texto = f"{value:,.2f}"
-        return texto.rstrip("0").rstrip(".") if "." in texto else texto
+        return f"{value:,.0f}"
     return str(value)
 
 

@@ -26,6 +26,14 @@ def _cli():
 
 # ── Ventana de fechas ────────────────────────────────────────────────────────
 
+def test_ventana_sin_argumentos_cubre_anio_pasado_mas_el_actual():
+    """Sin --meses/--anios/--desde: 1-ene del año pasado hasta hoy."""
+    cli = _cli()
+    desde, hasta = cli.ventana(hoy=date(2026, 8, 12))
+    assert desde == "2025-01-01"
+    assert hasta == "2026-08-12"
+
+
 def test_ventana_por_defecto_cubre_12_meses_hasta_hoy():
     cli = _cli()
     desde, hasta = cli.ventana(meses=12, hoy=date(2026, 8, 11))

@@ -76,6 +76,12 @@ def ventana(
     - ``anios``: whole calendar years, from January 1st of the earliest;
     - ``meses``: the last N months, current one included and partial.
 
+    With none of the three, the window is last calendar year plus the
+    current one to date (January 1st of ``hoy.year - 1`` through ``hoy``).
+    A full prior year is what makes the year-over-year comparison
+    readable; a rolling 12-month window splits both years in half and
+    the ``Total AAAA`` columns stop meaning anything.
+
     ``hasta`` never runs past today: projecting an in-progress year to
     December 31st would show empty months as if they were zero sales.
     """
@@ -92,7 +98,10 @@ def ventana(
             min(fin, hoy).isoformat(),
         )
 
-    total = (hoy.year * 12 + hoy.month - 1) - ((meses or 12) - 1)
+    if not meses:
+        return date(hoy.year - 1, 1, 1).isoformat(), hoy.isoformat()
+
+    total = (hoy.year * 12 + hoy.month - 1) - (meses - 1)
     anio, mes = divmod(total, 12)
     return f"{anio:04d}-{mes + 1:02d}-01", hoy.isoformat()
 

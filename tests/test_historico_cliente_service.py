@@ -457,7 +457,10 @@ def test_mes_con_valor_grande_ensancha_su_columna(tmp_path):
         "generico": ["CERVEZAS", "CERVEZAS"],
         "row_key": ["SALTA", "SALTA"],
         "mes": ["2026-01", "2026-02"],
-        "bultos": [1234.56, 2.0],
+        # Se muestra "123,457": mas ancho que el header "01/26", que es lo que
+        # obliga a la columna a crecer. Con #,##0 un valor de 4 digitos ya entra
+        # en el ancho del header y no discriminaria nada.
+        "bultos": [123456.78, 2.0],
     })
 
     service = HistoricoClienteService(data_loader=loader)
@@ -475,8 +478,8 @@ def test_mes_con_valor_grande_ensancha_su_columna(tmp_path):
     ancho_grande = ws.column_dimensions[get_column_letter(headers.index("01/26") + 1)].width
     ancho_chico = ws.column_dimensions[get_column_letter(headers.index("02/26") + 1)].width
 
-    # "1,234.56" is 8 chars at _FONT_SIZE; the column must hold it.
-    assert ancho_grande >= 8 * (_FONT_SIZE / 11)
+    # Se MUESTRA "123,457" (7 caracteres, formato #,##0); debe entrar completo.
+    assert ancho_grande >= len("123,457") * (_FONT_SIZE / 11)
     # The quiet month is not dragged along with it.
     assert ancho_chico <= _WIDTH_MES_MIN + 1
     assert ancho_chico < ancho_grande
@@ -790,6 +793,50 @@ def test_un_solo_anio_no_agrega_columna_redundante(tmp_path):
     """Within one calendar year the grand Total already is the year total."""
     ws = _grouped_workbook(tmp_path)  # ventana 2026-01..2026-02
     assert not [h for h in _headers(ws) if str(h).startswith("Total 20")]
+
+
+def test_numeros_se_muestran_sin_decimales(tmp_path):
+    """Every numeric cell carries the 0-decimal format."""
+    ws = _grouped_workbook(tmp_path)
+    headers = _headers(ws)
+    fila = _header_row(ws) + 1
+
+    for col in range(3, len(headers) + 1):  # de la primera columna de mes en adelante
+        celda = ws.cell(row=fila, column=col)
+        assert celda.number_format == "#,##0", (
+            f"{celda.coordinate} quedo en {celda.number_format!r}"
+        )
+
+
+def test_el_valor_guardado_conserva_sus_decimales(tmp_path):
+    """Displaying integers must NOT round the stored number.
+
+    The cell keeps the exact figure from the database; only its display is
+    integer. Rounding in Python would make the xlsx disagree with the source
+    and the column totals stop adding up.
+    """
+    loader = MagicMock(spec=DataLoader)
+    loader.get_ventas_historico_cliente.return_value = pd.DataFrame({
+        "id_cliente": [1], "id_sucursal": [1], "nombre_cliente": ["Cli A"],
+        "generico": ["CERVEZAS"], "row_key": ["SALTA"],
+        "mes": ["2026-01"], "bultos": [10.416667],
+    })
+
+    service = HistoricoClienteService(data_loader=loader)
+    config = _base_config(
+        clientes=[{"id_cliente": 1, "id_sucursal": 1}],
+        marcas=None, articulos=None, agrupar_por_generico=True,
+    )
+    with patch("src.services.historico_cliente.service.service_output_dir", return_value=tmp_path):
+        result = service.generar_reporte(config)
+
+    from openpyxl import load_workbook
+    ws = load_workbook(result.ruta_archivo).active
+    headers = _headers(ws)
+    valor = ws.cell(row=_header_row(ws) + 1, column=headers.index("01/26") + 1).value
+
+    assert valor == pytest.approx(10.416667), f"el valor se redondeo a {valor}"
+    assert valor != 10, "no debe guardarse el entero"
 
 
 def test_rango_captura_cubre_toda_la_hoja(tmp_path):
