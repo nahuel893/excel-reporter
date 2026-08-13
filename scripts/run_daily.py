@@ -55,8 +55,14 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from main import _run_reportes, _resolve_test_mode  # noqa: E402
-from config.settings import FERIADOS  # noqa: E402
+from config.settings import FERIADOS  # noqa: E402,F401  (lo usa periodos)
 from src.config.resolver import load_contacts, load_report_config  # noqa: E402
+from src.core.periodos import (  # noqa: E402
+    es_dia_habil,
+    es_primer_dia_habil_del_mes,
+    rango_mes_a_hoy,
+    rango_mes_completo,
+)
 
 
 def _refresh_mv_resumen_mensual() -> None:
@@ -113,73 +119,26 @@ RAM_MIN_MB_IMAGENES = 3000
 _MEMINFO_PATH = Path("/proc/meminfo")
 
 
+# La logica de ventanas vive en src/core/periodos.py para que `main.py --config`
+# la comparta. Estos wrappers conservan los nombres internos del daily y le
+# pasan SU `FERIADOS`: los tests parchean el del modulo, y con un alias directo
+# ese parche no llegaba a la funcion.
+
+
 def _is_business_day(value: date) -> bool:
-    """Return True when the date is not Sunday nor configured holiday."""
-    feriados = {datetime.strptime(raw, "%Y-%m-%d").date() for raw in FERIADOS}
-    return value.weekday() != 6 and value not in feriados
+    return es_dia_habil(value, FERIADOS)
 
 
 def _is_first_business_day_of_month(value: date) -> bool:
-    """Return True if the given date is the first business day of its month.
-
-    Note: the project's `_is_business_day` treats Saturday as a business
-    day (only Sundays + FERIADOS are excluded). So Aug 1 (Saturday) IS the
-    first business day of August — the function returns True. The
-    `mes_a_hoy`/`mes_completo` resolution then runs on the NEXT business
-    day (e.g. Monday Aug 3) when the daily actually fires, picking the
-    closed-previous-month window.
-    """
-    if not _is_business_day(value):
-        return False
-
-    cursor = value.replace(day=1)
-    while cursor < value:
-        if _is_business_day(cursor):
-            return False
-        cursor += timedelta(days=1)
-    return True
+    return es_primer_dia_habil_del_mes(value, FERIADOS)
 
 
 def _resolve_mes_a_hoy_range(hoy: date) -> tuple[str, str]:
-    """Resolve the date range for monthly daily reports.
-
-    Rule: on the first business day of a month, send the previous month closed.
-    Otherwise, keep the current month-to-date behavior.
-
-    NOTE: returns INCLUSIVE `fecha_hasta` (last day of the period). Report
-    consumers that use a half-open SQL bound (e.g. `fecha_comprobante <
-    :fecha_hasta`) MUST add one day to `fecha_hasta` (or use `mes_completo`,
-    which returns the already-exclusive bound).
-    """
-    if _is_first_business_day_of_month(hoy):
-        ultimo_dia_mes_anterior = hoy.replace(day=1) - timedelta(days=1)
-        primer_dia_mes_anterior = ultimo_dia_mes_anterior.replace(day=1)
-        return primer_dia_mes_anterior.isoformat(), ultimo_dia_mes_anterior.isoformat()
-
-    return hoy.replace(day=1).isoformat(), hoy.isoformat()
+    return rango_mes_a_hoy(hoy, FERIADOS)
 
 
 def _resolve_mes_completo_range(hoy: date) -> tuple[str, str]:
-    """Resolve the date range for monthly reports that use a half-open SQL
-    bound on `fecha_hasta` (e.g. `get_venta_mes`, which uses `<`).
-
-    Unlike `mes_a_hoy`, this returns fecha_hasta = FIRST day of the FOLLOWING
-    month (or tomorrow, when today is in the current month) — the exclusive
-    upper bound — so the period truly INCLUDES the last day of the reported
-    month (or today).
-    """
-    if _is_first_business_day_of_month(hoy):
-        # Closed previous month: [1st prev, 1st of current) — exclusive
-        # upper bound = 1st of current month.
-        primer_dia_mes_anterior = hoy.replace(day=1) - timedelta(days=1)
-        primer_dia_mes_anterior = primer_dia_mes_anterior.replace(day=1)
-        return (
-            primer_dia_mes_anterior.isoformat(),
-            hoy.replace(day=1).isoformat(),
-        )
-    # Current month to-date: [1st of this month, tomorrow) — exclusive
-    # upper bound = tomorrow (so today IS included).
-    return hoy.replace(day=1).isoformat(), (hoy + timedelta(days=1)).isoformat()
+    return rango_mes_completo(hoy, FERIADOS)
 
 
 @dataclass(frozen=True)
