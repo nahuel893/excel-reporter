@@ -1,0 +1,30 @@
+{
+    "tipo": "volumen-cobertura",
+    "filtros": {
+        "fecha_desde": "2026-06-01",
+        "fecha_hasta": "2026-08-14",
+        "genericos": ["PERNOD RICARD"],
+        "sucursales_excluidas": [1],
+        "enviar_email": false,
+        "enviar_whatsapp": true,
+        "whatsapp_enviar_como": "ambos"
+    },
+    "reportes": [
+        {
+            "nombre": "PERNOD RICARD - Volumen y Cobertura Sucursales",
+            "capture_images": [
+                {
+                    "hoja": "Resumen",
+                    "rango": "A1:L20",
+                    "renderer": "libreoffice",
+                    "caption": "PERNOD RICARD — volumen y cobertura por sucursal"
+                }
+            ],
+            "enviar_a": {
+                "Nahuel Aguirre": {
+                    "via": ["whatsapp"]
+                }
+            }
+        }
+    ]
+}

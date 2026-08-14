@@ -1107,6 +1107,119 @@ class DataLoader:
             },
         )
 
+    def get_ventas_generico_cliente_mes(
+        self,
+        generico: str,
+        fecha_desde: str,
+        fecha_hasta: str,
+        id_fuerza_ventas: int = 1,
+        sucursales_excluidas: list[int] | None = None,
+        rutas_excluidas: list[tuple[int | None, int]] | None = None,
+    ) -> pd.DataFrame:
+        """Neto vendido de un generico por (sucursal, marca, cliente, mes), en
+        bultos Y hectolitros.
+
+        Mismo criterio que `get_ventas_cliente_marca_mes` — del que es hermano —
+        con dos diferencias: filtra por GENERICO en vez de por lista de marcas
+        (asi el informe no tiene que enumerar las 20 marcas de PERNOD RICARD a
+        mano y sobrevive a que el negocio agregue una), y devuelve tambien los
+        hectolitros.
+
+        Los hectolitros se calculan aca y no se leen de una columna: `fact_ventas`
+        no guarda el total, solo la cantidad; el factor vive en
+        `dim_articulo.factor_hectolitros` y es POR ARTICULO. Un articulo sin
+        factor aporta NULL, que en la suma de Postgres se ignora — por eso el
+        servicio tiene que denunciar los articulos sin factor en vez de confiar
+        en que el total cierra.
+
+        El neto se devuelve SIN filtrar por umbral: el umbral se aplica despues
+        de totalizar por cliente DENTRO del corte que se quiera medir. Agrupar
+        despues de filtrar cuenta como cubierto a quien compro y devolvio.
+
+        Args:
+            generico: valor exacto de `dim_articulo.generico`.
+            fecha_desde: primer dia del rango (inclusive).
+            fecha_hasta: ultimo dia del rango (inclusive).
+            id_fuerza_ventas: fuerza de ventas a considerar (1 = preventa).
+            sucursales_excluidas: sucursales fuera del universo (p.ej. CASA
+                CENTRAL, que tiene su propio circuito).
+            rutas_excluidas: pares ``(id_sucursal, id_ruta)``; ``None`` en la
+                sucursal aplica a todas. Tiene que ser EL MISMO conjunto que se
+                le pasa a `get_padron_activo`, o el peso sobre padron compara
+                universos distintos.
+
+        Returns:
+            DataFrame [id_sucursal, des_sucursal, marca, id_cliente, mes,
+            bultos, hectolitros] con `mes` como 'YYYY-MM'.
+        """
+        filtro_rutas, params_rutas = self._excluir_rutas_sql(rutas_excluidas)
+
+        filtro_suc = ""
+        params_suc: dict = {}
+        if sucursales_excluidas:
+            filtro_suc = "AND fv.id_sucursal <> ALL(:sucursales_excluidas)"
+            params_suc["sucursales_excluidas"] = list(sucursales_excluidas)
+
+        # LEFT JOIN a dim_cliente: solo aporta la ruta. Con INNER, un cliente sin
+        # ficha desapareceria de la cobertura sin dejar rastro.
+        query = f"""
+        SELECT
+            fv.id_sucursal                                   AS id_sucursal,
+            dv.des_sucursal                                  AS des_sucursal,
+            da.marca                                         AS marca,
+            fv.id_cliente                                    AS id_cliente,
+            to_char(fv.fecha_comprobante, 'YYYY-MM')         AS mes,
+            SUM(fv.cantidades_total)                         AS bultos,
+            SUM(fv.cantidades_total * da.factor_hectolitros) AS hectolitros
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo da
+          ON fv.id_articulo = da.id_articulo
+        JOIN gold.dim_vendedor dv
+          ON fv.id_vendedor = dv.id_vendedor
+         AND fv.id_sucursal = dv.id_sucursal
+        LEFT JOIN gold.dim_cliente dc
+          ON fv.id_cliente = dc.id_cliente
+         AND fv.id_sucursal = dc.id_sucursal
+        WHERE da.generico = :generico
+          AND fv.anulado = false
+          AND dv.id_fuerza_ventas = :id_fuerza_ventas
+          AND fv.fecha_comprobante >= :fecha_desde
+          AND fv.fecha_comprobante <= :fecha_hasta
+          {filtro_suc}
+          {filtro_rutas}
+        GROUP BY 1, 2, 3, 4, 5
+        """
+        return self.execute_query(
+            query,
+            {
+                "generico": generico,
+                "fecha_desde": fecha_desde,
+                "fecha_hasta": fecha_hasta,
+                "id_fuerza_ventas": id_fuerza_ventas,
+                **params_suc,
+                **params_rutas,
+            },
+        )
+
+    def get_articulos_sin_factor_hl(self, generico: str) -> pd.DataFrame:
+        """Articulos de un generico sin factor de hectolitros cargado.
+
+        Sirve para denunciar el hueco en vez de entregar un total de HL corto:
+        `SUM` ignora los NULL, asi que sin este chequeo la columna cierra igual
+        y nadie se entera de que falta media marca.
+
+        Returns:
+            DataFrame [id_articulo, des_articulo, marca].
+        """
+        query = """
+        SELECT da.id_articulo, da.des_articulo, da.marca
+        FROM gold.dim_articulo da
+        WHERE da.generico = :generico
+          AND (da.factor_hectolitros IS NULL OR da.factor_hectolitros = 0)
+        ORDER BY da.marca, da.id_articulo
+        """
+        return self.execute_query(query, {"generico": generico})
+
     def get_ventas_articulo_cliente_mes(
         self,
         marca: str,

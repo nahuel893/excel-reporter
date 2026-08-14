@@ -257,6 +257,7 @@ def merge_filters(
         "todos_los_articulos": global_f.todos_los_articulos,
         "dias_stock": global_f.dias_stock,
         "genericos_excluidos": global_f.genericos_excluidos,
+        "sucursales_excluidas": global_f.sucursales_excluidas,
         "lista_precios_path": global_f.lista_precios_path,
         "fecha_stock": global_f.fecha_stock,
         "lista_precios_max_dias": global_f.lista_precios_max_dias,

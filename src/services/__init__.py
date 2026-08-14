@@ -19,3 +19,4 @@ __all__ = [
     "SubdistribuidoresConfig", "SubdistribuidoresResult", "SubdistribuidoresService",
     "CupoDesagregadoConfig", "CupoDesagregadoResult", "CupoDesagregadoService",
 ]
+from src.services.volumen_cobertura import VolumenCoberturaConfig, VolumenCoberturaResult, VolumenCoberturaService

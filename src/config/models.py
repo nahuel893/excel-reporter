@@ -110,6 +110,10 @@ class GlobalFilters(BaseModel):
     # stock-badie / stock-valorizado: genericos que NO forman parte del informe
     # (envases, marketing, equipos de frio, dispensers — no son articulos de venta).
     genericos_excluidos: list[str] | None = None
+    # volumen-cobertura: sucursales que quedan FUERA del informe, por id.
+    # CASA CENTRAL (1) suele excluirse porque tiene su propio circuito y su
+    # volumen tapa al del interior.
+    sucursales_excluidas: list[int] | None = None
     # stock-valorizado: xlsx exportado del ERP con la lista de precios de
     # referencia (columnas "Articulo" y "Precio Base"). No hay precio en gold,
     # asi que sin este archivo no hay valorizacion.
@@ -211,7 +215,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "incentivo-salta", "stock-badie", "stock-valorizado", "cupo-desagregado", "comparativo-salta", "cobertura", "cobertura-cupos", "cobertura-aguas", "quesos"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "incentivo-salta", "stock-badie", "stock-valorizado", "cupo-desagregado", "comparativo-salta", "cobertura", "cobertura-cupos", "cobertura-aguas", "quesos", "volumen-cobertura"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

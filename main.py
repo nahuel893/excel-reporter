@@ -92,6 +92,7 @@ REPORT_HANDLERS: dict[str, str] = {
     "cobertura-cupos": "_run_cobertura_cupos_report",
     "cobertura-aguas": "_run_cobertura_aguas_report",
     "quesos": "_run_quesos_report",
+    "volumen-cobertura": "_run_volumen_cobertura_report",
 }
 
 
@@ -942,6 +943,51 @@ def _run_quesos_report(report, merged: dict) -> list[tuple[Path, dict]]:
         print(f"  - OJO articulos sin factor (bultos si, kilos no): {result.sin_factor}")
     return [(Path(result.ruta_archivo),
              {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")})]
+
+
+def _run_volumen_cobertura_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate volumen-cobertura report (volumen y cobertura de un generico).
+
+    El generico viene en `genericos` y tiene que ser UNO solo: el informe abre
+    por marca y cruza sucursal x marca, y mezclar dos genericos en esa matriz
+    da columnas que no se pueden comparar entre si.
+    """
+    from src.services.volumen_cobertura import (
+        VolumenCoberturaConfig,
+        VolumenCoberturaService,
+    )
+
+    genericos = merged.get("genericos") or []
+    if len(genericos) != 1:
+        print(
+            f"Error: volumen-cobertura necesita exactamente UN generico en "
+            f"'genericos'; llegaron {len(genericos)}: {genericos}"
+        )
+        return []
+
+    config = VolumenCoberturaConfig(
+        fecha_desde=merged["fecha_desde"],
+        fecha_hasta=merged["fecha_hasta"],
+        generico=genericos[0],
+        nombre_archivo=report.nombre,
+        sucursales_excluidas=merged.get("sucursales_excluidas") or [],
+    )
+
+    result = VolumenCoberturaService().generar_reporte(config)
+    print(f"Volumen y Cobertura '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Generico: {config.generico} | Meses: {', '.join(result.meses)}")
+    print(f"  - Sucursales con movimiento: {result.sucursales}")
+    print(
+        f"  - Acumulado: {result.bultos:,.2f} bultos | {result.hectolitros:,.2f} HL "
+        f"| {result.cobertura:,} clientes"
+    )
+    if result.articulos_sin_factor:
+        print(
+            f"  - ATENCION: {len(result.articulos_sin_factor)} articulos sin factor "
+            f"de hectolitros; la columna HL sale corta"
+        )
+    return [(result.ruta_archivo, {"_tipo": "volumen-cobertura"})]
 
 
 def _run_cobertura_aguas_report(report, merged: dict) -> list[tuple[Path, dict]]:
