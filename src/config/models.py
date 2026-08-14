@@ -120,6 +120,13 @@ class GlobalFilters(BaseModel):
     # 14 y es el supraconjunto de los otros), y con un mapa asi los subtotales
     # suman dos veces la misma sucursal. El servicio lo verifica y rompe.
     supervisores_sucursales: dict[str, list[str]] | None = None
+    # volumen-cobertura: si True, la ruta DIRECTA (100) entra en el informe.
+    # DIRECTA son entregas sin visita de preventista. Con False el informe mide
+    # "que hizo la fuerza de venta"; con True mide "cuanto salio de la sucursal"
+    # y ademas concilia exacto con gold.cob_* (que no la excluye).
+    # El flag mueve ventas Y padron a la vez: son el numerador y el denominador
+    # del % s/ padron y tienen que salir del mismo universo.
+    incluir_directa: bool = False
     # stock-valorizado: xlsx exportado del ERP con la lista de precios de
     # referencia (columnas "Articulo" y "Precio Base"). No hay precio en gold,
     # asi que sin este archivo no hay valorizacion.

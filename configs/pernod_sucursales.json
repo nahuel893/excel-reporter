@@ -3,8 +3,13 @@
     "filtros": {
         "fecha_desde": "2026-06-01",
         "fecha_hasta": "2026-08-14",
-        "genericos": ["PERNOD RICARD"],
-        "sucursales_excluidas": [1],
+        "genericos": [
+            "PERNOD RICARD"
+        ],
+        "sucursales_excluidas": [
+            1
+        ],
+        "incluir_directa": true,
         "_supervisores_nota": "Tomado de configs/ventas.json. Walter Vilte NO va: tiene las 14 sucursales y es el supraconjunto de los otros, asi que su bloque duplicaria todo — su total ES el TOTAL GENERAL. Antonio Cabrerizo tampoco: solo tiene CASA CENTRAL, que este informe excluye. Garcia + Yapura particionan exacto el interior.",
         "supervisores_sucursales": {
             "Adrian Garcia": [
@@ -42,7 +47,9 @@
             ],
             "enviar_a": {
                 "Nahuel Aguirre": {
-                    "via": ["whatsapp"]
+                    "via": [
+                        "whatsapp"
+                    ]
                 }
             }
         }

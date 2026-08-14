@@ -972,6 +972,7 @@ def _run_volumen_cobertura_report(report, merged: dict) -> list[tuple[Path, dict
         nombre_archivo=report.nombre,
         sucursales_excluidas=merged.get("sucursales_excluidas") or [],
         supervisores_sucursales=merged.get("supervisores_sucursales") or {},
+        incluir_directa=bool(merged.get("incluir_directa")),
     )
 
     result = VolumenCoberturaService().generar_reporte(config)

@@ -32,6 +32,7 @@ from src.services.base_service import BaseService
 
 from .constants import (
     ETIQUETA_TOTAL,
+    RUTA_DIRECTA,
     ID_FUERZA_VENTAS_PREVENTA,
     RUTAS_EXCLUIDAS,
     UMBRAL_COBERTURA,
@@ -82,6 +83,7 @@ class VolumenCoberturaConfig:
     nombre_archivo: str
     sucursales_excluidas: list[int] = field(default_factory=list)
     supervisores_sucursales: dict[str, list[str]] = field(default_factory=dict)
+    incluir_directa: bool = False
     output_dir: str | None = None
 
 
@@ -111,7 +113,10 @@ class VolumenCoberturaService(BaseService):
     # --- datos --------------------------------------------------------------
 
     def _traer(self, config: VolumenCoberturaConfig) -> tuple[pd.DataFrame, pd.DataFrame, list[int]]:
-        rutas = list(RUTAS_EXCLUIDAS)
+        # El MISMO conjunto de rutas para ventas y para padron: son numerador y
+        # denominador del % s/ padron.
+        rutas = [r for r in RUTAS_EXCLUIDAS
+                 if not (config.incluir_directa and r == RUTA_DIRECTA)]
         ventas = self.data_loader.get_ventas_generico_cliente_mes(
             generico=config.generico,
             fecha_desde=config.fecha_desde,
@@ -441,14 +446,21 @@ class VolumenCoberturaService(BaseService):
             ("", ""),
             ("Fuerza de ventas", f"id_fuerza_ventas = {ID_FUERZA_VENTAS_PREVENTA} (preventa)"),
             ("", "con este filtro el conteo reproduce gold.cob_sucursal_* exacto"),
-            ("Rutas excluidas", "DIRECTA (100) en todas las sucursales; CHOPERAS (200) en CASA CENTRAL"),
-            ("", "DIRECTA no es un preventista: son entregas sin visita. Sacarla baja"),
-            ("", "la cobertura y el padron por igual, asi el % compara el mismo universo."),
+            ("Ruta DIRECTA (100)", "INCLUIDA" if config.incluir_directa else "EXCLUIDA"),
+            ("", "DIRECTA son entregas sin visita de preventista. Incluida, el informe"),
+            ("", "mide cuanto salio de la sucursal; excluida, que hizo la fuerza de venta."),
+            ("", "El flag mueve ventas Y padron: son numerador y denominador del %."),
+            ("Otras rutas excluidas", "CHOPERAS (200) en CASA CENTRAL"),
             ("Sucursales excluidas", str(config.sucursales_excluidas) or "ninguna"),
             ("", ""),
-            ("Contra gold.cob_*", "SIN excluir rutas este calculo reproduce cob_sucursal_generico"),
-            ("", "EXACTO en un mes cerrado (julio-2026 PERNOD: 726 contra 726)."),
-            ("", "Un mes ABIERTO puede diferir: cob_* es la foto que dejo la ultima"),
+            ("Contra gold.cob_*", (
+                "con DIRECTA incluida este calculo reproduce cob_sucursal_generico "
+                "EXACTO en un mes cerrado (julio-2026 PERNOD: 726 contra 726)."
+                if config.incluir_directa else
+                "cob_sucursal_generico NO excluye DIRECTA, asi que da un poco mas "
+                "que este informe (julio-2026 PERNOD: 726 contra 712)."
+            )),
+            ("", "Un mes ABIERTO difiere igual: cob_* es la foto que dejo la ultima"),
             ("", "corrida del ETL y fact_ventas ya tiene las ventas posteriores."),
             ("Padron", "gold.dim_cliente con anulado = false, mismas rutas excluidas"),
             ("", "es SCD tipo 1: foto de HOY, no del mes medido"),

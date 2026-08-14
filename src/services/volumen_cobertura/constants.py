@@ -11,8 +11,12 @@ ID_CASA_CENTRAL = 1
 # son entregas sin visita, y contarlas infla la cobertura y el padron con
 # clientes que ninguna ruta persigue. VENDEDOR CHOPERAS (200) solo existe en
 # CASA CENTRAL.
+# DIRECTA en todas las sucursales. Se saca por separado porque es la unica que
+# el informe puede volver a meter (filtro `incluir_directa`).
+RUTA_DIRECTA: tuple[int | None, int] = (None, 100)
+
 RUTAS_EXCLUIDAS: tuple[tuple[int | None, int], ...] = (
-    (None, 100),
+    RUTA_DIRECTA,
     (ID_CASA_CENTRAL, 200),
 )
 

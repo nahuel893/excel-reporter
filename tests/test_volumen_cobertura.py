@@ -10,7 +10,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from src.services.volumen_cobertura.constants import RUTAS_EXCLUIDAS, etiqueta_mes
+from src.services.volumen_cobertura.constants import (
+    RUTA_DIRECTA,
+    RUTAS_EXCLUIDAS,
+    etiqueta_mes,
+)
 from src.services.volumen_cobertura.processor import (
     clientes_cubiertos,
     construir_bloques,
@@ -317,9 +321,23 @@ def test_la_matriz_marca_con_cero_lo_que_no_llego():
 
 # --- criterio ---------------------------------------------------------------
 
-def test_se_excluye_la_ruta_directa_en_todas_las_sucursales():
-    """DIRECTA no es un preventista: infla cobertura y padron por igual."""
-    assert (None, 100) in RUTAS_EXCLUIDAS
+def test_directa_se_excluye_por_defecto_y_es_la_unica_reversible():
+    """El informe puede volver a meterla con `incluir_directa`; CHOPERAS no."""
+    assert RUTA_DIRECTA == (None, 100)
+    assert RUTA_DIRECTA in RUTAS_EXCLUIDAS
+
+
+def test_incluir_directa_mueve_ventas_y_padron_juntos():
+    """Si moviera solo el numerador, el % s/ padron compararia universos distintos."""
+    import inspect
+
+    from src.services.volumen_cobertura.service import VolumenCoberturaService
+
+    fuente = inspect.getsource(VolumenCoberturaService._traer)
+    assert "rutas_excluidas=rutas" in fuente
+    assert fuente.count("rutas_excluidas=rutas") == 2, (
+        "el mismo conjunto de rutas tiene que ir a las ventas y al padron"
+    )
 
 
 def test_etiqueta_de_mes():
