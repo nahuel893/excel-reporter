@@ -358,3 +358,46 @@ def test_el_config_de_pernod_es_valido():
     assert "Walter Vilte" not in mapa
     todas = [s for sucs in mapa.values() for s in sucs]
     assert len(todas) == len(set(todas)), "el mapa tiene que ser una particion"
+
+
+# --- split por sucursal -----------------------------------------------------
+
+def test_el_split_reparte_sin_perder_ni_duplicar():
+    """La suma de las partes tiene que dar el consolidado, en las tres medidas.
+
+    Es la propiedad que hace confiable mandarle a cada sucursal lo suyo: si no
+    cierra, alguien recibe un numero que no existe en el informe grande.
+    """
+    v = _ventas([
+        (3, "CAFAYATE", "ABSOLUT", 7, "2026-07", 5.0, 0.4),
+        (5, "METAN", "ABSOLUT", 9, "2026-07", 50.0, 4.0),
+        (5, "METAN", "CHIVAS REGAL", 9, "2026-08", 20.0, 1.0),
+        (14, "LA QUIACA", "BUHERO", 11, "2026-07", 20.0, 1.0),
+    ])
+    padron = _padron([(3, 10), (5, 10), (14, 10)])
+    total = fila_total(v, padron, "des_sucursal")
+
+    partes = [
+        fila_total(v[v["des_sucursal"] == s], padron, "des_sucursal")
+        for s in v["des_sucursal"].unique()
+    ]
+    assert sum(p["bultos_acum"] for p in partes) == pytest.approx(total["bultos_acum"])
+    assert sum(p["hl_acum"] for p in partes) == pytest.approx(total["hl_acum"])
+    # La cobertura cierra porque entre sucursales SI es aditiva. METAN tiene un
+    # cliente que compro en los dos meses: en su parte cuenta 1, no 2.
+    assert sum(p["cob_acum"] for p in partes) == total["cob_acum"] == 3
+
+
+def test_cada_parte_ve_el_universo_completo_de_marcas():
+    """Cada sucursal tiene que ver en gris lo que las OTRAS venden y ella no."""
+    v = _ventas([
+        (3, "CAFAYATE", "ABSOLUT", 7, "2026-07", 5.0, 0.4),
+        (5, "METAN", "CHIVAS REGAL", 9, "2026-07", 50.0, 4.0),
+    ])
+    universo = universo_marcas(v)
+    propias = v[v["des_sucursal"] == "CAFAYATE"]
+    bloques = construir_bloques(propias, "des_sucursal", "marca", universo)
+    _, filas, _ = bloques[0]
+    assert set(filas["marca"]) == {"ABSOLUT", "CHIVAS REGAL"}
+    assert filas.set_index("marca").loc["CHIVAS REGAL", "bultos_acum"] == 0.0
+

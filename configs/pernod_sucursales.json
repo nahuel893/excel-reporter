@@ -10,6 +10,7 @@
             1
         ],
         "incluir_directa": true,
+        "split_por_sucursal": true,
         "_supervisores_nota": "Tomado de configs/ventas.json. Walter Vilte NO va: tiene las 14 sucursales y es el supraconjunto de los otros, asi que su bloque duplicaria todo — su total ES el TOTAL GENERAL. Antonio Cabrerizo tampoco: solo tiene CASA CENTRAL, que este informe excluye. Garcia + Yapura particionan exacto el interior.",
         "supervisores_sucursales": {
             "Adrian Garcia": [
@@ -31,8 +32,9 @@
             ]
         },
         "enviar_email": false,
-        "enviar_whatsapp": true,
-        "whatsapp_enviar_como": "ambos"
+        "enviar_whatsapp": false,
+        "whatsapp_enviar_como": "ambos",
+        "_envio_nota": "enviar_whatsapp en false A PROPOSITO: con split_por_sucursal el pipeline corre una vez por ARCHIVO, asi que una corrida manda 13 mensajes (el consolidado + 12 sucursales). Para mandar algo puntual, usar el pipeline sobre el archivo ya generado en vez de prender este flag."
     },
     "reportes": [
         {

@@ -973,9 +973,11 @@ def _run_volumen_cobertura_report(report, merged: dict) -> list[tuple[Path, dict
         sucursales_excluidas=merged.get("sucursales_excluidas") or [],
         supervisores_sucursales=merged.get("supervisores_sucursales") or {},
         incluir_directa=bool(merged.get("incluir_directa")),
+        split_por_sucursal=bool(merged.get("split_por_sucursal")),
     )
 
-    result = VolumenCoberturaService().generar_reporte(config)
+    servicio = VolumenCoberturaService()
+    result = servicio.generar_reporte(config)
     print(f"Volumen y Cobertura '{report.nombre}' generado exitosamente:")
     print(f"  - Archivo: {result.ruta_archivo}")
     print(f"  - Generico: {config.generico} | Meses: {', '.join(result.meses)}")
@@ -989,7 +991,23 @@ def _run_volumen_cobertura_report(report, merged: dict) -> list[tuple[Path, dict
             f"  - ATENCION: {len(result.articulos_sin_factor)} articulos sin factor "
             f"de hectolitros; la columna HL sale corta"
         )
-    return [(result.ruta_archivo, {"_tipo": "volumen-cobertura"})]
+
+    artefactos = [(result.ruta_archivo, {"_tipo": "volumen-cobertura"})]
+
+    if config.split_por_sucursal:
+        # El split va DESPUES del consolidado y con el mismo servicio: comparte
+        # la conexion y el criterio, y si el consolidado fallo no tiene sentido
+        # generar doce archivos con el mismo problema.
+        partes = servicio.generar_split(config)
+        print(f"  - Split por sucursal: {len(partes)} archivos")
+        for parte in partes:
+            print(
+                f"      {parte.ruta_archivo.name}  "
+                f"({parte.bultos:,.2f} bultos | {parte.cobertura:,} clientes)"
+            )
+            artefactos.append((parte.ruta_archivo, {"_tipo": "volumen-cobertura"}))
+
+    return artefactos
 
 
 def _run_cobertura_aguas_report(report, merged: dict) -> list[tuple[Path, dict]]:

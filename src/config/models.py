@@ -127,6 +127,10 @@ class GlobalFilters(BaseModel):
     # El flag mueve ventas Y padron a la vez: son el numerador y el denominador
     # del % s/ padron y tienen que salir del mismo universo.
     incluir_directa: bool = False
+    # volumen-cobertura: si True, ademas del consolidado genera UN ARCHIVO POR
+    # SUCURSAL, para mandarle a cada una lo suyo. La base se consulta una sola
+    # vez y se reparte en memoria.
+    split_por_sucursal: bool = False
     # stock-valorizado: xlsx exportado del ERP con la lista de precios de
     # referencia (columnas "Articulo" y "Precio Base"). No hay precio en gold,
     # asi que sin este archivo no hay valorizacion.

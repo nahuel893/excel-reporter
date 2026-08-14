@@ -260,6 +260,7 @@ def merge_filters(
         "sucursales_excluidas": global_f.sucursales_excluidas,
         "supervisores_sucursales": global_f.supervisores_sucursales,
         "incluir_directa": global_f.incluir_directa,
+        "split_por_sucursal": global_f.split_por_sucursal,
         "lista_precios_path": global_f.lista_precios_path,
         "fecha_stock": global_f.fecha_stock,
         "lista_precios_max_dias": global_f.lista_precios_max_dias,

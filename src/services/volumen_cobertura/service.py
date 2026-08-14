@@ -84,6 +84,7 @@ class VolumenCoberturaConfig:
     sucursales_excluidas: list[int] = field(default_factory=list)
     supervisores_sucursales: dict[str, list[str]] = field(default_factory=dict)
     incluir_directa: bool = False
+    split_por_sucursal: bool = False
     output_dir: str | None = None
 
 
@@ -474,6 +475,85 @@ class VolumenCoberturaService(BaseService):
 
     # --- orquestacion -------------------------------------------------------
 
+    def generar_split(self, config: VolumenCoberturaConfig) -> list[VolumenCoberturaResult]:
+        """Un archivo por sucursal, para mandarle a cada una lo suyo.
+
+        Se consulta la base UNA vez y se reparte en memoria: doce consultas
+        identicas salvo el filtro serian doce veces el mismo trabajo, y ademas
+        podrian caer en momentos distintos y no cerrar entre si.
+
+        Cada archivo trae la apertura por marca de esa sucursal con las que NO
+        vendio en gris, y el Criterio. No lleva la matriz sucursal x marca —
+        con una sola sucursal es una fila— ni el bloque por supervisor.
+        """
+        ventas, padron, sin_factor = self._traer(config)
+        if ventas.empty:
+            raise ValueError(
+                f"{config.generico}: sin ventas entre {config.fecha_desde} y "
+                f"{config.fecha_hasta} con el criterio del informe."
+            )
+
+        meses = meses_con_movimiento(ventas)
+        # El universo de marcas sale del TOTAL, no de cada sucursal: la gracia
+        # es que cada una vea en gris lo que las otras si venden.
+        universo = universo_marcas(ventas)
+        base = self._subtitulo_base(config, meses)
+
+        resultados: list[VolumenCoberturaResult] = []
+        orden = (
+            ventas.groupby("des_sucursal")["bultos"].sum().sort_values(ascending=False).index
+        )
+        for sucursal in orden:
+            propias = ventas[ventas["des_sucursal"] == sucursal]
+            wb = Workbook()
+            wb.remove(wb.active)
+
+            total = fila_total(propias, pd.DataFrame(), "marca")
+            self._hoja_bloques(
+                wb, "Resumen",
+                f"{config.generico} — {sucursal}",
+                base + " | Gris = la marca no llego a esta sucursal, pero si a otras",
+                construir_bloques(propias, "des_sucursal", "marca", universo),
+                None, total, meses,
+                etiqueta_dim="Marca", dimension="marca", con_padron=False,
+            )
+            self._hoja_criterio(wb, config, meses, sin_factor)
+
+            # Nombre corto: el archivo lo abre la sucursal, no hace falta que
+            # arrastre el titulo largo del consolidado.
+            ruta = self._guardar(wb, config, f"{config.generico} - {sucursal}")
+            fila_suc = fila_total(propias, padron, "des_sucursal")
+            resultados.append(VolumenCoberturaResult(
+                ruta_archivo=ruta,
+                meses=meses,
+                sucursales=1,
+                bultos=float(fila_suc["bultos_acum"]),
+                hectolitros=float(fila_suc["hl_acum"]),
+                cobertura=int(fila_suc["cob_acum"]),
+                articulos_sin_factor=sin_factor,
+            ))
+            logger.info("split: %s -> %s", sucursal, ruta.name)
+
+        return resultados
+
+    def _subtitulo_base(self, config: VolumenCoberturaConfig, meses: list[str]) -> str:
+        etiquetas = ", ".join(etiqueta_mes(m) for m in meses)
+        return (
+            f"Cobertura = clientes distintos con neto > 0 | Ventana {config.fecha_desde} a "
+            f"{config.fecha_hasta} | Meses con movimiento: {etiquetas} | "
+            f"El acumulado se mide sobre la ventana completa, NO es la suma de los meses"
+        )
+
+    def _guardar(self, wb: Workbook, config: VolumenCoberturaConfig, nombre: str) -> Path:
+        output_dir = (
+            Path(config.output_dir) if config.output_dir
+            else service_output_dir(self.SERVICE_SLUG, config.fecha_desde, "month")
+        )
+        output_dir.mkdir(parents=True, exist_ok=True)
+        ruta = output_dir / f"{nombre}.xlsx"
+        wb.save(str(ruta))
+        return ruta
+
     def generar_reporte(self, config: VolumenCoberturaConfig) -> VolumenCoberturaResult:
         ventas, padron, sin_factor = self._traer(config)
         if ventas.empty:
@@ -484,12 +564,7 @@ class VolumenCoberturaService(BaseService):
             )
 
         meses = meses_con_movimiento(ventas)
-        etiquetas = ", ".join(etiqueta_mes(m) for m in meses)
-        base = (
-            f"Cobertura = clientes distintos con neto > 0 | Ventana {config.fecha_desde} a "
-            f"{config.fecha_hasta} | Meses con movimiento: {etiquetas} | "
-            f"El acumulado se mide sobre la ventana completa, NO es la suma de los meses"
-        )
+        base = self._subtitulo_base(config, meses)
 
         por_suc = construir_tabla(ventas, padron, "des_sucursal")
         total_suc = fila_total(ventas, padron, "des_sucursal")
@@ -550,13 +625,7 @@ class VolumenCoberturaService(BaseService):
         )
         self._hoja_criterio(wb, config, meses, sin_factor)
 
-        output_dir = (
-            Path(config.output_dir) if config.output_dir
-            else service_output_dir(self.SERVICE_SLUG, config.fecha_desde, "month")
-        )
-        output_dir.mkdir(parents=True, exist_ok=True)
-        ruta = output_dir / f"{config.nombre_archivo}.xlsx"
-        wb.save(str(ruta))
+        ruta = self._guardar(wb, config, config.nombre_archivo)
 
         return VolumenCoberturaResult(
             ruta_archivo=ruta,
