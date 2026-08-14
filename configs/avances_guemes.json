@@ -10,7 +10,8 @@
         "enviar_email": true,
         "enviar_whatsapp": false,
         "email_adjuntos": ["excel"],
-        "esperar_objetivo": true
+        "esperar_objetivo": true,
+        "skip_cupos": true
     },
     "reportes": [
         {
