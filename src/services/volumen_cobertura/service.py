@@ -5,7 +5,8 @@ Cuatro hojas:
     Resumen           una fila por sucursal, un bloque de columnas por mes
                       (Bultos / HL / Cobertura) y el acumulado de la ventana.
                       Es la que se captura como imagen.
-    Por Marca         lo mismo abierto por marca del generico.
+    Por Marca         un bloque por sucursal con sus marcas adentro y un subtotal
+                      al pie, mas el consolidado de todas al final.
     Sucursal x Marca  matriz de bultos del acumulado: que marca entro donde.
     Criterio          como se conto cada numero, para auditarlo sin preguntar.
 
@@ -37,6 +38,7 @@ from .constants import (
     etiqueta_mes,
 )
 from .processor import (
+    construir_bloques,
     construir_tabla,
     fila_total,
     matriz_sucursal_marca,
@@ -49,11 +51,15 @@ logger = logging.getLogger(__name__)
 HEADER_FILL = "2E75B6"      # encabezado de columna
 BANDA_FILL = "DDEBF7"       # banda que agrupa el bloque de cada mes
 ACUM_FILL = "FFF2CC"        # bloque acumulado: es un subtotal, no un mes mas
+SUBTOTAL_FILL = "D9E1F2"    # subtotal de cada bloque de sucursal
 TOTAL_FILL = "FFE08A"       # TOTAL GENERAL
 ZEBRA_FILL = "F7F9FC"
 FUENTE_HEADER = "FFFFFF"
 FUENTE_SUBTITULO = "546E7A"
 BORDE = Side(style="thin", color="D9D9D9")
+# Grueso solo en los limites de cada bloque de mes. Con todo del mismo grosor el
+# ojo se cruza de mes al recorrer una fila de 12 columnas numericas.
+BORDE_BLOQUE = Side(style="medium", color="8EA9DB")
 
 FMT_BULTOS = "#,##0"
 FMT_HL = "#,##0.00"
@@ -160,6 +166,30 @@ class VolumenCoberturaService(BaseService):
         bloques.append(("ACUMULADO", acum))
         return bloques
 
+    def _mapa_bordes(self, bloques_col) -> dict[int, tuple[Side, Side]]:
+        """columna -> (lado izquierdo, lado derecho).
+
+        El borde grueso cae en el primer y el ultimo campo de cada bloque de
+        mes, y encierra tambien la columna de etiquetas.
+        """
+        mapa: dict[int, tuple[Side, Side]] = {1: (BORDE_BLOQUE, BORDE_BLOQUE)}
+        col = 2
+        for _, cols in bloques_col:
+            ini, fin = col, col + len(cols) - 1
+            for j in range(ini, fin + 1):
+                mapa[j] = (
+                    BORDE_BLOQUE if j == ini else BORDE,
+                    BORDE_BLOQUE if j == fin else BORDE,
+                )
+            col = fin + 1
+        return mapa
+
+    @staticmethod
+    def _borde(mapa: dict[int, tuple[Side, Side]], col: int,
+               arriba: Side = BORDE, abajo: Side = BORDE) -> Border:
+        izq, der = mapa.get(col, (BORDE, BORDE))
+        return Border(left=izq, right=der, top=arriba, bottom=abajo)
+
     def _hoja_tabla(
         self, wb: Workbook, nombre: str, titulo: str, subtitulo: str,
         etiqueta_dim: str, dimension: str,
@@ -171,6 +201,7 @@ class VolumenCoberturaService(BaseService):
         self._titulo(ws, titulo, subtitulo, n_cols)
 
         fila_banda, fila_header, fila_datos = 4, 5, 6
+        mapa = self._mapa_bordes(bloques)
 
         # Banda de agrupacion: un bloque por mes + el acumulado.
         col = 2
@@ -181,7 +212,12 @@ class VolumenCoberturaService(BaseService):
             c.fill = PatternFill("solid", fgColor=ACUM_FILL if etiqueta == "ACUMULADO" else BANDA_FILL)
             c.font = Font(bold=True, size=10)
             c.alignment = Alignment(horizontal="center")
+            # El borde va celda por celda: en una combinada, openpyxl solo
+            # dibuja el de la esquina y el bloque queda abierto a la derecha.
+            for j in range(ini, fin + 1):
+                ws.cell(fila_banda, j).border = self._borde(mapa, j, arriba=BORDE_BLOQUE)
             col = fin + 1
+        ws.cell(fila_banda, 1).border = self._borde(mapa, 1, arriba=BORDE_BLOQUE)
 
         # Encabezados
         planas: list[tuple[str, str, str]] = [(etiqueta_dim, dimension, "")]
@@ -192,7 +228,7 @@ class VolumenCoberturaService(BaseService):
             c.fill = PatternFill("solid", fgColor=HEADER_FILL)
             c.font = Font(bold=True, color=FUENTE_HEADER)
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            c.border = Border(left=BORDE, right=BORDE, top=BORDE, bottom=BORDE)
+            c.border = self._borde(mapa, j)
 
         # Datos
         r = fila_datos
@@ -206,7 +242,7 @@ class VolumenCoberturaService(BaseService):
                     c.number_format = fmt
                 if i % 2:
                     c.fill = PatternFill("solid", fgColor=ZEBRA_FILL)
-                c.border = Border(left=BORDE, right=BORDE, top=BORDE, bottom=BORDE)
+                c.border = self._borde(mapa, j)
             r += 1
 
         # TOTAL GENERAL
@@ -216,13 +252,104 @@ class VolumenCoberturaService(BaseService):
                 c.number_format = fmt
             c.fill = PatternFill("solid", fgColor=TOTAL_FILL)
             c.font = Font(bold=True)
-            c.border = Border(left=BORDE, right=BORDE, top=BORDE, bottom=BORDE)
+            c.border = self._borde(mapa, j, arriba=BORDE_BLOQUE, abajo=BORDE_BLOQUE)
 
         ws.column_dimensions["A"].width = 30
         for j in range(2, len(planas) + 1):
             ws.column_dimensions[get_column_letter(j)].width = 12
         ws.freeze_panes = ws.cell(fila_datos, 2)
         ws.auto_filter.ref = f"A{fila_header}:{get_column_letter(len(planas))}{r - 1}"
+        return ws
+
+    def _hoja_bloques(
+        self, wb: Workbook, nombre: str, titulo: str, subtitulo: str,
+        bloques: list[tuple[str, pd.DataFrame, dict]],
+        consolidado: tuple[pd.DataFrame, dict],
+        total: dict, meses: list[str],
+    ):
+        """Un bloque por sucursal con sus marcas adentro, y al final el
+        consolidado de todas."""
+        ws = wb.create_sheet(nombre)
+        bloques_col = self._bloques(meses, con_padron=False)
+        planas: list[tuple[str, str, str]] = [("Marca", "marca", "")]
+        for _, cols in bloques_col:
+            planas += cols
+        self._titulo(ws, titulo, subtitulo, len(planas))
+
+        fila_banda, fila_header = 4, 5
+        mapa = self._mapa_bordes(bloques_col)
+        col = 2
+        for etiqueta, cols in bloques_col:
+            ini, fin = col, col + len(cols) - 1
+            ws.merge_cells(start_row=fila_banda, start_column=ini, end_row=fila_banda, end_column=fin)
+            c = ws.cell(fila_banda, ini, etiqueta)
+            c.fill = PatternFill("solid", fgColor=ACUM_FILL if etiqueta == "ACUMULADO" else BANDA_FILL)
+            c.font = Font(bold=True, size=10)
+            c.alignment = Alignment(horizontal="center")
+            # Celda por celda: en una combinada openpyxl solo dibuja el borde de
+            # la esquina y el bloque queda abierto a la derecha.
+            for j in range(ini, fin + 1):
+                ws.cell(fila_banda, j).border = self._borde(mapa, j, arriba=BORDE_BLOQUE)
+            col = fin + 1
+        ws.cell(fila_banda, 1).border = self._borde(mapa, 1, arriba=BORDE_BLOQUE)
+
+        for j, (titulo_col, _, _) in enumerate(planas, start=1):
+            c = ws.cell(fila_header, j, titulo_col)
+            c.fill = PatternFill("solid", fgColor=HEADER_FILL)
+            c.font = Font(bold=True, color=FUENTE_HEADER)
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            c.border = self._borde(mapa, j)
+
+        def _escribir(registro, r: int, fill: str | None, negrita: bool,
+                      abajo: Side = BORDE) -> None:
+            for j, (_, clave, fmt) in enumerate(planas, start=1):
+                c = ws.cell(r, j, registro.get(clave))
+                if fmt:
+                    c.number_format = fmt
+                if fill:
+                    c.fill = PatternFill("solid", fgColor=fill)
+                if negrita:
+                    c.font = Font(bold=True)
+                c.border = self._borde(mapa, j, abajo=abajo)
+
+        r = fila_header + 1
+        for etiqueta, filas, subtotal in bloques:
+            # Cabecera de sucursal: banda celeste que abre el bloque.
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=len(planas))
+            c = ws.cell(r, 1, etiqueta)
+            c.fill = PatternFill("solid", fgColor=BANDA_FILL)
+            c.font = Font(bold=True)
+            for j in range(1, len(planas) + 1):
+                ws.cell(r, j).border = self._borde(mapa, j, arriba=BORDE_BLOQUE)
+            r += 1
+            for _, registro in filas.iterrows():
+                _escribir(registro, r, None, False)
+                r += 1
+            _escribir(subtotal, r, SUBTOTAL_FILL, True, abajo=BORDE_BLOQUE)
+            r += 2  # una fila en blanco entre bloques
+
+        # Consolidado de todas las sucursales: responde "cuanto pesa cada marca
+        # en el total", que se pierde si solo se abre por sucursal.
+        filas_cons, subtotal_cons = consolidado
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=len(planas))
+        c = ws.cell(r, 1, "CONSOLIDADO — TODAS LAS SUCURSALES")
+        c.fill = PatternFill("solid", fgColor=ACUM_FILL)
+        c.font = Font(bold=True)
+        for j in range(1, len(planas) + 1):
+            ws.cell(r, j).border = self._borde(mapa, j, arriba=BORDE_BLOQUE)
+        r += 1
+        for _, registro in filas_cons.iterrows():
+            _escribir(registro, r, None, False)
+            r += 1
+        _escribir(total, r, TOTAL_FILL, True, abajo=BORDE_BLOQUE)
+
+        ws.column_dimensions["A"].width = 34
+        for j in range(2, len(planas) + 1):
+            ws.column_dimensions[get_column_letter(j)].width = 12
+        # Coordenada como string, no ws.cell(): la primera fila de datos es la
+        # cabecera del primer bloque, que esta combinada, y openpyxl no acepta
+        # una MergedCell en freeze_panes.
+        ws.freeze_panes = f"B{fila_header + 1}"
         return ws
 
     def _hoja_matriz(self, wb: Workbook, matriz: pd.DataFrame, subtitulo: str):
@@ -238,6 +365,7 @@ class VolumenCoberturaService(BaseService):
             c.fill = PatternFill("solid", fgColor=HEADER_FILL)
             c.font = Font(bold=True, color=FUENTE_HEADER)
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            c.border = Border(left=BORDE, right=BORDE, top=BORDE_BLOQUE, bottom=BORDE)
 
         r = fila_header + 1
         for suc, registro in matriz.iterrows():
@@ -256,11 +384,13 @@ class VolumenCoberturaService(BaseService):
 
         ws.cell(r, 1, ETIQUETA_TOTAL).font = Font(bold=True)
         ws.cell(r, 1).fill = PatternFill("solid", fgColor=TOTAL_FILL)
+        ws.cell(r, 1).border = Border(left=BORDE, right=BORDE, top=BORDE, bottom=BORDE_BLOQUE)
         for j, marca in enumerate(matriz.columns, start=2):
             c = ws.cell(r, j, float(matriz[marca].sum()))
             c.number_format = FMT_BULTOS
             c.font = Font(bold=True)
             c.fill = PatternFill("solid", fgColor=TOTAL_FILL)
+            c.border = Border(left=BORDE, right=BORDE, top=BORDE, bottom=BORDE_BLOQUE)
 
         ws.column_dimensions["A"].width = 30
         for j in range(2, len(matriz.columns) + 2):
@@ -337,10 +467,13 @@ class VolumenCoberturaService(BaseService):
             wb, "Resumen", f"{config.generico} — volumen y cobertura por sucursal",
             base, "Sucursal", "des_sucursal", por_suc, total_suc, meses, con_padron=True,
         )
-        self._hoja_tabla(
-            wb, "Por Marca", f"{config.generico} — volumen y cobertura por marca",
-            base + " | La cobertura NO se suma entre marcas: el mismo cliente compra varias",
-            "Marca", "marca", por_marca, total_marca, meses, con_padron=False,
+        self._hoja_bloques(
+            wb, "Por Marca",
+            f"{config.generico} — volumen y cobertura por sucursal y marca",
+            base + " | La cobertura NO se suma entre marcas: el mismo cliente compra "
+                   "varias, por eso cada subtotal se recalcula en vez de sumar la columna",
+            construir_bloques(ventas, "des_sucursal", "marca"),
+            (por_marca, total_marca), total_marca, meses,
         )
         self._hoja_matriz(
             wb, matriz_sucursal_marca(ventas),

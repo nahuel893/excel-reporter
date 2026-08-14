@@ -140,6 +140,41 @@ def fila_total(ventas: pd.DataFrame, padron: pd.DataFrame, dimension: str) -> di
     return fila
 
 
+def construir_bloques(
+    ventas: pd.DataFrame,
+    dimension_bloque: str = "des_sucursal",
+    dimension_fila: str = "marca",
+) -> list[tuple[str, pd.DataFrame, dict]]:
+    """Un bloque por sucursal, con sus marcas adentro y un subtotal al pie.
+
+    Solo se listan las marcas que esa sucursal efectivamente vendio: una tabla
+    de 12 sucursales x 20 marcas es mayormente ceros, y los ceros tapan lo poco
+    que hay. Que marca falto donde se responde en la matriz, que para eso esta.
+
+    El subtotal del bloque **recalcula** la cobertura sobre el corte de la
+    sucursal entera. Sumar las marcas contaria dos veces al cliente que compro
+    ABSOLUT y CHIVAS.
+
+    Returns:
+        Lista de ``(etiqueta_bloque, filas, subtotal)`` ordenada por volumen
+        del bloque, de mayor a menor.
+    """
+    if ventas.empty:
+        return []
+
+    orden = (
+        ventas.groupby(dimension_bloque)["bultos"].sum().sort_values(ascending=False).index
+    )
+    bloques: list[tuple[str, pd.DataFrame, dict]] = []
+    for etiqueta in orden:
+        grupo = ventas[ventas[dimension_bloque] == etiqueta]
+        filas = construir_tabla(grupo, pd.DataFrame(), dimension=dimension_fila)
+        subtotal = fila_total(grupo, pd.DataFrame(), dimension_fila)
+        subtotal[dimension_fila] = f"TOTAL {etiqueta}"
+        bloques.append((str(etiqueta), filas, subtotal))
+    return bloques
+
+
 def matriz_sucursal_marca(ventas: pd.DataFrame, medida: str = "bultos") -> pd.DataFrame:
     """Matriz sucursal x marca de la ventana completa.
 

@@ -13,6 +13,7 @@ import pytest
 from src.services.volumen_cobertura.constants import RUTAS_EXCLUIDAS, etiqueta_mes
 from src.services.volumen_cobertura.processor import (
     clientes_cubiertos,
+    construir_bloques,
     construir_tabla,
     fila_total,
     matriz_sucursal_marca,
@@ -148,6 +149,50 @@ def test_las_sucursales_se_ordenan_por_volumen():
 
 def test_sin_ventas_devuelve_tabla_vacia():
     assert construir_tabla(_ventas([]), _padron([])).empty
+
+
+# --- bloques por sucursal ---------------------------------------------------
+
+def test_un_bloque_por_sucursal_ordenado_por_volumen():
+    v = _ventas([
+        (3, "CAFAYATE", "ABSOLUT", 7, "2026-07", 5.0, 0.4),
+        (5, "METAN", "ABSOLUT", 9, "2026-07", 50.0, 4.0),
+    ])
+    bloques = construir_bloques(v)
+    assert [etiqueta for etiqueta, _, _ in bloques] == ["METAN", "CAFAYATE"]
+
+
+def test_el_bloque_solo_lista_las_marcas_que_esa_sucursal_vendio():
+    """12 sucursales x 20 marcas es casi todo ceros, y los ceros tapan el dato."""
+    v = _ventas([
+        (3, "CAFAYATE", "ABSOLUT", 7, "2026-07", 5.0, 0.4),
+        (5, "METAN", "CHIVAS REGAL", 9, "2026-07", 50.0, 4.0),
+    ])
+    bloques = {etiqueta: filas for etiqueta, filas, _ in construir_bloques(v)}
+    assert list(bloques["CAFAYATE"]["marca"]) == ["ABSOLUT"]
+    assert list(bloques["METAN"]["marca"]) == ["CHIVAS REGAL"]
+
+
+def test_el_subtotal_del_bloque_no_suma_la_cobertura_de_sus_marcas():
+    """Un cliente que compra dos marcas es UNO en el subtotal de la sucursal."""
+    v = _ventas([
+        (3, "CAFAYATE", "ABSOLUT", 7, "2026-07", 5.0, 0.4),
+        (3, "CAFAYATE", "CHIVAS REGAL", 7, "2026-07", 3.0, 0.2),
+    ])
+    _, filas, subtotal = construir_bloques(v)[0]
+    assert filas["cob_acum"].sum() == 2
+    assert subtotal["cob_acum"] == 1
+    assert subtotal["bultos_acum"] == 8.0, "los bultos SI se suman"
+
+
+def test_el_subtotal_se_etiqueta_con_la_sucursal():
+    v = _ventas([(3, "CAFAYATE", "ABSOLUT", 7, "2026-07", 5.0, 0.4)])
+    _, _, subtotal = construir_bloques(v)[0]
+    assert subtotal["marca"] == "TOTAL CAFAYATE"
+
+
+def test_sin_ventas_no_hay_bloques():
+    assert construir_bloques(_ventas([])) == []
 
 
 def test_la_matriz_marca_con_cero_lo_que_no_llego():
