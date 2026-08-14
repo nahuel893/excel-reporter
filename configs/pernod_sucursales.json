@@ -40,9 +40,9 @@
             "capture_images": [
                 {
                     "hoja": "Resumen",
-                    "rango": "A1:L20",
+                    "rango": "A1:L24",
                     "renderer": "libreoffice",
-                    "caption": "PERNOD RICARD — volumen y cobertura por sucursal"
+                    "caption": "PERNOD RICARD — volumen y cobertura por supervisor y sucursal"
                 }
             ],
             "enviar_a": {
