@@ -39,10 +39,13 @@ from .constants import (
 )
 from .processor import (
     construir_bloques,
+    construir_bloques_supervisor,
     construir_tabla,
     fila_total,
     matriz_sucursal_marca,
+    universo_marcas,
     meses_con_movimiento,
+    validar_particion,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,6 +57,10 @@ ACUM_FILL = "FFF2CC"        # bloque acumulado: es un subtotal, no un mes mas
 SUBTOTAL_FILL = "D9E1F2"    # subtotal de cada bloque de sucursal
 TOTAL_FILL = "FFE08A"       # TOTAL GENERAL
 ZEBRA_FILL = "F7F9FC"
+# Rol "dato faltante": la marca NO llego a esa sucursal. Es informacion, no un
+# hueco — por eso se dibuja y no se omite.
+FALTANTE_FILL = "F4F6FA"
+FALTANTE_FUENTE = "A3B0C4"
 FUENTE_HEADER = "FFFFFF"
 FUENTE_SUBTITULO = "546E7A"
 BORDE = Side(style="thin", color="D9D9D9")
@@ -74,6 +81,7 @@ class VolumenCoberturaConfig:
     generico: str
     nombre_archivo: str
     sucursales_excluidas: list[int] = field(default_factory=list)
+    supervisores_sucursales: dict[str, list[str]] = field(default_factory=dict)
     output_dir: str | None = None
 
 
@@ -264,14 +272,20 @@ class VolumenCoberturaService(BaseService):
     def _hoja_bloques(
         self, wb: Workbook, nombre: str, titulo: str, subtitulo: str,
         bloques: list[tuple[str, pd.DataFrame, dict]],
-        consolidado: tuple[pd.DataFrame, dict],
+        consolidado: tuple[pd.DataFrame, dict] | None,
         total: dict, meses: list[str],
+        etiqueta_dim: str = "Marca", dimension: str = "marca",
+        con_padron: bool = False,
     ):
-        """Un bloque por sucursal con sus marcas adentro, y al final el
-        consolidado de todas."""
+        """Bloques con subtotal al pie: sucursal->marcas, o supervisor->sucursales.
+
+        `consolidado` es opcional: en la hoja por marca cierra con el peso de
+        cada marca en el total; en la de supervisores no hace falta, porque la
+        fila de abajo de cada bloque ya es la sucursal.
+        """
         ws = wb.create_sheet(nombre)
-        bloques_col = self._bloques(meses, con_padron=False)
-        planas: list[tuple[str, str, str]] = [("Marca", "marca", "")]
+        bloques_col = self._bloques(meses, con_padron=con_padron)
+        planas: list[tuple[str, str, str]] = [(etiqueta_dim, dimension, "")]
         for _, cols in bloques_col:
             planas += cols
         self._titulo(ws, titulo, subtitulo, len(planas))
@@ -302,14 +316,22 @@ class VolumenCoberturaService(BaseService):
 
         def _escribir(registro, r: int, fill: str | None, negrita: bool,
                       abajo: Side = BORDE) -> None:
+            # Fila sin una sola venta en la ventana: la marca no llego a esta
+            # sucursal. Se resalta en gris en vez de omitirla, asi el hueco se
+            # ve al lado de las que si entraron.
+            vacia = fill is None and not registro.get("bultos_acum")
             for j, (_, clave, fmt) in enumerate(planas, start=1):
                 c = ws.cell(r, j, registro.get(clave))
                 if fmt:
                     c.number_format = fmt
                 if fill:
                     c.fill = PatternFill("solid", fgColor=fill)
+                elif vacia:
+                    c.fill = PatternFill("solid", fgColor=FALTANTE_FILL)
                 if negrita:
                     c.font = Font(bold=True)
+                elif vacia:
+                    c.font = Font(color=FALTANTE_FUENTE, italic=True)
                 c.border = self._borde(mapa, j, abajo=abajo)
 
         r = fila_header + 1
@@ -328,19 +350,20 @@ class VolumenCoberturaService(BaseService):
             _escribir(subtotal, r, SUBTOTAL_FILL, True, abajo=BORDE_BLOQUE)
             r += 2  # una fila en blanco entre bloques
 
-        # Consolidado de todas las sucursales: responde "cuanto pesa cada marca
-        # en el total", que se pierde si solo se abre por sucursal.
-        filas_cons, subtotal_cons = consolidado
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=len(planas))
-        c = ws.cell(r, 1, "CONSOLIDADO — TODAS LAS SUCURSALES")
-        c.fill = PatternFill("solid", fgColor=ACUM_FILL)
-        c.font = Font(bold=True)
-        for j in range(1, len(planas) + 1):
-            ws.cell(r, j).border = self._borde(mapa, j, arriba=BORDE_BLOQUE)
-        r += 1
-        for _, registro in filas_cons.iterrows():
-            _escribir(registro, r, None, False)
+        # Consolidado: responde "cuanto pesa cada marca en el total", que se
+        # pierde si solo se abre por sucursal.
+        if consolidado is not None:
+            filas_cons, _ = consolidado
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=len(planas))
+            c = ws.cell(r, 1, "CONSOLIDADO — TODAS LAS SUCURSALES")
+            c.fill = PatternFill("solid", fgColor=ACUM_FILL)
+            c.font = Font(bold=True)
+            for j in range(1, len(planas) + 1):
+                ws.cell(r, j).border = self._borde(mapa, j, arriba=BORDE_BLOQUE)
             r += 1
+            for _, registro in filas_cons.iterrows():
+                _escribir(registro, r, None, False)
+                r += 1
         _escribir(total, r, TOTAL_FILL, True, abajo=BORDE_BLOQUE)
 
         ws.column_dimensions["A"].width = 34
@@ -458,22 +481,56 @@ class VolumenCoberturaService(BaseService):
 
         por_suc = construir_tabla(ventas, padron, "des_sucursal")
         total_suc = fila_total(ventas, padron, "des_sucursal")
+
+        # El mapa de supervisores tiene que ser una PARTICION. Si no lo es, los
+        # subtotales suman dos veces la misma sucursal y el informe miente sin
+        # que se note. Preferimos romper aca.
+        mapa_sup = config.supervisores_sucursales or {}
+        if mapa_sup:
+            repetidas, huerfanas = validar_particion(ventas, mapa_sup)
+            if repetidas:
+                raise ValueError(
+                    "supervisores_sucursales no es una particion: "
+                    f"{repetidas} figuran en mas de un supervisor. Los subtotales "
+                    "sumarian dos veces esas sucursales. Revisar el mapa: en "
+                    "configs/ventas.json hay un supervisor que tiene TODAS las "
+                    "sucursales y es el supraconjunto de los demas."
+                )
+            if huerfanas:
+                logger.warning(
+                    "sucursales sin supervisor en el mapa: %s — van al bloque "
+                    "SIN SUPERVISOR", huerfanas,
+                )
         por_marca = construir_tabla(ventas, pd.DataFrame(), "marca")
         total_marca = fila_total(ventas, pd.DataFrame(), "marca")
 
         wb = Workbook()
         wb.remove(wb.active)
-        self._hoja_tabla(
-            wb, "Resumen", f"{config.generico} — volumen y cobertura por sucursal",
-            base, "Sucursal", "des_sucursal", por_suc, total_suc, meses, con_padron=True,
-        )
+        if mapa_sup:
+            self._hoja_bloques(
+                wb, "Resumen",
+                f"{config.generico} — volumen y cobertura por supervisor y sucursal",
+                base + " | Cada bloque es un supervisor; el subtotal suma sus "
+                       "sucursales, que es la unica dimension donde la cobertura ES aditiva",
+                construir_bloques_supervisor(ventas, padron, mapa_sup),
+                None, total_suc, meses,
+                etiqueta_dim="Supervisor / Sucursal", dimension="des_sucursal",
+                con_padron=True,
+            )
+        else:
+            self._hoja_tabla(
+                wb, "Resumen", f"{config.generico} — volumen y cobertura por sucursal",
+                base, "Sucursal", "des_sucursal", por_suc, total_suc, meses, con_padron=True,
+            )
         self._hoja_bloques(
             wb, "Por Marca",
             f"{config.generico} — volumen y cobertura por sucursal y marca",
-            base + " | La cobertura NO se suma entre marcas: el mismo cliente compra "
-                   "varias, por eso cada subtotal se recalcula en vez de sumar la columna",
-            construir_bloques(ventas, "des_sucursal", "marca"),
+            base + " | Gris = la marca no llego a esa sucursal | La cobertura NO se suma "
+                   "entre marcas: el mismo cliente compra varias, por eso cada "
+                   "subtotal se recalcula en vez de sumar la columna",
+            construir_bloques(ventas, "des_sucursal", "marca", universo_marcas(ventas)),
             (por_marca, total_marca), total_marca, meses,
+            etiqueta_dim="Marca", dimension="marca", con_padron=False,
         )
         self._hoja_matriz(
             wb, matriz_sucursal_marca(ventas),

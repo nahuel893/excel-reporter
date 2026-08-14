@@ -140,16 +140,32 @@ def fila_total(ventas: pd.DataFrame, padron: pd.DataFrame, dimension: str) -> di
     return fila
 
 
+def universo_marcas(ventas: pd.DataFrame) -> list[str]:
+    """Marcas con movimiento en la ventana, en cualquier sucursal.
+
+    Es el universo contra el que se mide el hueco de cada sucursal. Se toma de
+    lo VENDIDO y no del catalogo de `dim_articulo` a proposito: una marca que
+    nadie vendio en ningun lado no dice nada sobre esta sucursal en particular,
+    y repetida en los doce bloques solo agrega ruido.
+    """
+    if ventas.empty:
+        return []
+    return list(
+        ventas.groupby("marca")["bultos"].sum().sort_values(ascending=False).index
+    )
+
+
 def construir_bloques(
     ventas: pd.DataFrame,
     dimension_bloque: str = "des_sucursal",
     dimension_fila: str = "marca",
+    universo: list[str] | None = None,
 ) -> list[tuple[str, pd.DataFrame, dict]]:
     """Un bloque por sucursal, con sus marcas adentro y un subtotal al pie.
 
-    Solo se listan las marcas que esa sucursal efectivamente vendio: una tabla
-    de 12 sucursales x 20 marcas es mayormente ceros, y los ceros tapan lo poco
-    que hay. Que marca falto donde se responde en la matriz, que para eso esta.
+    Con `universo`, cada bloque lista TODAS esas marcas: las que la sucursal no
+    vendio aparecen en cero al final del bloque, para que el hueco se vea. Sin
+    `universo`, solo se listan las que efectivamente vendio.
 
     El subtotal del bloque **recalcula** la cobertura sobre el corte de la
     sucursal entera. Sumar las marcas contaria dos veces al cliente que compro
@@ -157,11 +173,13 @@ def construir_bloques(
 
     Returns:
         Lista de ``(etiqueta_bloque, filas, subtotal)`` ordenada por volumen
-        del bloque, de mayor a menor.
+        del bloque, de mayor a menor. Dentro del bloque las filas van por
+        volumen, asi los ceros quedan juntos abajo.
     """
     if ventas.empty:
         return []
 
+    meses = meses_con_movimiento(ventas)
     orden = (
         ventas.groupby(dimension_bloque)["bultos"].sum().sort_values(ascending=False).index
     )
@@ -169,9 +187,97 @@ def construir_bloques(
     for etiqueta in orden:
         grupo = ventas[ventas[dimension_bloque] == etiqueta]
         filas = construir_tabla(grupo, pd.DataFrame(), dimension=dimension_fila)
+
+        if universo:
+            faltantes = [m for m in universo if m not in set(filas[dimension_fila])]
+            if faltantes:
+                vacias = pd.DataFrame({dimension_fila: faltantes})
+                for mes in meses:
+                    vacias[f"bultos_{mes}"] = 0.0
+                    vacias[f"hl_{mes}"] = 0.0
+                    vacias[f"cob_{mes}"] = 0
+                vacias["bultos_acum"] = 0.0
+                vacias["hl_acum"] = 0.0
+                vacias["cob_acum"] = 0
+                filas = pd.concat([filas, vacias], ignore_index=True)
+
         subtotal = fila_total(grupo, pd.DataFrame(), dimension_fila)
         subtotal[dimension_fila] = f"TOTAL {etiqueta}"
-        bloques.append((str(etiqueta), filas, subtotal))
+        bloques.append((str(etiqueta), filas.reset_index(drop=True), subtotal))
+    return bloques
+
+
+def validar_particion(
+    ventas: pd.DataFrame, mapa: dict[str, list[str]]
+) -> tuple[list[str], list[str]]:
+    """Chequea que el mapa supervisor -> sucursales sea una PARTICION.
+
+    El mapa de `configs/ventas.json` NO lo es: hay un supervisor que tiene todas
+    las sucursales y es el supraconjunto de los demas. Si se dibujan bloques con
+    un mapa asi, la misma sucursal cae en dos bloques y los subtotales suman dos
+    veces lo mismo. Este informe se niega a hacer eso en silencio.
+
+    Returns:
+        ``(repetidas, huerfanas)``. `repetidas` son sucursales en mas de un
+        supervisor; `huerfanas`, sucursales con movimiento que ningun supervisor
+        reclama.
+    """
+    con_movimiento = set(ventas["des_sucursal"].unique()) if not ventas.empty else set()
+
+    veces: dict[str, int] = {}
+    for sucursales in mapa.values():
+        for suc in sucursales:
+            if suc in con_movimiento:
+                veces[suc] = veces.get(suc, 0) + 1
+
+    repetidas = sorted(s for s, n in veces.items() if n > 1)
+    huerfanas = sorted(con_movimiento - set(veces))
+    return repetidas, huerfanas
+
+
+def construir_bloques_supervisor(
+    ventas: pd.DataFrame,
+    padron: pd.DataFrame,
+    mapa: dict[str, list[str]],
+) -> list[tuple[str, pd.DataFrame, dict]]:
+    """Un bloque por supervisor, con sus sucursales adentro y el subtotal al pie.
+
+    El subtotal SI puede sumar la cobertura de sus sucursales — es la unica
+    dimension en la que la cobertura es aditiva, porque la clave del cliente es
+    ``(id_cliente, id_sucursal)`` y el mismo numero en dos sucursales son dos
+    clientes. Aun asi se recalcula sobre el corte, que es equivalente y no
+    depende de que el mapa este bien armado.
+
+    Las sucursales que ningun supervisor reclama van a un bloque final
+    "SIN SUPERVISOR": desaparecer del informe es peor que aparecer sin dueño.
+    """
+    if ventas.empty:
+        return []
+
+    bloques: list[tuple[str, pd.DataFrame, dict]] = []
+    asignadas: set[str] = set()
+
+    orden = sorted(
+        mapa,
+        key=lambda sup: -ventas[ventas["des_sucursal"].isin(mapa[sup])]["bultos"].sum(),
+    )
+    for supervisor in orden:
+        grupo = ventas[ventas["des_sucursal"].isin(mapa[supervisor])]
+        if grupo.empty:
+            continue
+        asignadas |= set(grupo["des_sucursal"].unique())
+        filas = construir_tabla(grupo, padron, "des_sucursal")
+        subtotal = fila_total(grupo, padron, "des_sucursal")
+        subtotal["des_sucursal"] = f"TOTAL {supervisor}"
+        bloques.append((supervisor, filas, subtotal))
+
+    huerfanas = ventas[~ventas["des_sucursal"].isin(asignadas)]
+    if not huerfanas.empty:
+        subtotal = fila_total(huerfanas, padron, "des_sucursal")
+        subtotal["des_sucursal"] = "TOTAL SIN SUPERVISOR"
+        bloques.append(
+            ("SIN SUPERVISOR", construir_tabla(huerfanas, padron, "des_sucursal"), subtotal)
+        )
     return bloques
 
 

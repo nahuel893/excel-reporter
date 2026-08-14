@@ -14,10 +14,13 @@ from src.services.volumen_cobertura.constants import RUTAS_EXCLUIDAS, etiqueta_m
 from src.services.volumen_cobertura.processor import (
     clientes_cubiertos,
     construir_bloques,
+    construir_bloques_supervisor,
     construir_tabla,
     fila_total,
     matriz_sucursal_marca,
+    universo_marcas,
     meses_con_movimiento,
+    validar_particion,
 )
 
 COLS = ["id_sucursal", "des_sucursal", "marca", "id_cliente", "mes", "bultos", "hectolitros"]
@@ -162,8 +165,7 @@ def test_un_bloque_por_sucursal_ordenado_por_volumen():
     assert [etiqueta for etiqueta, _, _ in bloques] == ["METAN", "CAFAYATE"]
 
 
-def test_el_bloque_solo_lista_las_marcas_que_esa_sucursal_vendio():
-    """12 sucursales x 20 marcas es casi todo ceros, y los ceros tapan el dato."""
+def test_sin_universo_el_bloque_solo_lista_lo_que_esa_sucursal_vendio():
     v = _ventas([
         (3, "CAFAYATE", "ABSOLUT", 7, "2026-07", 5.0, 0.4),
         (5, "METAN", "CHIVAS REGAL", 9, "2026-07", 50.0, 4.0),
@@ -171,6 +173,44 @@ def test_el_bloque_solo_lista_las_marcas_que_esa_sucursal_vendio():
     bloques = {etiqueta: filas for etiqueta, filas, _ in construir_bloques(v)}
     assert list(bloques["CAFAYATE"]["marca"]) == ["ABSOLUT"]
     assert list(bloques["METAN"]["marca"]) == ["CHIVAS REGAL"]
+
+
+def test_con_universo_cada_bloque_lista_las_marcas_que_NO_vendio():
+    """El hueco tiene que verse al lado de las marcas que si entraron."""
+    v = _ventas([
+        (3, "CAFAYATE", "ABSOLUT", 7, "2026-07", 5.0, 0.4),
+        (5, "METAN", "CHIVAS REGAL", 9, "2026-07", 50.0, 4.0),
+    ])
+    universo = universo_marcas(v)
+    assert universo == ["CHIVAS REGAL", "ABSOLUT"], "ordenado por volumen total"
+    bloques = {e: f for e, f, _ in construir_bloques(v, universo=universo)}
+    assert set(bloques["CAFAYATE"]["marca"]) == {"ABSOLUT", "CHIVAS REGAL"}
+    faltante = bloques["CAFAYATE"].set_index("marca").loc["CHIVAS REGAL"]
+    assert faltante["bultos_acum"] == 0.0
+    assert faltante["cob_acum"] == 0
+    assert faltante["bultos_2026-07"] == 0.0
+
+
+def test_las_marcas_ausentes_quedan_al_final_del_bloque():
+    """Ordenadas por volumen, los ceros caen juntos abajo."""
+    v = _ventas([
+        (3, "CAFAYATE", "ABSOLUT", 7, "2026-07", 5.0, 0.4),
+        (5, "METAN", "CHIVAS REGAL", 9, "2026-07", 50.0, 4.0),
+    ])
+    filas = dict((e, f) for e, f, _ in construir_bloques(v, universo=universo_marcas(v)))
+    assert list(filas["CAFAYATE"]["marca"]) == ["ABSOLUT", "CHIVAS REGAL"]
+
+
+def test_el_universo_no_altera_el_subtotal():
+    """Las filas en cero no pueden mover ni el volumen ni la cobertura."""
+    v = _ventas([
+        (3, "CAFAYATE", "ABSOLUT", 7, "2026-07", 5.0, 0.4),
+        (5, "METAN", "CHIVAS REGAL", 9, "2026-07", 50.0, 4.0),
+    ])
+    sin = dict((e, s) for e, _, s in construir_bloques(v))
+    con = dict((e, s) for e, _, s in construir_bloques(v, universo=universo_marcas(v)))
+    assert sin["CAFAYATE"]["bultos_acum"] == con["CAFAYATE"]["bultos_acum"] == 5.0
+    assert sin["CAFAYATE"]["cob_acum"] == con["CAFAYATE"]["cob_acum"] == 1
 
 
 def test_el_subtotal_del_bloque_no_suma_la_cobertura_de_sus_marcas():
@@ -193,6 +233,76 @@ def test_el_subtotal_se_etiqueta_con_la_sucursal():
 
 def test_sin_ventas_no_hay_bloques():
     assert construir_bloques(_ventas([])) == []
+
+
+# --- bloques por supervisor -------------------------------------------------
+
+MAPA = {"Garcia": ["CAFAYATE", "METAN"], "Yapura": ["LA QUIACA"]}
+
+
+def _tres_sucursales():
+    return _ventas([
+        (3, "CAFAYATE", "ABSOLUT", 7, "2026-07", 5.0, 0.4),
+        (5, "METAN", "ABSOLUT", 9, "2026-07", 50.0, 4.0),
+        (14, "LA QUIACA", "BUHERO", 11, "2026-07", 20.0, 1.0),
+    ])
+
+
+def test_un_mapa_que_no_particiona_se_denuncia():
+    """El de configs/ventas.json NO particiona: Vilte tiene todas las sucursales."""
+    solapado = {"Vilte": ["CAFAYATE", "METAN", "LA QUIACA"], "Garcia": ["CAFAYATE"]}
+    repetidas, huerfanas = validar_particion(_tres_sucursales(), solapado)
+    assert repetidas == ["CAFAYATE"]
+    assert huerfanas == []
+
+
+def test_una_sucursal_sin_supervisor_se_denuncia():
+    repetidas, huerfanas = validar_particion(_tres_sucursales(), {"Garcia": ["CAFAYATE"]})
+    assert repetidas == []
+    assert huerfanas == ["LA QUIACA", "METAN"]
+
+
+def test_un_mapa_que_particiona_no_denuncia_nada():
+    assert validar_particion(_tres_sucursales(), MAPA) == ([], [])
+
+
+def test_una_sucursal_del_mapa_sin_ventas_no_es_problema():
+    """ABRA PAMPA cerro: sigue en el mapa y no tiene movimiento."""
+    mapa = {**MAPA, "Yapura": ["LA QUIACA", "ABRA PAMPA"]}
+    assert validar_particion(_tres_sucursales(), mapa) == ([], [])
+
+
+def test_los_bloques_de_supervisor_se_ordenan_por_volumen():
+    b = construir_bloques_supervisor(_tres_sucursales(), _padron([(3, 10), (5, 10), (14, 10)]), MAPA)
+    assert [etiqueta for etiqueta, _, _ in b] == ["Garcia", "Yapura"]
+
+
+def test_el_subtotal_del_supervisor_suma_sus_sucursales():
+    """Es la UNICA dimension en la que la cobertura es aditiva."""
+    b = dict((etiqueta, sub) for etiqueta, _, sub in
+             construir_bloques_supervisor(_tres_sucursales(), _padron([(3, 10), (5, 10), (14, 10)]), MAPA))
+    assert b["Garcia"]["bultos_acum"] == 55.0
+    assert b["Garcia"]["cob_acum"] == 2
+    assert b["Garcia"]["padron"] == 20
+
+
+def test_las_sucursales_huerfanas_van_a_un_bloque_propio():
+    """Desaparecer del informe es peor que aparecer sin dueño."""
+    b = construir_bloques_supervisor(
+        _tres_sucursales(), _padron([(3, 10), (5, 10), (14, 10)]), {"Garcia": ["CAFAYATE"]}
+    )
+    assert [etiqueta for etiqueta, _, _ in b] == ["Garcia", "SIN SUPERVISOR"]
+    sin_duenio = b[-1][2]
+    assert sin_duenio["bultos_acum"] == 70.0
+
+
+def test_los_subtotales_de_supervisor_cierran_contra_el_total():
+    v = _tres_sucursales()
+    padron = _padron([(3, 10), (5, 10), (14, 10)])
+    bloques = construir_bloques_supervisor(v, padron, MAPA)
+    total = fila_total(v, padron, "des_sucursal")
+    assert sum(sub["bultos_acum"] for _, _, sub in bloques) == pytest.approx(total["bultos_acum"])
+    assert sum(sub["cob_acum"] for _, _, sub in bloques) == total["cob_acum"]
 
 
 def test_la_matriz_marca_con_cero_lo_que_no_llego():
@@ -224,3 +334,9 @@ def test_el_config_de_pernod_es_valido():
     assert cfg.tipo == "volumen-cobertura"
     assert cfg.filtros.genericos == ["PERNOD RICARD"]
     assert cfg.filtros.sucursales_excluidas == [1]
+    mapa = cfg.filtros.supervisores_sucursales
+    assert set(mapa) == {"Adrian Garcia", "Hernan Yapura"}
+    # Walter Vilte tiene las 14 sucursales: si entrara, su bloque duplicaria todo.
+    assert "Walter Vilte" not in mapa
+    todas = [s for sucs in mapa.values() for s in sucs]
+    assert len(todas) == len(set(todas)), "el mapa tiene que ser una particion"

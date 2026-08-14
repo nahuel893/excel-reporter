@@ -114,6 +114,12 @@ class GlobalFilters(BaseModel):
     # CASA CENTRAL (1) suele excluirse porque tiene su propio circuito y su
     # volumen tapa al del interior.
     sucursales_excluidas: list[int] | None = None
+    # volumen-cobertura: {supervisor: [sucursales]} para agrupar el informe en
+    # bloques con subtotal. Tiene que ser una PARTICION de las sucursales del
+    # informe: el mapa de configs/ventas.json NO lo es (Walter Vilte tiene las
+    # 14 y es el supraconjunto de los otros), y con un mapa asi los subtotales
+    # suman dos veces la misma sucursal. El servicio lo verifica y rompe.
+    supervisores_sucursales: dict[str, list[str]] | None = None
     # stock-valorizado: xlsx exportado del ERP con la lista de precios de
     # referencia (columnas "Articulo" y "Precio Base"). No hay precio en gold,
     # asi que sin este archivo no hay valorizacion.
