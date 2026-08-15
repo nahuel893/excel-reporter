@@ -101,7 +101,7 @@ def resolve_delivery(
     enviar_whatsapp: bool = True,
     test_mode: bool = False,
     whatsapp_enviar_como: WhatsAppEnviarComo = "imagen",
-    whatsapp_caption_imagenes: bool = True,
+    whatsapp_caption_imagenes: bool = False,
     email_adjuntos: list[str] | None = None,
 ) -> DeliveryConfig | None:
     """

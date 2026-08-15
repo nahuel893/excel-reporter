@@ -86,7 +86,12 @@ class GlobalFilters(BaseModel):
     id_fuerza_ventas: int | None = None
     id_articulo: int | None = None
     whatsapp_enviar_como: WhatsAppEnviarComo = "imagen"
-    whatsapp_caption_imagenes: bool = True
+    # Las imagenes van SIN texto. Cambiado el 2026-08-15 a pedido de Nahuel:
+    # el cuadrito ya dice de que informe es y de que hoja, asi que el caption
+    # solo agrega ruido arriba de cada imagen en el grupo. Un config que lo
+    # quiera lo pone en true; el default es no mandarlo.
+    # NO afecta al caption del ARCHIVO (xlsx), que sigue llevando su texto.
+    whatsapp_caption_imagenes: bool = False
     email_adjuntos: list[str] = ["excel"]  # ["excel"] | ["imagen"] | ["excel", "imagen"]
     detalle_movimientos_path: str | None = None  # Path to detalle_movimientos.xlsx for merge import
     detalle_movimientos_ma_path: str | None = None    # Mes anterior — imported as separate sheet
