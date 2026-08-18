@@ -7,6 +7,8 @@
         "enviar_email": false,
         "enviar_whatsapp": true,
         "whatsapp_enviar_como": "imagen",
+        "whatsapp_caption_imagenes": false,
+        "_caption_nota": "Las imagenes van SIN texto. Se declara ACA y no en el default de GlobalFilters porque el default ya se volvio a true una vez (5d729b5, avance-badie, que si quiere caption en sus bloques). Declarado en el config, no lo pisa el cambio de otro informe.",
         "fecha_modo": "mes_a_hoy"
     },
     "reportes": [
@@ -29,8 +31,7 @@
                 {
                     "hoja": "Ventas Cob x Preventista",
                     "rango": "A1:H55",
-                    "renderer": "libreoffice",
-                    "caption": "Corregido: Luciano Guzman"
+                    "renderer": "libreoffice"
                 }
             ],
             "enviar_a": {
