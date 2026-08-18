@@ -1,6 +1,6 @@
 ---
 name: formato-excel-badie
-description: "Colores, formatos numéricos y convenciones visuales de los informes Excel de Distribuidora Badie. Define la paleta por rol semántico (encabezado, subtotal, TOTAL GENERAL, alerta, dato faltante), los number_format por tipo de medida (bultos, hectolitros, pesos, porcentajes, cobertura), los bordes, y las reglas que no se negocian: nunca redondear el dato, siempre fila de totales, el porcentaje se guarda como fracción. Usar al crear un servicio nuevo que genere Excel, al agregar hojas o columnas a uno existente, al revisar por qué un informe se ve distinto de los demás, o cuando pidan cambiar colores, formatos o el aspecto de un reporte."
+description: "Colores, formatos numéricos y convenciones visuales de los informes Excel de Distribuidora Badie. Define la paleta por rol semántico (encabezado, subtotal, TOTAL GENERAL, alerta, dato faltante), los number_format por tipo de medida (bultos, hectolitros, pesos, porcentajes, cobertura) — SIEMPRE sin decimales —, los bordes (OBLIGATORIOS en toda celda de la tabla), y las reglas que no se negocian: nunca redondear el dato, siempre fila de totales, el porcentaje se guarda como fracción. Usar al crear un servicio nuevo que genere Excel, al agregar hojas o columnas a uno existente, al revisar por qué un informe se ve distinto de los demás, o cuando pidan cambiar colores, formatos o el aspecto de un reporte."
 version: 1.0.0
 metadata:
   hermes:
@@ -37,27 +37,47 @@ El color no describe una fila, describe **qué es** esa fila.
 | Dato faltante | `F4F6FA` + fuente `A3B0C4` | gris muy claro | marca que el cliente NO compró: es información, no un hueco |
 | Zebra | `F7F9FC` | casi blanco | bandeado alterno en tablas largas |
 
+**Fuente del semáforo**: SIEMPRE `000000` (negra), sobre cualquiera de los
+rellenos de semáforo. El relleno ya dice si está bien o mal; teñir además la
+fuente baja el contraste y se lee peor, sobre todo en las capturas de WhatsApp.
+Nada de `006100` / `9C0006` / `9C5700`, que son los que pone Excel por defecto.
+
 **Fuente sobre relleno oscuro**: `FFFFFF` en negrita.
 **Fuente de subtítulo**: `546E7A` o `7F7F7F`, itálica, tamaño 10.
 
-## 2. Bordes
+## 2. ⛔ Bordes — SIEMPRE en TODAS las celdas de la tabla
 
-`Side(style="thin", color="D9D9D9")` en las celdas de datos. Para tablas más
+**Toda celda que forma parte de una tabla lleva borde, sin excepción:**
+encabezados, filas de datos, subtotales, TOTAL GENERAL y bandas de agrupación.
+
+`Side(style="thin", color="D9D9D9")` en todas las celdas. Para tablas más
 densas se usa `B0B0B0` o `BFBFBF`; elegí uno y mantenelo en todo el archivo.
 
-## 3. Formatos numéricos por tipo de medida
+No dejar ninguna celda de la tabla sin `border`: una tabla con celdas sueltas
+sin borde se ve rota y no es un informe Badie.
+
+## 3. ⛔ Formatos numéricos por tipo de medida — SIEMPRE sin decimales
+
+**Regla: ninguna celda numérica muestra decimales.** El `number_format` de
+todas las medidas usa `#,##0` (o `$ #,##0` para plata). La celda guarda el
+valor completo con su precisión (NUNCA se redondea el dato, ver §4.1); el
+formato solo decide cómo se **muestra**, y se muestra sin decimales.
 
 | Medida | `number_format` | Por qué |
 |---|---|---|
 | Bultos | `#,##0` | se leen enteros aunque el dato tenga decimales |
-| Bultos con detalle | `#,##0.00` | cuando media caja importa (incentivos con umbral 0,5) |
-| Hectolitros | `#,##0.00` | la unidad es chica, dos decimales |
-| Kilos | `#,##0.00` | idem |
+| Bultos con detalle | `#,##0` | **sin decimales** — la fracción de caja no se muestra |
+| Hectolitros | `#,##0` | **sin decimales** |
+| Kilos | `#,##0` | **sin decimales** |
 | Pesos | `$ #,##0` | sin decimales: son millones, los centavos son ruido |
 | Porcentaje | `0.0%` | **se guarda como fracción** (0.421), no como 42.1 |
 | Cobertura / clientes | `#,##0` | son conteos enteros |
 | Cupos y objetivos | `#,##0` | |
 | Códigos numéricos | `0` | id_ruta, id_cliente: **nunca** formato de fecha (ver §6) |
+
+⚠️ Si un número necesita decimales para que el negocio lo entienda (ej. un
+precio unitario chico), se declara la excepción en el subtítulo del informe —
+pero la regla general es sin decimales.
 
 ## 4. Las tres reglas que no se negocian
 

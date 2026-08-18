@@ -37,7 +37,11 @@ MARCA = "SALTA"
 HEADER_FILL, HEADER_FONT = "1F4E78", "FFFFFF"
 TOTAL_FILL = "FFE08A"          # ámbar — fila de la marca (el total del bloque)
 ZONA_FILL = "D6E0F0"           # celeste — primera fila de cada zona
-POS_FONT, NEG_FONT = "006100", "9C0006"
+# Fuente NEGRA, a pedido de Nahuel (2026-08-18). OJO: en las columnas Var.
+# estas celdas NO llevan relleno, asi que el color era el unico realce del
+# signo. La informacion no se pierde —el numero negativo ya muestra el menos—
+# pero deja de saltar a la vista. Si hace falta el realce, va un relleno.
+POS_FONT = NEG_FONT = "000000"
 
 _MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
           "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]

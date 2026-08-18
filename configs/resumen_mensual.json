@@ -3,6 +3,8 @@
     "filtros": {
         "fecha_desde": "2026-06-01",
         "fecha_hasta": "2026-06-30",
+        "fecha_modo": "mes_a_hoy",
+        "_ventana_nota": "mes_a_hoy: las fechas de arriba solo documentan el formato. En cada corrida se recalculan al mes en curso. El daily ya lo hacia; una corrida MANUAL con este config salia con junio.",
         "genericos": [
             "CERVEZAS",
             "AGUAS DANONE",
@@ -30,7 +32,7 @@
     },
     "reportes": [
         {
-            "nombre": "Resumen Mensual Junio",
+            "nombre": "Resumen Mensual {MES} {AÑO}",
             "capture_images": [
                 {
                     "hoja": "CERVEZAS",
