@@ -3,6 +3,8 @@
     "filtros": {
         "fecha_desde": "2026-06-01",
         "fecha_hasta": "2026-08-10",
+        "fecha_modo": "ventana_movil",
+        "_ventana_nota": "ventana_movil: las fechas de arriba solo documentan el ANCHO (3 meses). En cada corrida se recalculan para terminar HOY y conservar ese ancho. Con mes_a_hoy el informe quedaria en un solo mes.",
         "enviar_email": false,
         "enviar_whatsapp": true,
         "whatsapp_enviar_como": "ambos"
@@ -19,7 +21,9 @@
             ],
             "enviar_a": {
                 "Nahuel Aguirre": {
-                    "via": ["whatsapp"]
+                    "via": [
+                        "whatsapp"
+                    ]
                 }
             }
         }

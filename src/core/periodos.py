@@ -167,7 +167,27 @@ def rango_mes_completo(hoy: date, feriados: Feriados = None) -> tuple[str, str]:
     return hoy.replace(day=1).isoformat(), (hoy + timedelta(days=1)).isoformat()
 
 
-def resolver_ventana(modo: str, hoy: date) -> tuple[str, str]:
+def rango_ventana_movil(hoy: date, meses: int) -> tuple[str, str]:
+    """Ventana de `meses` meses calendario que TERMINA hoy.
+
+    Con meses=3 y hoy=2026-08-18 devuelve ('2026-06-01', '2026-08-18'): junio
+    entero, julio entero y agosto hasta hoy. Al cambiar de mes la ventana rueda
+    sola y sigue midiendo tres meses; no crece.
+
+    Es distinto de `mes_a_hoy`, que siempre da UN mes. Los informes abiertos por
+    mes derivan la cantidad de columnas del rango, asi que necesitan que el
+    ancho se conserve.
+    """
+    if meses < 1:
+        raise ValueError(f"la ventana tiene que ser de al menos 1 mes, no {meses}")
+    total = (hoy.year * 12 + hoy.month - 1) - (meses - 1)
+    desde = date(total // 12, total % 12 + 1, 1)
+    return desde.isoformat(), hoy.isoformat()
+
+
+def resolver_ventana(
+    modo: str, hoy: date, meses_ventana: int | None = None
+) -> tuple[str, str]:
     """Traduce un `fecha_modo` de config a un rango concreto.
 
     Raises:
@@ -181,6 +201,16 @@ def resolver_ventana(modo: str, hoy: date) -> tuple[str, str]:
         return rango_mes_completo(hoy)
     if modo == "hoy":
         return hoy.isoformat(), hoy.isoformat()
+    if modo == "ventana_movil":
+        # El ancho NO se escribe aparte: sale de las fechas que ya trae el
+        # config, que quedan documentando cuantos meses mide el informe.
+        if not meses_ventana:
+            raise ValueError(
+                "fecha_modo 'ventana_movil' necesita el ancho en meses, que se "
+                "deriva de fecha_desde..fecha_hasta del config"
+            )
+        return rango_ventana_movil(hoy, meses_ventana)
     raise ValueError(
-        f"fecha_modo desconocido: {modo!r}. Validos: mes_a_hoy, mes_completo, hoy"
+        f"fecha_modo desconocido: {modo!r}. "
+        "Validos: mes_a_hoy, mes_completo, hoy, ventana_movil"
     )

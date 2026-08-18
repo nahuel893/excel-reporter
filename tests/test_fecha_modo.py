@@ -79,10 +79,14 @@ def test_full_sport_manda_a_preventa_salta_y_a_gonzalo():
 
 
 def test_sin_fecha_modo_las_fechas_del_config_se_respetan():
-    """La ventana relativa es opt-in: sin el campo, nada cambia."""
-    cfg = load_report_config(CONFIG_AGUAS)
+    """La ventana relativa es opt-in: sin el campo, nada cambia.
+
+    Se usa cartesiano y no cobertura-aguas: aguas paso a `ventana_movil` el
+    2026-08-18 y dejo de servir como ejemplo de config sin ventana relativa.
+    """
+    cfg = load_report_config(Path("configs/cartesiano.json"))
     assert cfg.filtros.fecha_modo is None
-    assert cfg.filtros.fecha_desde == "2026-06-01"
+    assert cfg.filtros.fecha_desde is not None
 
 
 def test_main_reescribe_las_fechas_cuando_hay_fecha_modo(tmp_path):
@@ -111,3 +115,68 @@ def test_main_reescribe_las_fechas_cuando_hay_fecha_modo(tmp_path):
     esperado = rango_mes_a_hoy(date.today())
     assert (visto["desde"], visto["hasta"]) == esperado
     assert visto["desde"] != "2020-01-01"
+
+
+# --- ventana_movil ----------------------------------------------------------
+
+class TestVentanaMovil:
+    """Ventana de N meses que TERMINA hoy, con el ancho tomado del config.
+
+    Existe porque `mes_a_hoy` no sirve para los informes que abren una columna
+    por mes: derivan la cantidad de columnas del rango, asi que mes_a_hoy los
+    dejaria en un solo mes.
+    """
+
+    def test_conserva_el_ancho_al_rodar(self):
+        from src.core.periodos import meses_abarcados, rango_ventana_movil
+
+        for hoy in (date(2026, 8, 18), date(2026, 9, 1), date(2026, 12, 31)):
+            desde, hasta = rango_ventana_movil(hoy, 3)
+            assert meses_abarcados(desde, hasta) == 3
+            assert hasta == hoy.isoformat()
+
+    def test_cruza_el_anio(self):
+        from src.core.periodos import rango_ventana_movil
+
+        assert rango_ventana_movil(date(2027, 1, 5), 3) == ("2026-11-01", "2027-01-05")
+
+    def test_arranca_el_primero_del_mes(self):
+        """La ventana toma meses calendario enteros, no 90 dias hacia atras."""
+        from src.core.periodos import rango_ventana_movil
+
+        assert rango_ventana_movil(date(2026, 8, 18), 3)[0] == "2026-06-01"
+
+    def test_una_ventana_de_un_mes_es_el_mes_en_curso(self):
+        from src.core.periodos import rango_ventana_movil
+
+        assert rango_ventana_movil(date(2026, 8, 18), 1) == ("2026-08-01", "2026-08-18")
+
+    def test_sin_ancho_rompe_en_vez_de_adivinar(self):
+        from src.core.periodos import resolver_ventana
+
+        with pytest.raises(ValueError, match="ancho en meses"):
+            resolver_ventana("ventana_movil", date(2026, 8, 18))
+
+    def test_ancho_invalido_rompe(self):
+        from src.core.periodos import rango_ventana_movil
+
+        with pytest.raises(ValueError, match="al menos 1 mes"):
+            rango_ventana_movil(date(2026, 8, 18), 0)
+
+    def test_el_config_de_cobertura_aguas_lo_declara(self):
+        from src.config.resolver import load_report_config
+
+        cfg = load_report_config(Path("configs/cobertura_aguas.json"))
+        assert cfg.filtros.fecha_modo == "ventana_movil"
+
+    def test_cobertura_aguas_esta_en_el_daily(self):
+        import importlib.util
+        import sys
+
+        spec = importlib.util.spec_from_file_location("rd_va", "scripts/run_daily.py")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["rd_va"] = mod
+        spec.loader.exec_module(mod)
+        srv = {s.nombre: s for s in mod.SERVICIOS}
+        assert "cobertura-aguas" in srv
+        assert srv["cobertura-aguas"].fecha_modo == "ventana_movil"

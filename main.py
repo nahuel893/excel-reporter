@@ -119,11 +119,15 @@ def _run_report_config(
     if report_config.filtros.fecha_modo:
         from datetime import date as _date
 
-        from src.core.periodos import resolver_ventana
+        from src.core.periodos import meses_abarcados, resolver_ventana
 
+        # El ancho se mide sobre las fechas ESCRITAS, antes de pisarlas.
+        ancho = meses_abarcados(
+            report_config.filtros.fecha_desde, report_config.filtros.fecha_hasta
+        )
         try:
             desde, hasta = resolver_ventana(
-                report_config.filtros.fecha_modo, _date.today()
+                report_config.filtros.fecha_modo, _date.today(), ancho
             )
         except ValueError as exc:
             print(f"Error: {exc}")
@@ -1686,6 +1690,9 @@ def _run_cobertura_cupos_report(report, merged: dict) -> list[tuple[Path, dict]]
         fecha_desde=merged["fecha_desde"],
         # None -> los 5 genericos CCU (default del servicio).
         genericos=merged.get("genericos"),
+        # None -> las tres zonas por defecto (CASA CENTRAL / VALLE SALTA /
+        # GUEMES). Con nombres, una hoja entera por sucursal.
+        sucursales=merged.get("sucursales"),
         nombre_archivo=report.nombre,
     )
 

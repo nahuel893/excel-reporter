@@ -69,7 +69,7 @@ class GlobalFilters(BaseModel):
     # informe de FULL SPORT con junio-julio cuando tenia que ser julio-agosto.
     # Es el mismo modo que declara scripts/run_daily.py, resuelto por el mismo
     # codigo (src/core/periodos.resolver_ventana).
-    fecha_modo: Literal["mes_a_hoy", "mes_completo", "hoy"] | None = None
+    fecha_modo: Literal["mes_a_hoy", "mes_completo", "hoy", "ventana_movil"] | None = None
     genericos: list[str] | None = None
     categorias: dict[str, Any] | None = None
     con_slicers: bool = True

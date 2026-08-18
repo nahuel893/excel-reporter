@@ -18,6 +18,8 @@ Add a new service:
         - "hoy"         : fecha_desde = fecha_hasta = today (single-day snapshots)
         - "mes_a_hoy"   : fecha_desde = first day of month, fecha_hasta = today
         - "solo_hasta"  : keep fecha_desde as-is, only patch fecha_hasta = today
+        - "ventana_movil": N-month window ENDING today; N comes from the config's
+                          own fecha_desde..fecha_hasta, so the width is preserved
 
 Daily overrides (configs/daily_overrides.json):
     Optional file. Per-service flags to skip execution and/or delivery.
@@ -59,6 +61,8 @@ from config.settings import FERIADOS  # noqa: E402,F401  (lo usa periodos)
 from src.config.resolver import load_contacts, load_report_config  # noqa: E402
 from src.core.periodos import (  # noqa: E402
     es_dia_habil,
+    meses_abarcados,
+    rango_ventana_movil,
     es_primer_dia_habil_del_mes,
     rango_mes_a_hoy,
     rango_mes_completo,
@@ -153,7 +157,7 @@ CONFIGS_DIR = ROOT / "configs"
 CONTACTOS_PATH = CONFIGS_DIR / "contactos.json"
 OVERRIDES_PATH = CONFIGS_DIR / "daily_overrides.json"
 
-FechaModo = Literal["hoy", "mes_a_hoy", "mes_completo", "solo_hasta"]
+FechaModo = Literal["hoy", "mes_a_hoy", "mes_completo", "solo_hasta", "ventana_movil"]
 
 # RAM guard for image-rendering reports (e.g. avance-badie's LibreOffice capture).
 # The render needs ~2.5 GB RAM; below this floor we skip images rather than risk
@@ -211,6 +215,14 @@ class Servicio:
             # day of the period. Required for get_venta_mes and any other
             # consumer that treats fecha_hasta as exclusive.
             fecha_desde, fecha_hasta = _resolve_mes_completo_range(hoy)
+            filtros["fecha_desde"] = fecha_desde
+            filtros["fecha_hasta"] = fecha_hasta
+        elif self.fecha_modo == "ventana_movil":
+            # Ventana de N meses que TERMINA hoy. El ancho sale de las fechas
+            # escritas en el config, que quedan documentando cuantos meses mide
+            # el informe. Con mes_a_hoy se achicaria a uno solo.
+            ancho = meses_abarcados(filtros["fecha_desde"], filtros["fecha_hasta"])
+            fecha_desde, fecha_hasta = rango_ventana_movil(hoy, ancho)
             filtros["fecha_desde"] = fecha_desde
             filtros["fecha_hasta"] = fecha_hasta
         elif self.fecha_modo == "solo_hasta":
@@ -324,6 +336,13 @@ SERVICIOS: list[Servicio] = [
         nombre="stock-badie",
         config_path=CONFIGS_DIR / "stock_badie.json",
         fecha_modo="mes_completo",  # half-open SQL upper bound (see _resolve_mes_completo_range)
+    ),
+    Servicio(
+        nombre="cobertura-aguas",
+        config_path=CONFIGS_DIR / "cobertura_aguas.json",
+        # ventana_movil y no mes_a_hoy: el informe abre una columna por mes y
+        # deriva cuantas del rango, asi que mes_a_hoy lo dejaria en un solo mes.
+        fecha_modo="ventana_movil",
     ),
 ]
 
