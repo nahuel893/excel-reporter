@@ -145,9 +145,26 @@ corre y entrega solo. Un `ejecutar: false` explícito le gana al calendario, y u
 valor inválido se ignora con warning (fail-open: un typo no debe apagar un
 informe para siempre en silencio).
 
-**Compuerta de RAM** — `RAM_MIN_MB_IMAGENES = 3000` en `run_daily.py`: si a las
+**Compuerta de RAM** — `RAM_MIN_MB_IMAGENES = 1500` en `run_daily.py`: si a las
 07:00 hay menos memoria disponible, se omiten las imágenes, **el xlsx igual sale
 por email** y Nahuel recibe un aviso por WhatsApp. Nunca falla en silencio.
+
+El piso se **recalibra cuando cambia el costo del render**. Medición del
+2026-08-19 con las 5 capturas actuales:
+
+| Disponible al arrancar | Duración | Resultado |
+|---|---|---|
+| 3918 MB | 567 s | 5/5 |
+| 1108 MB | 736 s | 5/5 |
+
+Picos de RSS: `soffice` 1151 MB, Python 2588 MB. Con poca memoria el render
+**no muere, se apoya en swap y tarda ~30% más**. Por eso el piso protege contra
+un OOM-kill, no contra la lentitud.
+
+El piso anterior era 3000 MB, medido en julio cuando el reporte generaba 25
+imágenes. Quedó desactualizado al pasar a 5: el 2026-08-19 el guard se disparó
+con 2497 MB disponibles y el grupo se quedó sin imágenes por nada — el render
+funciona con bastante menos.
 
 ### 4.2. A quién le llega
 

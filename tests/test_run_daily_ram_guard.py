@@ -276,7 +276,12 @@ class TestRamGuardNoDejaANadieSinInforme:
         spec.loader.exec_module(mod)
 
         patched = self._patched_como_avance_badie()
-        assert mod._ram_guard_omite_imagenes(patched, 2497) is True
+        # Relativo al piso, no un valor fijo: el piso se recalibra cuando cambia
+        # el costo del render (bajo de 3000 a 1500 el 2026-08-19) y este test
+        # prueba la DEGRADACION, no el numero.
+        assert mod._ram_guard_omite_imagenes(
+            patched, mod.RAM_MIN_MB_IMAGENES - 1
+        ) is True
 
         # Lo que hace el runner cuando el guard se dispara.
         patched["filtros"]["whatsapp_enviar_como"] = "archivo"

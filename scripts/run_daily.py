@@ -160,9 +160,19 @@ OVERRIDES_PATH = CONFIGS_DIR / "daily_overrides.json"
 FechaModo = Literal["hoy", "mes_a_hoy", "mes_completo", "solo_hasta", "ventana_movil"]
 
 # RAM guard for image-rendering reports (e.g. avance-badie's LibreOffice capture).
-# The render needs ~2.5 GB RAM; below this floor we skip images rather than risk
-# an OOM-killed render silently dropping the WhatsApp send.
-RAM_MIN_MB_IMAGENES = 3000
+# Below this floor we skip images rather than risk an OOM-killed render silently
+# dropping the WhatsApp send.
+#
+# Calibrado 2026-08-19 midiendo el render real de avance-badie (5 capturas, ver
+# docs/avance-badie.md). El piso anterior era 3000 MB, medido en julio cuando el
+# reporte generaba 25 imagenes; con 5 sobra:
+#   - arrancando con 1108 MB disponibles completo las 5 sin fallar (736 s)
+#   - arrancando con 3918 MB disponibles tardo 567 s
+# O sea que abajo del piso viejo el render funciona igual, solo mas lento porque
+# se apoya en swap. 1500 deja margen sobre el minimo probado y evita seguir
+# bloqueando envios perfectamente viables: el 2026-08-19 el guard salto con
+# 2497 MB y el grupo se quedo sin las imagenes por nada.
+RAM_MIN_MB_IMAGENES = 1500
 _MEMINFO_PATH = Path("/proc/meminfo")
 
 
