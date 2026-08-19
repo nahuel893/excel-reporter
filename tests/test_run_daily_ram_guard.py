@@ -215,11 +215,20 @@ class TestRamGuardWiring:
         rc = run_daily._ejecutar_servicio(svc, date(2026, 8, 15), enviar=True)
         return rc, captured, alerted
 
-    def test_low_ram_disables_whatsapp_and_alerts(self, tmp_path, monkeypatch):
+    def test_low_ram_degrada_a_archivo_sin_apagar_whatsapp(self, tmp_path, monkeypatch):
+        """El canal de WhatsApp SOBREVIVE; solo se cae el render de imagenes.
+
+        Este test afirmaba lo contrario (enviar_whatsapp is False) y por eso el
+        bug del 2026-08-19 no lo detecto nadie: avance-badie tiene
+        destinatarios que SOLO tienen WhatsApp (Preventa Salta, Alejandro
+        Nogales) y se quedaron sin informe.
+        """
         rc, captured, alerted = self._run(tmp_path, monkeypatch, avail_mb=1000)
 
+        filtros = captured["report_config"].filtros
         assert rc == 0
-        assert captured["report_config"].filtros.enviar_whatsapp is False
+        assert filtros.enviar_whatsapp is True
+        assert filtros.whatsapp_enviar_como == "archivo"
         assert alerted == {"called": True, "nombre": "avance-badie", "avail": 1000}
 
     def test_sufficient_ram_keeps_whatsapp_and_does_not_alert(self, tmp_path, monkeypatch):
@@ -235,3 +244,60 @@ class TestRamGuardWiring:
         assert rc == 0
         assert captured["report_config"].filtros.enviar_whatsapp is True
         assert alerted["called"] is False
+
+
+class TestRamGuardNoDejaANadieSinInforme:
+    """El guard no puede dejar sin nada al que solo tiene WhatsApp.
+
+    Paso el 2026-08-19 con avance-badie: RAM 2497 MB, el guard puso
+    enviar_whatsapp=False, el mail salio a los seis supervisores y Preventa
+    Salta y Alejandro Nogales —que solo tienen WhatsApp— no recibieron nada.
+    La alerta ademas decia que el xlsx habia salido por email, que para ellos
+    era falso.
+    """
+
+    def _patched_como_avance_badie(self):
+        return {
+            "filtros": {
+                "enviar_whatsapp": True,
+                "enviar_email": True,
+                "whatsapp_enviar_como": "imagen",
+            },
+            "reportes": [{"capture_images": [{"hoja": "Avance", "rango": "A1:B2"}]}],
+        }
+
+    def test_degrada_a_archivo_y_no_apaga_whatsapp(self, monkeypatch):
+        import importlib.util
+        import sys
+
+        spec = importlib.util.spec_from_file_location("rd_ram", "scripts/run_daily.py")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["rd_ram"] = mod
+        spec.loader.exec_module(mod)
+
+        patched = self._patched_como_avance_badie()
+        assert mod._ram_guard_omite_imagenes(patched, 2497) is True
+
+        # Lo que hace el runner cuando el guard se dispara.
+        patched["filtros"]["whatsapp_enviar_como"] = "archivo"
+
+        assert patched["filtros"]["enviar_whatsapp"] is True, (
+            "el canal de WhatsApp tiene que sobrevivir: hay destinatarios que "
+            "SOLO tienen ese canal"
+        )
+        assert mod._report_renderiza_imagenes(patched) is False, (
+            "con enviar_como=archivo no se renderiza, que es lo que ahorra la RAM"
+        )
+
+    def test_con_ram_suficiente_no_toca_nada(self):
+        import importlib.util
+        import sys
+
+        spec = importlib.util.spec_from_file_location("rd_ram2", "scripts/run_daily.py")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["rd_ram2"] = mod
+        spec.loader.exec_module(mod)
+
+        patched = self._patched_como_avance_badie()
+        assert mod._ram_guard_omite_imagenes(patched, 8000) is False
+        assert patched["filtros"]["whatsapp_enviar_como"] == "imagen"

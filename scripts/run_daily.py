@@ -549,9 +549,9 @@ def _alertar_ram_baja(nombre: str, avail_mb: int | None) -> None:
             print("  ⚠️  alerta RAM baja: 'Nahuel Aguirre' sin telefono en contactos — no se envía")
             return
         msg = (
-            f"⚠️ {nombre}: RAM baja ({avail_mb} MB) a las 07:00 — se envió el xlsx por "
-            f"email pero se OMITIERON las imágenes del grupo. Cerrá el VM y regenerá si "
-            f"querés las imágenes."
+            f"⚠️ {nombre}: RAM baja ({avail_mb} MB) a las 07:00 — se OMITIERON las "
+            f"imágenes. El xlsx salió igual por los canales configurados (email y/o "
+            f"WhatsApp como archivo). Cerrá el VM y regenerá si querés las imágenes."
         )
         WhatsAppClient(WHATSAPP_SERVICE_URL).send_text(target=telefono, text=msg)
     except Exception as exc:  # noqa: BLE001
@@ -582,18 +582,26 @@ def _ejecutar_servicio(
 
     # RAM guard: image-rendering reports (LibreOffice capture, ~2.5 GB) can get
     # OOM-killed if a VM is eating RAM at 07:00, silently dropping the WhatsApp
-    # send. If RAM is short, disable enviar_whatsapp — resolve_delivery then
-    # builds no WhatsApp config, so CaptureImageStep's `_images_consumed` gate
-    # returns False (email adjuntos default to ["excel"], not image) → no
-    # render, no OOM, but the email xlsx still goes out. Nahuel gets alerted.
+    # send. If RAM is short, DEGRADE the WhatsApp channel to "archivo" instead
+    # of turning it off: mandar el xlsx no renderiza nada, asi que no cuesta RAM,
+    # y el grupo sigue recibiendo el informe.
+    #
+    # Antes esto ponia enviar_whatsapp=False, y ahi el que solo tiene WhatsApp se
+    # quedaba sin NADA sin que nadie se enterara. Paso el 2026-08-19 con
+    # avance-badie: el mail salio a los seis supervisores, pero Preventa Salta y
+    # Alejandro Nogales —que solo tienen WhatsApp— no recibieron nada, y la
+    # alerta decia que el xlsx habia salido por email, que para ellos era falso.
+    #
+    # Con enviar_como="archivo", `_report_renderiza_imagenes` da False, asi que
+    # CaptureImageStep no renderiza y no hay OOM.
     if enviar and _report_renderiza_imagenes(patched):
         avail = _mem_available_mb()
         if _ram_guard_omite_imagenes(patched, avail):
             print(
                 f"  🧠 {svc.nombre}: RAM insuficiente ({avail} MB < {RAM_MIN_MB_IMAGENES} MB) — "
-                f"se envía xlsx por email, se OMITEN las imágenes"
+                f"se OMITEN las imágenes; el xlsx sale igual por email y por WhatsApp"
             )
-            patched.setdefault("filtros", {})["enviar_whatsapp"] = False
+            patched.setdefault("filtros", {})["whatsapp_enviar_como"] = "archivo"
             _alertar_ram_baja(svc.nombre, avail)
 
     if not enviar:
