@@ -258,6 +258,7 @@ def merge_filters(
         "dias_stock": global_f.dias_stock,
         "genericos_excluidos": global_f.genericos_excluidos,
         "sucursales_excluidas": global_f.sucursales_excluidas,
+        "sucursales_ids": global_f.sucursales_ids,
         "supervisores_sucursales": global_f.supervisores_sucursales,
         "incluir_directa": global_f.incluir_directa,
         "split_por_sucursal": global_f.split_por_sucursal,

@@ -91,6 +91,7 @@ REPORT_HANDLERS: dict[str, str] = {
     "cobertura": "_run_cobertura_report",
     "cobertura-cupos": "_run_cobertura_cupos_report",
     "cobertura-aguas": "_run_cobertura_aguas_report",
+    "cobertura-levite": "_run_cobertura_levite_report",
     "quesos": "_run_quesos_report",
     "volumen-cobertura": "_run_volumen_cobertura_report",
 }
@@ -1047,6 +1048,41 @@ def _run_cobertura_aguas_report(report, merged: dict) -> list[tuple[Path, dict]]
         (
             Path(result.ruta_archivo),
             {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
+def _run_cobertura_levite_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate cobertura-levite report (cobertura de Levite abierta por calibre)."""
+    from src.services.cobertura_levite import (
+        CoberturaLeviteConfig,
+        CoberturaLeviteService,
+    )
+
+    fecha_hasta = merged.get("fecha_hasta") or merged.get("fecha_desde")
+    fecha_desde = merged.get("fecha_desde") or (fecha_hasta[:7] + "-01")
+    
+    config = CoberturaLeviteConfig(
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        umbral=float(merged.get("umbral", 0.0)),
+        nombre_archivo=report.nombre,
+        sucursales=merged.get("sucursales_ids"),
+    )
+
+    result = CoberturaLeviteService().generar_reporte(config)
+    print(f"Cobertura Levite por Calibre '{report.nombre}' generada exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Clientes compradores: {result.clientes_compradores:,} | Volumen total: {result.volumen_total:,.2f} bultos")
+    print(
+        f"  - Cobertura sobre padron: {result.clientes_compradores:,} "
+        f"de {result.padron_total:,} "
+        f"({result.clientes_compradores / result.padron_total:.1%})"
+    )
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": fecha_hasta},
         )
     ]
 

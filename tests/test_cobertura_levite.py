@@ -192,3 +192,59 @@ def test_las_categorias_separan_mineral_saborizada_e_isotonica():
     assert grupos["AGUA MINERAL"] == ("VILLA DEL SUR", "VILLAVICENCIO")
     assert grupos["AGUA SABORIZADA"] == ("LEVITE", "BRIO")
     assert grupos["ISOTONICA"] == ("FULL SPORT",)
+
+
+# --- config y entrega -------------------------------------------------------
+
+def test_el_config_manda_a_los_tres_por_mail_y_wpp():
+    from pathlib import Path
+
+    from src.config.resolver import load_report_config
+
+    cfg = load_report_config(Path("configs/cobertura_levite.json"))
+    envios = cfg.reportes[0].enviar_a
+    for nombre in ("Sebastian Dellamea", "Antonio Cabrerizo", "Gonzalo Farah"):
+        assert "email" in envios[nombre].via, f"{nombre} sin mail"
+        assert "whatsapp" in envios[nombre].via, f"{nombre} sin whatsapp"
+    assert cfg.filtros.enviar_email is True
+    assert cfg.filtros.enviar_whatsapp is True
+
+
+def test_el_config_captura_la_hoja_del_cuadro():
+    from pathlib import Path
+
+    from src.config.resolver import load_report_config
+
+    cap = load_report_config(Path("configs/cobertura_levite.json")).reportes[0].capture_images
+    assert len(cap) == 1
+    assert cap[0].hoja == "Calibre x Marca"
+
+
+def test_el_config_solo_toma_casa_central():
+    from pathlib import Path
+
+    from src.config.resolver import load_report_config
+
+    assert load_report_config(Path("configs/cobertura_levite.json")).filtros.sucursales_ids == [1]
+
+
+def test_la_ventana_es_relativa():
+    """Sin esto el informe diario sale con el mes escrito en el JSON."""
+    from pathlib import Path
+
+    from src.config.resolver import load_report_config
+
+    assert load_report_config(Path("configs/cobertura_levite.json")).filtros.fecha_modo == "mes_a_hoy"
+
+
+def test_esta_registrado_en_el_daily():
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location("rd_lev", "scripts/run_daily.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["rd_lev"] = mod
+    spec.loader.exec_module(mod)
+    srv = {s.nombre: s for s in mod.SERVICIOS}
+    assert "cobertura-levite" in srv
+    assert srv["cobertura-levite"].fecha_modo == "mes_a_hoy"

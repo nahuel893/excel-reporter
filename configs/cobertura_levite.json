@@ -4,12 +4,58 @@
         "fecha_desde": "2026-08-01",
         "fecha_hasta": "2026-08-18",
         "umbral": 0.0,
-        "enviar_email": false,
-        "enviar_whatsapp": false
+        "sucursales_ids": [
+            1
+        ],
+        "_sucursal_nota": "Solo CASA CENTRAL (id 1). Filtra ventas y padron con el mismo criterio.",
+        "enviar_email": true,
+        "enviar_whatsapp": true,
+        "fecha_modo": "mes_a_hoy",
+        "_ventana_nota": "mes_a_hoy: las fechas de arriba solo documentan el formato; se recalculan al mes en curso en cada corrida.",
+        "whatsapp_enviar_como": "imagen",
+        "whatsapp_caption_imagenes": false,
+        "email_adjuntos": [
+            "excel",
+            "imagen"
+        ]
     },
     "reportes": [
         {
-            "nombre": "Cobertura Levite por Calibre"
+            "nombre": "Cobertura Aguas por Calibre y Marca - CASA CENTRAL - {MES} {AÑO}",
+            "asunto_email": "Cobertura Aguas por Calibre y Marca - CASA CENTRAL - {MES} {AÑO}",
+            "capture_images": [
+                {
+                    "hoja": "Calibre x Marca",
+                    "rango": "A1:J14",
+                    "renderer": "libreoffice"
+                }
+            ],
+            "enviar_a": {
+                "Sebastian Dellamea": {
+                    "via": [
+                        "email",
+                        "whatsapp"
+                    ]
+                },
+                "Antonio Cabrerizo": {
+                    "via": [
+                        "email",
+                        "whatsapp"
+                    ]
+                },
+                "Gonzalo Farah": {
+                    "via": [
+                        "email",
+                        "whatsapp"
+                    ]
+                },
+                "Nahuel Aguirre": {
+                    "via": [
+                        "email_cc",
+                        "whatsapp"
+                    ]
+                }
+            }
         }
     ]
 }

@@ -27,7 +27,6 @@ from .processor import (
     matriz_calibre_marca,
     ordenar_calibres,
     procesar_cobertura_sucursal_calibre,
-    procesar_clientes_compradores,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,6 +48,10 @@ class CoberturaLeviteConfig:
     fecha_hasta: str
     umbral: float = 0.0
     nombre_archivo: str | None = None
+    # Sucursales del informe, por id. None = todas. El padron se filtra con el
+    # MISMO criterio: es el denominador del % y tiene que salir del mismo
+    # universo que las ventas.
+    sucursales: list[int] | None = None
 
 
 @dataclass
@@ -73,7 +76,8 @@ class CoberturaLeviteService(BaseService):
     GRANULARITY = "month"
 
     def _fetch_ventas(
-        self, fecha_desde: str, fecha_hasta: str, marcas: list[str] | None = None
+        self, fecha_desde: str, fecha_hasta: str,
+        marcas: list[str] | None = None, sucursales: list[int] | None = None,
     ) -> pd.DataFrame:
         """Ventas con joins compuestos y clasificacion por calibre.
 
@@ -105,6 +109,7 @@ class CoberturaLeviteService(BaseService):
         JOIN gold.dim_vendedor dv ON fv.id_vendedor = dv.id_vendedor AND fv.id_sucursal = dv.id_sucursal
         LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente AND fv.id_sucursal = dc.id_sucursal
         WHERE da.marca = ANY(:marcas)
+          {filtro_suc}
           AND fv.anulado = false
           AND dv.id_fuerza_ventas = 1
           AND fv.fecha_comprobante >= :desde
@@ -119,17 +124,23 @@ class CoberturaLeviteService(BaseService):
             COALESCE(dc.id_ruta_fv1, 0), COALESCE(dv.des_vendedor, 'SIN VENDEDOR'),
             fv.id_articulo, da.des_articulo, da.marca
         """
-        df = self.data_loader.execute_query(
-            query,
-            {"desde": fecha_desde, "hasta": fecha_hasta, "marcas": list(marcas or ["LEVITE"])},
-        )
+        params = {
+            "desde": fecha_desde, "hasta": fecha_hasta,
+            "marcas": list(marcas or ["LEVITE"]),
+        }
+        if sucursales:
+            query = query.replace("{filtro_suc}", "AND fv.id_sucursal = ANY(:sucursales)")
+            params["sucursales"] = list(sucursales)
+        else:
+            query = query.replace("{filtro_suc}", "")
+        df = self.data_loader.execute_query(query, params)
         if not df.empty:
             df["calibre"] = df["des_articulo"].apply(extraer_calibre)
         else:
             df["calibre"] = pd.Series(dtype=str)
         return df
 
-    def _fetch_padron(self) -> pd.DataFrame:
+    def _fetch_padron(self, sucursales: list[int] | None = None) -> pd.DataFrame:
         """Obtiene el padron de clientes activos (no anulados) por sucursal."""
         query = """
         SELECT 
@@ -139,10 +150,19 @@ class CoberturaLeviteService(BaseService):
         FROM gold.dim_cliente dc
         JOIN gold.dim_sucursal ds ON dc.id_sucursal = ds.id_sucursal
         WHERE dc.anulado = false
+          {filtro_suc}
         GROUP BY dc.id_sucursal, ds.descripcion
         ORDER BY ds.descripcion
         """
-        return self.data_loader.execute_query(query)
+        # El MISMO recorte que las ventas: el padron es el denominador del % y
+        # con otro universo el porcentaje compara cosas distintas.
+        params: dict = {}
+        if sucursales:
+            query = query.replace("{filtro_suc}", "AND dc.id_sucursal = ANY(:sucursales)")
+            params["sucursales"] = list(sucursales)
+        else:
+            query = query.replace("{filtro_suc}", "")
+        return self.data_loader.execute_query(query, params)
 
     def generar_reporte(self, config: CoberturaLeviteConfig) -> CoberturaLeviteResult:
         """Ejecuta la extraccion, transformacion y generacion del workbook Excel."""
@@ -150,15 +170,16 @@ class CoberturaLeviteService(BaseService):
         
         # Una sola consulta con TODO el universo; cada hoja filtra lo suyo.
         marcas_universo = [m for _, ms in CATEGORIAS for m in ms]
-        df_todo = self._fetch_ventas(config.fecha_desde, config.fecha_hasta, marcas_universo)
+        df_todo = self._fetch_ventas(
+            config.fecha_desde, config.fecha_hasta, marcas_universo, config.sucursales
+        )
         df_ventas = df_todo[df_todo["marca"] == "LEVITE"].copy()
-        df_padron = self._fetch_padron()
+        df_padron = self._fetch_padron(config.sucursales)
         
         calibres_presentes = ordenar_calibres(list(df_ventas["calibre"].unique())) if not df_ventas.empty else ["500cc", "1500cc", "2250cc"]
         calibres_activos = [c for c in calibres_presentes if c != "OTRO"]
         
         df_matriz, df_resumen_cal = procesar_cobertura_sucursal_calibre(df_ventas, df_padron, calibres_activos)
-        df_clientes = procesar_clientes_compradores(df_ventas, calibres_activos)
         
         out_dir = service_output_dir(self.SERVICE_SLUG, config.fecha_hasta, granularity="month")
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -166,19 +187,23 @@ class CoberturaLeviteService(BaseService):
         nombre = config.nombre_archivo or f"Cobertura Levite por Calibre - {config.fecha_hasta}"
         ruta_archivo = out_dir / f"{nombre}.xlsx"
         
+        # El informe es UN cuadro. Las hojas de matriz por sucursal y de detalle
+        # de clientes se sacaron el 2026-08-19 a pedido de Nahuel: lo que se
+        # mira es la apertura calibre x marca, y el resto solo agrandaba el
+        # archivo que va por mail todos los dias.
         wb = Workbook()
-        ws_cob = wb.active
-        ws_cob.title = "Cobertura por Calibre"
-        ws_cal_marca = wb.create_sheet(title="Calibre x Marca")
-        ws_cli = wb.create_sheet(title="Clientes Compradores")
-        
-        self._build_hoja_cobertura(ws_cob, config, calibres_activos, df_matriz, df_resumen_cal)
+        ws_cal_marca = wb.active
+        ws_cal_marca.title = "Calibre x Marca"
+
         df_cal_marca, bloques = matriz_calibre_marca(
             df_todo[df_todo["calibre"] != "OTRO"], CATEGORIAS, config.umbral
         )
-        if not df_cal_marca.empty:
-            self._build_hoja_calibre_marca(ws_cal_marca, config, df_cal_marca, bloques)
-        self._build_hoja_clientes(ws_cli, config, calibres_activos, df_clientes)
+        if df_cal_marca.empty:
+            raise ValueError(
+                f"Sin ventas de aguas entre {config.fecha_desde} y "
+                f"{config.fecha_hasta} para las sucursales {config.sucursales or 'todas'}"
+            )
+        self._build_hoja_calibre_marca(ws_cal_marca, config, df_cal_marca, bloques)
         
         wb.save(ruta_archivo)
         logger.info("Reporte guardado en %s", ruta_archivo)
@@ -192,145 +217,6 @@ class CoberturaLeviteService(BaseService):
             volumen_total=float(total_gen["vol_total"]) if total_gen is not None else 0.0,
             padron_total=int(df_padron["padron"].sum()),
         )
-
-    def _build_hoja_cobertura(
-        self,
-        ws: Worksheet,
-        config: CoberturaLeviteConfig,
-        calibres: list[str],
-        df_matriz: pd.DataFrame,
-        df_resumen_cal: pd.DataFrame,
-    ) -> None:
-        """Construye la hoja de Cobertura por Calibre."""
-        border = _thin_border()
-        
-        # Titulo y Subtitulo
-        ws["A1"] = "COBERTURA LEVITÉ POR CALIBRE"
-        ws["A1"].font = Font(bold=True, size=15, color="1F4E78")
-        ws["A2"] = (
-            f"Período: {config.fecha_desde} al {config.fecha_hasta}  |  "
-            f"Fuerza de Ventas: Preventa (FV=1)  |  "
-            f"Criterio: Compra neta > {config.umbral:g} bultos  |  "
-            f"Categorización automática por descripción de artículo"
-        )
-        ws["A2"].font = Font(italic=True, size=9, color="595959")
-        
-        # --- TABLA 1: MATRIZ DE COBERTURA POR SUCURSAL Y CALIBRE ---
-        r = 4
-        ws.cell(r, 1, "1. Cobertura por Sucursal y Calibre").font = Font(bold=True, size=12, color="1F4E78")
-        r += 1
-        
-        # Headers Tabla 1
-        headers_t1 = ["Sucursal", "Padrón"]
-        for cal in calibres:
-            headers_t1.extend([f"Cob {cal}", f"% s/ Pad {cal}"])
-        headers_t1.extend(["TOTAL LEVITÉ", "% Cob Total", "Vol Total (Bultos)"])
-        
-        fila_h1 = r
-        for j, h in enumerate(headers_t1, 1):
-            c = ws.cell(r, j, h)
-            c.fill = PatternFill("solid", start_color=HEADER_FILL, end_color=HEADER_FILL)
-            c.font = Font(bold=True, color=HEADER_FONT, size=10)
-            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            c.border = border
-        ws.row_dimensions[r].height = 28
-        r += 1
-        
-        for _, fila in df_matriz.iterrows():
-            es_tg = bool(fila["es_total_general"])
-            valores = [fila["sucursal"], int(fila["padron"])]
-            for cal in calibres:
-                valores.extend([int(fila[f"cob_{cal}"]), float(fila[f"pct_{cal}"])])
-            valores.extend([int(fila["cob_total"]), float(fila["pct_cob_total"]), float(fila["vol_total"])])
-            
-            for j, v in enumerate(valores, 1):
-                c = ws.cell(r, j, v)
-                c.border = border
-                if j == 1:
-                    c.alignment = Alignment(horizontal="left")
-                else:
-                    c.alignment = Alignment(horizontal="right")
-                    
-                # Formatos numericos
-                if isinstance(v, float):
-                    if headers_t1[j - 1].startswith("%"):
-                        c.number_format = "0.0%"
-                    else:
-                        c.number_format = "#,##0.00"
-                elif isinstance(v, int):
-                    c.number_format = "#,##0"
-                    
-                if es_tg:
-                    c.font = Font(bold=True)
-                    c.fill = PatternFill("solid", start_color=TOTAL_GRAL_FILL, end_color=TOTAL_GRAL_FILL)
-                elif headers_t1[j - 1] in ("TOTAL LEVITÉ", "% Cob Total"):
-                    c.fill = PatternFill("solid", start_color=TOTAL_SUC_FILL, end_color=TOTAL_SUC_FILL)
-                    c.font = Font(bold=True)
-                    
-            r += 1
-            
-        # --- TABLA 2: RESUMEN CONSOLIDADO POR CALIBRE ---
-        r += 2
-        ws.cell(r, 1, "2. Resumen Consolidado por Calibre (Total Empresa)").font = Font(bold=True, size=12, color="1F4E78")
-        r += 1
-        
-        headers_t2 = [
-            "Calibre",
-            "SKUs Activos",
-            "Clientes Compradores",
-            "% Penetración Levité",
-            "% Cobertura s/ Padrón",
-            "Volumen (Bultos)",
-            "% Mix Volumen",
-            "Drop Size (Bultos/Cli)",
-        ]
-        
-        for j, h in enumerate(headers_t2, 1):
-            c = ws.cell(r, j, h)
-            c.fill = PatternFill("solid", start_color=HEADER_FILL, end_color=HEADER_FILL)
-            c.font = Font(bold=True, color=HEADER_FONT, size=10)
-            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            c.border = border
-        ws.row_dimensions[r].height = 28
-        r += 1
-        
-        for _, fila in df_resumen_cal.iterrows():
-            es_tot = fila["calibre"] == "TOTAL LEVITÉ"
-            valores = [
-                fila["calibre"],
-                int(fila["articulos"]),
-                int(fila["cobertura"]),
-                float(fila["pct_penetracion_levite"]),
-                float(fila["pct_cobertura_padron"]),
-                float(fila["volumen_bultos"]),
-                float(fila["pct_mix_volumen"]),
-                float(fila["drop_size"]),
-            ]
-            
-            for j, v in enumerate(valores, 1):
-                c = ws.cell(r, j, v)
-                c.border = border
-                if j == 1:
-                    c.alignment = Alignment(horizontal="left")
-                else:
-                    c.alignment = Alignment(horizontal="right")
-                    
-                if j in (4, 5, 7):
-                    c.number_format = "0.0%"
-                elif j in (6, 8):
-                    c.number_format = "#,##0.00"
-                elif isinstance(v, int):
-                    c.number_format = "#,##0"
-                    
-                if es_tot:
-                    c.font = Font(bold=True)
-                    c.fill = PatternFill("solid", start_color=TOTAL_GRAL_FILL, end_color=TOTAL_GRAL_FILL)
-            r += 1
-            
-        # Ajustar anchos
-        ws.column_dimensions["A"].width = 30
-        for j in range(2, len(headers_t1) + 1):
-            ws.column_dimensions[get_column_letter(j)].width = 16
 
     def _build_hoja_calibre_marca(
         self, ws: Worksheet, config: "CoberturaLeviteConfig",
@@ -405,94 +291,3 @@ class CoberturaLeviteService(BaseService):
         ws.page_setup.orientation = "landscape"
         ws.page_setup.fitToWidth = 1
         ws.sheet_properties.pageSetUpPr.fitToPage = True
-
-    def _build_hoja_clientes(
-        self,
-        ws: Worksheet,
-        config: CoberturaLeviteConfig,
-        calibres: list[str],
-        df_clientes: pd.DataFrame,
-    ) -> None:
-        """Construye la hoja detallada de Clientes Compradores."""
-        border = _thin_border()
-        
-        ws["A1"] = "CLIENTES COMPRADORES — LEVITÉ POR CALIBRE"
-        ws["A1"].font = Font(bold=True, size=15, color="1F4E78")
-        ws["A2"] = (
-            f"Período: {config.fecha_desde} al {config.fecha_hasta}  |  "
-            f"Clientes con compra neta positiva en el período  |  "
-            f"Volúmenes expresados en Bultos"
-        )
-        ws["A2"].font = Font(italic=True, size=9, color="595959")
-        
-        headers = ["ID Suc", "Sucursal", "ID Cliente", "Cliente / Razón Social", "Ruta", "Preventista"]
-        headers.extend(calibres)
-        headers.extend(["Total Bultos", "Cant Calibres"])
-        
-        r = 4
-        fila_header = r
-        for j, h in enumerate(headers, 1):
-            c = ws.cell(r, j, h)
-            c.fill = PatternFill("solid", start_color=HEADER_FILL, end_color=HEADER_FILL)
-            c.font = Font(bold=True, color=HEADER_FONT, size=10)
-            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            c.border = border
-        ws.row_dimensions[r].height = 26
-        r += 1
-        
-        col_total_idx = len(headers) - 1
-        col_cant_idx = len(headers)
-        
-        for _, fila in df_clientes.iterrows():
-            valores = [
-                int(fila["id_sucursal"]),
-                str(fila["sucursal"]),
-                int(fila["id_cliente"]),
-                str(fila["cliente"]),
-                int(fila["id_ruta"]),
-                str(fila["vendedor"]),
-            ]
-            for cal in calibres:
-                valores.append(float(fila[cal]))
-            valores.extend([float(fila["total_bultos"]), int(fila["calibres_comprados"])])
-            
-            for j, v in enumerate(valores, 1):
-                c = ws.cell(r, j, v)
-                c.border = border
-                
-                # Alineacion
-                if j in (1, 3, 5, col_cant_idx):
-                    c.alignment = Alignment(horizontal="center")
-                elif j in (2, 4, 6):
-                    c.alignment = Alignment(horizontal="left")
-                else:
-                    c.alignment = Alignment(horizontal="right")
-                    
-                # Formatos
-                if j in (1, 3, 5, col_cant_idx):
-                    c.number_format = "#,##0"
-                elif isinstance(v, (int, float)) and j >= 7:
-                    c.number_format = "#,##0.00"
-                    
-                # Resaltar total
-                if j == col_total_idx:
-                    c.fill = PatternFill("solid", start_color=TOTAL_SUC_FILL, end_color=TOTAL_SUC_FILL)
-                    c.font = Font(bold=True)
-            r += 1
-            
-        # Anchos de columna
-        anchos = {
-            1: 10,   # ID Suc
-            2: 24,   # Sucursal
-            3: 13,   # ID Cliente
-            4: 40,   # Cliente
-            5: 10,   # Ruta
-            6: 24,   # Preventista
-        }
-        for j in range(1, len(headers) + 1):
-            w = anchos.get(j, 15)
-            ws.column_dimensions[get_column_letter(j)].width = w
-            
-        # Filtro y congelar paneles
-        ws.freeze_panes = ws.cell(row=fila_header + 1, column=4).coordinate
-        ws.auto_filter.ref = f"A{fila_header}:{get_column_letter(len(headers))}{r - 1}"

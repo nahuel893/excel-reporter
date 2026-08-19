@@ -114,6 +114,9 @@ class GlobalFilters(BaseModel):
     # CASA CENTRAL (1) suele excluirse porque tiene su propio circuito y su
     # volumen tapa al del interior.
     sucursales_excluidas: list[int] | None = None
+    # cobertura-levite: sucursales INCLUIDAS, por id. None = todas. Filtra
+    # ventas Y padron con el mismo criterio.
+    sucursales_ids: list[int] | None = None
     # volumen-cobertura: {supervisor: [sucursales]} para agrupar el informe en
     # bloques con subtotal. Tiene que ser una PARTICION de las sucursales del
     # informe: el mapa de configs/ventas.json NO lo es (Walter Vilte tiene las
@@ -232,7 +235,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "incentivo-salta", "stock-badie", "stock-valorizado", "cupo-desagregado", "comparativo-salta", "cobertura", "cobertura-cupos", "cobertura-aguas", "quesos", "volumen-cobertura"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "incentivo-salta", "stock-badie", "stock-valorizado", "cupo-desagregado", "comparativo-salta", "cobertura", "cobertura-cupos", "cobertura-aguas", "cobertura-levite", "quesos", "volumen-cobertura"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

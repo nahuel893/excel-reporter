@@ -338,6 +338,11 @@ SERVICIOS: list[Servicio] = [
         fecha_modo="mes_completo",  # half-open SQL upper bound (see _resolve_mes_completo_range)
     ),
     Servicio(
+        nombre="cobertura-levite",
+        config_path=CONFIGS_DIR / "cobertura_levite.json",
+        fecha_modo="mes_a_hoy",
+    ),
+    Servicio(
         nombre="cobertura-aguas",
         config_path=CONFIGS_DIR / "cobertura_aguas.json",
         # ventana_movil y no mes_a_hoy: el informe abre una columna por mes y
