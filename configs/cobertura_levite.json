@@ -1,0 +1,15 @@
+{
+    "tipo": "cobertura-levite",
+    "filtros": {
+        "fecha_desde": "2026-08-01",
+        "fecha_hasta": "2026-08-18",
+        "umbral": 0.0,
+        "enviar_email": false,
+        "enviar_whatsapp": false
+    },
+    "reportes": [
+        {
+            "nombre": "Cobertura Levite por Calibre"
+        }
+    ]
+}
