@@ -15,8 +15,8 @@ Dos decisiones que no son obvias:
   blanco — no en cero, que se leeria como fracaso y pintaria el semaforo rojo
   antes de tiempo.
 
-La cobertura usa umbral 0.5 bultos (ver `processor`), que es criterio de ESTE
-informe y no se hereda a ningun otro.
+La cobertura cuenta el cliente con neto POSITIVO en el corte (`> 0`). Hasta el
+2026-08-19 usaba umbral 0.5 bultos; el negocio cambio el criterio.
 """
 import logging
 from dataclasses import dataclass, field

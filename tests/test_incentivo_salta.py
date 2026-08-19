@@ -2,7 +2,7 @@
 
 Tres cosas que este informe hace distinto al resto y que estos tests fijan:
 
-- La cobertura usa umbral **0.5 bultos**, no el `> 0` por defecto.
+- La cobertura cuenta neto POSITIVO (`> 0`). Antes usaba umbral 0.5 bultos.
 - Los cupos se LEEN del xlsx de objetivos y nunca se recalculan.
 - Un bloque cuyo mes todavia no empezo queda en BLANCO, no en cero.
 """
@@ -56,7 +56,11 @@ class TestMesYaEmpezo:
 # ── Conteo de cobertura ──────────────────────────────────────────────────────
 
 def _ventas():
-    """Cliente 3 lleva 0.25 bultos: por debajo del umbral, no cuenta."""
+    """Los cuatro tienen neto positivo, asi que los cuatro cuentan.
+
+    El cliente 3 lleva 0.25 bultos: con el umbral viejo de media caja quedaba
+    afuera; con `> 0` entra.
+    """
     return pd.DataFrame({
         "id_cliente": [1, 2, 3, 4],
         "id_sucursal": [1, 1, 1, 1],
@@ -68,12 +72,29 @@ def _ventas():
 
 
 class TestContarCobertura:
-    def test_aplica_el_umbral_de_medio_bulto(self):
-        assert contar_cobertura(_ventas(), "NEGRA", "1000") == {"LORENA": 2, "NAHUEL": 1}
+    def test_cuenta_todo_neto_positivo(self):
+        """Criterio 2026-08-19: cualquier compra neta positiva cuenta.
 
-    def test_medio_bulto_exacto_cuenta(self):
-        d = _ventas()[_ventas().id_cliente == 2]
+        Con el umbral viejo de 0.5 el cliente 3 (0.25 bultos) quedaba afuera y
+        LORENA daba 2.
+        """
+        assert contar_cobertura(_ventas(), "NEGRA", "1000") == {"LORENA": 3, "NAHUEL": 1}
+
+    def test_una_fraccion_chica_cuenta(self):
+        d = _ventas()[_ventas().id_cliente == 3]
         assert contar_cobertura(d, "NEGRA", "1000") == {"LORENA": 1}
+
+    def test_neto_cero_exacto_NO_cuenta(self):
+        """El filtro es estricto: `> 0`, no `>= 0`.
+
+        Si fuera `>=`, el que compro y devolvio todo entraria como cubierto.
+        """
+        d = pd.DataFrame({
+            "id_cliente": [9, 9], "id_sucursal": [1, 1],
+            "preventista": ["LORENA", "LORENA"], "sabor": ["NEGRA"] * 2,
+            "calibre": ["1000"] * 2, "bultos": [4.0, -4.0],
+        })
+        assert contar_cobertura(d, "NEGRA", "1000") == {}
 
     def test_totaliza_por_cliente_antes_de_filtrar(self):
         """Dos compras de 0.3 suman 0.6 y el cliente cuenta; linea a linea no."""
@@ -101,7 +122,8 @@ class TestContarCobertura:
 
 class TestCoberturaTotal:
     def test_cuenta_desde_el_grano_no_sumando_preventistas(self):
-        assert cobertura_total(_ventas(), "NEGRA", "1000") == 3
+        # 4 y no 3: con el criterio `> 0` el cliente de 0.25 bultos tambien entra.
+        assert cobertura_total(_ventas(), "NEGRA", "1000") == 4
 
     def test_mismo_cliente_en_dos_preventistas_cuenta_una_vez(self):
         d = pd.DataFrame({
@@ -211,7 +233,8 @@ def test_el_bloque_futuro_queda_en_blanco_no_en_cero(tmp_path):
     result, _ = _generar(tmp_path)
     ws, filas = _celdas(result.ruta_archivo)
     r = filas["LORENA"]
-    assert ws.cell(r, 3).value == 2       # agosto: cobertura cargada
+    # 3 y no 2 desde el cambio de criterio a `> 0` (2026-08-19).
+    assert ws.cell(r, 3).value == 3       # agosto: cobertura cargada
     assert ws.cell(r, 6).value is None    # septiembre: en blanco
     assert ws.cell(r, 7).value is None    # y sin formula de %
 

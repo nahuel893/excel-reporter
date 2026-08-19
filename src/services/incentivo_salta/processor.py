@@ -1,17 +1,22 @@
 """Logica pura del incentivo preventa SALTA.
 
-La cobertura de este informe usa umbral **0.5 bultos**, no el `> 0` por defecto
-del resto del proyecto: el negocio quiere dejar afuera al pdv de compromiso que
-se lleva una o dos botellas de un pack de doce. El umbral es de ESTE informe y
-no se hereda a ningun otro.
+La cobertura usa el criterio `> 0`, igual que el resto del proyecto: cuenta el
+cliente con neto POSITIVO en el corte.
+
+Hasta el 2026-08-19 este informe usaba umbral 0.5 bultos —media caja— para
+dejar afuera al pdv de compromiso que se lleva una o dos botellas de un pack de
+doce. El negocio cambio ese criterio: ahora cualquier compra neta positiva
+cuenta. El umbral quedo parametrizable por si vuelve a moverse.
 """
 import calendar
 from datetime import date
 
 import pandas as pd
 
-# Media caja. Ver el docstring del modulo.
-UMBRAL_BULTOS = 0.5
+# Cambiado de 0.5 a 0.0 el 2026-08-19 a pedido de Nahuel. Va con el `>` de
+# abajo, NO con `>=`: con `>= 0` entraria el cliente cuyo neto da exactamente
+# cero —compro y devolvio todo— que es justo lo que la cobertura no debe contar.
+UMBRAL_BULTOS = 0.0
 
 _CLIENTE_KEY = ["id_cliente", "id_sucursal"]
 
@@ -49,6 +54,9 @@ def contar_cobertura(
     se filtra. Agrupar antes de filtrar es lo que hace que un cliente cuya
     devolucion cancela la compra quede afuera, y que uno que llego al umbral en
     varias compras chicas quede adentro.
+
+    El filtro es ESTRICTO (`>`): el neto tiene que superar el umbral, no
+    igualarlo. Con umbral 0 eso es exactamente "neto positivo".
     """
     if df.empty:
         return {}
@@ -56,7 +64,7 @@ def contar_cobertura(
     if d.empty:
         return {}
     neto = d.groupby(_CLIENTE_KEY + ["preventista"], as_index=False)["bultos"].sum()
-    return neto[neto["bultos"] >= umbral].groupby("preventista").size().to_dict()
+    return neto[neto["bultos"] > umbral].groupby("preventista").size().to_dict()
 
 
 def cobertura_total(
@@ -74,4 +82,4 @@ def cobertura_total(
     if d.empty:
         return 0
     neto = d.groupby(_CLIENTE_KEY, as_index=False)["bultos"].sum()
-    return int((neto["bultos"] >= umbral).sum())
+    return int((neto["bultos"] > umbral).sum())
