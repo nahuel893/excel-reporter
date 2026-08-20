@@ -18,7 +18,7 @@
     "reportes": [
         {
             "nombre": "AVANCE BADIE - {MES} {AÑO}",
-            "asunto_email": "AVANCE BADIE - JULIO 2026",
+            "asunto_email": "AVANCE BADIE - {MES} {AÑO}",
             "capture_images": [
                 {
                     "hoja": "Avance",

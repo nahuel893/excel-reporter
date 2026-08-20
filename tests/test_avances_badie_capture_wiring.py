@@ -178,6 +178,19 @@ class TestAvancesBadieEmailSettingsUnchanged:
         cfg = load_report_config(CONFIG_PATH)
         assert cfg.filtros.email_adjuntos == ["excel"]
 
+    def test_asunto_email_usa_placeholders_y_no_un_mes_fijo(self):
+        """El asunto se resuelve con `_resolver_nombre_periodo` (main.py:243).
+        Escrito a mano queda congelado: el 2026-08-20 el mail seguia saliendo
+        con asunto 'AVANCE BADIE - JULIO 2026'."""
+        cfg = load_report_config(CONFIG_PATH)
+        asunto = cfg.reportes[0].asunto_email
+        assert "{MES}" in asunto and "{AÑO}" in asunto
+        meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO",
+                 "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+        assert not any(m in asunto.upper() for m in meses), (
+            f"el asunto tiene un mes fijo: {asunto!r}"
+        )
+
     def test_existing_email_recipients_still_present(self):
         cfg = load_report_config(CONFIG_PATH)
         report = cfg.reportes[0]
