@@ -70,6 +70,12 @@ CUPOS: dict[str, float] = {
 
 # (clave_interna, GRUPO, CATEGORIA, NIVEL). GRUPO -> generico y
 # CATEGORIA -> desagregado, segun medallion-etl/data/cupos_config.json.
+# Convencion vigente (la de `CORRECION MULTI`, elegida por Nahuel el
+# 2026-08-18): GRUPO = CATEGORIA = la etiqueta, salvo los tres genericos de
+# MULTI CCU, que llevan CATEGORIA=MULTICCU para poder agruparlos.
+# CERVEZAS va como DETALLE y por lo tanto SE CARGA: en gold es el TOTAL y
+# convive con sus marcas. Sumar todos los genericos cuenta la cerveza dos
+# veces; hay que elegir el total O el detalle.
 FILAS_LARGO = [
     ("CERVEZAS", "CERVEZAS", "CERVEZAS", "DETALLE"),
     *[(c, c, c, "DETALLE") for c in CERVEZA_CATS],

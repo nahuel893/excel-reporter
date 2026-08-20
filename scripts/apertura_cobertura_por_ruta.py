@@ -62,6 +62,15 @@ ZONAS: dict[str, tuple[int, str]] = {
 }
 RUTAS_VALLE = {81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 118, 119, 120, 122}
 RUTAS_SUBD = {93}
+# SUB DISTRIBUIDORES no entra en el reparto proporcional: tiene 6 clientes y el
+# objetivo es cubrirlos a TODOS en cada categoria y marca, asi que su cupo es
+# fijo en 6 y no sale del cupo de ninguna zona. Sus filas se agregan aparte
+# (ver filas_subdistribuidor), no via `repartir`.
+SUBD_RUTA = 93
+SUBD_DES_RUTA = "SUB DISTRIBUIDORES"
+SUBD_PREVENTISTA = "SUB DISTRIBUIDOR"
+SUBD_ZONA_LABEL = "1 - CASA CENTRAL"
+SUBD_CUPO = 6.0
 # DIRECTA (100) y CERVECERA (200) no son rutas de preventa.
 RUTAS_SIN_CUPO = {77, 100, 200, 999}
 
@@ -314,6 +323,25 @@ def repartir(cupos: dict, rutas: dict, cobertura: dict, es_marca: bool) -> list[
     return filas
 
 
+def filas_subdistribuidor(cupos_marca: dict, cupos_generico: dict):
+    """Filas de cupo fijo para la ruta de SUB DISTRIBUIDORES.
+
+    Una fila por cada marca y por cada generico que exista en el objetivo de
+    sucursal 1 (CASA CENTRAL + VALLE SALTA), todas con el mismo cupo. No se
+    reparte nada: son 6 clientes y el objetivo es cubrir los 6 en todo.
+    """
+    zonas_suc1 = {z for z, (id_suc, _) in ZONAS.items() if id_suc == 1}
+    marcas = sorted({k[2] for k in cupos_marca if k[0] in zonas_suc1})
+    genericos = sorted({k[1] for k in cupos_generico if k[0] in zonas_suc1})
+    base = [SUBD_RUTA, SUBD_DES_RUTA, SUBD_PREVENTISTA]
+    fm = [[*base, m, SUBD_ZONA_LABEL, SUBD_CUPO] for m in marcas]
+    fg = [[SUBD_RUTA, None, SUBD_PREVENTISTA, g, SUBD_ZONA_LABEL, SUBD_CUPO]
+          for g in genericos]
+    print(f"  SUB DISTRIBUIDORES (ruta {SUBD_RUTA}): cupo fijo {SUBD_CUPO:g} — "
+          f"{len(fm)} marcas, {len(fg)} genericos")
+    return fm, fg
+
+
 # --- Excel ------------------------------------------------------------------
 HEADERS_MARCA = ["Ruta", "Descripción Ruta", "Descripción Vendedor", "MARCA",
                  "ZONA", "CUPO"]
@@ -417,6 +445,10 @@ def main() -> int:
 
     print("Reparto por generico:")
     filas_generico = repartir(cupos_generico, rutas, cobertura_gen, es_marca=False)
+
+    fm_subd, fg_subd = filas_subdistribuidor(cupos_marca, cupos_generico)
+    filas_marca += fm_subd
+    filas_generico += fg_subd
     # El piso del generico es 1 por ruta y nada mas. Subirlo al maximo de sus
     # marcas era coherente (quien compra LA VICTORIA esta cubierto en SIDRAS)
     # pero desfasaba el cupo: SIDRAS Y LICORES saltaba de 250 a 419 porque
