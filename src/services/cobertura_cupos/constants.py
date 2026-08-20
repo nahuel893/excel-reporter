@@ -57,6 +57,24 @@ class Zona:
     rutas_excluidas: tuple[int, ...] = field(default_factory=tuple)
 
 
+def zonas_desde_sucursales(nombres: list[str], mapa: dict[str, int]) -> list[Zona]:
+    """Una zona por sucursal entera, en el orden pedido.
+
+    Para el interior no hay split por ruta: las zonas virtuales existen solo en
+    CASA CENTRAL. Cada sucursal entra completa, sin filtro de rutas.
+
+    Raises:
+        ValueError: si algun nombre no existe en `mapa`. Es preferible fallar a
+            emitir una hoja vacia que se lea como "esa sucursal no vendio".
+    """
+    faltantes = [n for n in nombres if n not in mapa]
+    if faltantes:
+        raise ValueError(
+            f"Sucursales desconocidas: {faltantes}. Disponibles: {sorted(mapa)}"
+        )
+    return [Zona(n, mapa[n]) for n in nombres]
+
+
 def zonas_por_defecto() -> list[Zona]:
     """Las tres zonas del informe: CASA CENTRAL, VALLE SALTA y GUEMES.
 

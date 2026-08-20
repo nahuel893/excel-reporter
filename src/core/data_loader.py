@@ -1320,6 +1320,24 @@ class DataLoader:
             params["rutas_out"] = list(rutas_excluidas)
         return ("AND " + " AND ".join(partes)) if partes else "", params
 
+    def get_mapa_sucursales(self) -> dict[str, int]:
+        """ds_sucursal -> id_sucursal, desde `gold.dim_sucursal`.
+
+        Sirve para traducir los nombres que vienen de un config a la clave
+        numerica que usan los filtros. La descripcion es la que el proyecto usa
+        en los configs; el id es el que viaja en la clave compuesta.
+        """
+        df = self.execute_query(
+            """
+            SELECT ds.id_sucursal, ds.descripcion AS ds_sucursal
+            FROM gold.dim_sucursal ds
+            WHERE ds.descripcion IS NOT NULL
+            """,
+            {},
+        )
+        return {str(f.ds_sucursal).strip(): int(f.id_sucursal)
+                for f in df.itertuples(index=False)}
+
     def get_marcas_de_generico(self, generico: str) -> pd.DataFrame:
         """Universo COMPLETO de marcas de un generico, desde el maestro.
 

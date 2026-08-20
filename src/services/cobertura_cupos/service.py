@@ -27,6 +27,7 @@ from src.services.base_service import BaseService
 from src.services.cobertura_cupos.constants import (
     GENERICOS_CCU,
     Zona,
+    zonas_desde_sucursales,
     zonas_por_defecto,
 )
 
@@ -60,13 +61,17 @@ class CoberturaCuposConfig:
             por offset. Se respeta el ORDEN de la lista: aca el orden es una
             decision de lectura, no cronologica, asi que NO se reordena.
         genericos: Genericos a incluir. None -> los 5 CCU.
-        zonas: Zonas a abrir. None -> CASA CENTRAL, VALLE SALTA y GUEMES.
+        zonas: Zonas a abrir, ya resueltas. Gana sobre `sucursales`.
+        sucursales: Nombres de sucursal, una hoja entera cada una. El id se
+            resuelve contra la BD en el servicio. Sirve para el interior, que
+            no tiene zonas virtuales. None -> las tres zonas por defecto.
         nombre_archivo: Nombre de salida sin extension.
     """
     fecha_desde: str
     meses_atras: list[int] | None = None
     genericos: list[str] | None = None
     zonas: list[Zona] | None = None
+    sucursales: list[str] | None = None
     nombre_archivo: str | None = None
 
     def __post_init__(self):
@@ -78,7 +83,9 @@ class CoberturaCuposConfig:
             raise ValueError(f"meses_atras tiene offsets repetidos: {self.meses_atras}")
         if not self.genericos:
             self.genericos = list(GENERICOS_CCU)
-        if not self.zonas:
+        # Con `sucursales` las zonas se resuelven en el servicio (necesita BD
+        # para el id_sucursal). Dejarlas en None es la senal de "pendiente".
+        if not self.zonas and not self.sucursales:
             self.zonas = zonas_por_defecto()
         if self.nombre_archivo is None:
             self.nombre_archivo = f"Cobertura y Cupos {etiqueta_mes(self.periodo_principal)}"
@@ -123,7 +130,15 @@ class CoberturaCuposService(BaseService):
     SERVICE_SLUG = "cobertura-cupos"
     GRANULARITY = "month"
 
+    def _resolver_zonas(self, config: CoberturaCuposConfig) -> list[Zona]:
+        """Zonas explicitas, o una por sucursal resuelta contra la BD."""
+        if config.zonas:
+            return config.zonas
+        mapa = self.data_loader.get_mapa_sucursales()
+        return zonas_desde_sucursales(config.sucursales, mapa)
+
     def generar_reporte(self, config: CoberturaCuposConfig) -> CoberturaCuposResult:
+        config.zonas = self._resolver_zonas(config)
         bloques_por_zona = {
             zona.nombre: [self._bloque(config, zona, g) for g in config.genericos]
             for zona in config.zonas
