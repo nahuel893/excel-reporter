@@ -203,7 +203,50 @@ d = resolve_delivery(rep, contactos,
 > dict `merged` ahí da un falso "sí se envía", porque `enviar_whatsapp` toma su
 > default `True`.
 
-## 6. Historial de trampas ya pisadas
+## 6. El PowerPoint del avance
+
+`scripts/avance_pptx.py` arma un deck a partir del xlsx. **Solo lee**: nunca
+escribe el libro.
+
+```bash
+python scripts/avance_pptx.py \
+  --archivo "data/output/avances/2026-07/AVANCE BADIE - JULIO 2026.xlsx" \
+  --diagnostico
+```
+
+Sin `--salida` escribe el `.pptx` al lado del xlsx, y se niega a pisar uno que ya
+exista salvo `--force`.
+
+**8 slides**: portada, resumen por supervisor, y dos por bloque de supervisor —
+`VOLUMEN` (azul: `Avance` + `Multicategoria`) y `COBERTURA` (verde: los cuatro
+genéricos de `Cober Nueva`). Los bloques se detectan solos: un supervisor es un
+código de la columna `Super` cuyos miembros son vendedores. `GFARAH` queda
+afuera porque sus miembros son códigos, y `DIRECTA` / `SUB DISTRIBUIDOR` solo
+aparecen en el resumen porque son de una fila.
+
+Las columnas ocultas quedan fuera a propósito — el deck muestra lo que la hoja
+muestra: `SALTA CAUTIVA1` y `Y:AL` en `Avance`, `K:V` en `Multicategoria` (esas
+están además rotas con `#REF!`), y PERNOD en `Cober Nueva`.
+
+### 6.1. Los totales se suman, no se leen
+
+**Las filas de total del libro no son confiables.** El deck totaliza sumando las
+filas que muestra y deriva el % igual que la hoja (`venta / cupo`, `PDV / OBJ`).
+Verificado contra JULIO 2026, hay dos filas desactualizadas, cada una en un lado
+distinto, y las dos contradicen el gran total que el propio libro informa:
+
+| Dónde | Dice | La suma de sus filas da |
+|---|---|---|
+| `Avance`, banda de resumen, FGUANTAY (`AM54`) | 22.594,57 | 23.340,65 |
+| `Cober Nueva`, total del bloque VCHAPUR (`DS44`) | 23 PDV | 21 PDV |
+
+La primera es un `SUM` cuyo rango nunca creció cuando se agregó LORENA
+TARITOLAY; la segunda arrastra el número de FGUANTAY. `--diagnostico` lista
+todas las celdas donde un total del libro no cierra con sus propias filas — vale
+la pena correrlo cada mes, es la forma barata de detectar un rango que quedó
+corto. Los porcentajes quedan fuera de esa comparación: un ratio no se suma.
+
+## 7. Historial de trampas ya pisadas
 
 | Fecha | Qué pasó |
 |---|---|
