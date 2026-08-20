@@ -9,12 +9,16 @@ Deck layout
 -----------
 1. Cover.
 2. Summary: one row per supervisor block plus the grand-total row.
-3. Two slides per supervisor block:
-   - "VOLUMEN": sheets `Avance` (beer categories) + `Multicategoria`
-     (AGUAS DANONE and MULTI CCU). Hidden columns are skipped, matching what
-     the sheet actually shows.
+3. Every VOLUMEN slide, then every COBERTURA slide — never interleaved: they
+   are two different readings and mixing them forces the room to jump back and
+   forth. Per supervisor block:
+   - "VOLUMEN CERVEZAS": sheet `Avance`, three columns per category (Venta,
+     % Cupo, Falta) plus the five of TOTAL CERVEZA.
+   - "VOLUMEN ADO / MULTI CCU": sheet `Multicategoria`, on its own slide.
    - "COBERTURA": sheet `Cober Nueva`, generic-level totals for CERVEZAS,
      AGUAS DANONE, VINOS CCU and SIDRAS Y LICORES.
+
+Hidden columns are skipped, matching what the sheet actually shows.
 
 Vendor rows are copied verbatim from the workbook; only the on-screen rendering
 is formatted. Nothing is rounded in the data itself.
@@ -63,8 +67,9 @@ from pptx.util import Inches, Pt
 # which are also broken with #REF! in the source workbook.
 # --------------------------------------------------------------------------
 
-# (etiqueta, venta, %, falta). Cupo is not a column of its own: the sheet
-# writes it as Falta = Cupo - Venta, so Cupo = Venta + Falta.
+# (etiqueta, venta, %, falta) — las tres columnas que la hoja da por categoria.
+# El cupo no es columna propia: la hoja escribe Falta = Cupo - Venta, asi que
+# Cupo = Venta + Falta.
 AVANCE_CATEGORIAS = [
     ("SALTA", "D", "E", "F"),
     ("HEINEKEN", "J", "K", "L"),
@@ -73,19 +78,86 @@ AVANCE_CATEGORIAS = [
     ("MULTICERV.", "S", "T", "U"),
     ("IMPORTADAS", "V", "W", "X"),
 ]
-AVANCE_TOTAL = ("TOTAL CERVEZA", "AM", "AN", "AP")  # venta, cupo, % tendencia
+CATEGORIA_SUBS = ["Venta", "% Cupo", "Falta"]
+CATEGORIA_CLASES = ["num", "pct", "num"]
+
+# (etiqueta, columna, clase). AR ("Vta. Diaria p/ Cupo") queda afuera: en el
+# libro es #DIV/0! en todas las filas.
+AVANCE_TOTAL_ETIQUETA = "TOTAL CERVEZA"
+AVANCE_TOTAL_COLS = [
+    ("Venta", "AM", "num"),
+    ("Cupo", "AN", "num"),
+    ("Tend.", "AO", "num"),
+    ("% Tend.", "AP", "pct"),
+    ("Dif.", "AQ", "num"),
+]
+AVANCE_TOTAL_VENTA = "AM"
+AVANCE_TOTAL_CUPO = "AN"
 
 MULTI_CATEGORIAS = [
     ("AGUAS DANONE", "D", "E", "F"),
     ("MULTI CCU", "H", "I", "J"),
 ]
 
+# Totales por generico, para el resumen. (etiqueta, PDV, OBJ, Faltan, %)
 COBER_GENERICOS = [
-    ("CERVEZAS", "AT", "AU", "AV", "AW"),  # PDV, OBJ, Faltan, %
+    ("CERVEZAS", "AT", "AU", "AV", "AW"),
     ("AGUAS DANONE", "BU", "BV", "BW", "BX"),
     ("VINOS CCU", "CT", "CU", "CV", "CW"),
     ("SIDRAS Y LICORES", "DS", "DT", "DU", "DV"),
 ]
+
+# Detalle por marca. Un slide por bloque, con el mismo corte que usa la hoja:
+# CERVEZAS son 10 marcas y no entran legibles en una sola diapositiva, asi que
+# van separadas igual que en `Cober Nueva` (Cervezas 1 y Cervezas 2).
+# Las marcas de VINOS y SIDRAS traen tres columnas, no cuatro: la hoja no les
+# calcula "Faltan". El TOTAL de cada generico si las trae.
+COBER_SLIDES = [
+    ("COBERTURA CERVEZAS 1", [
+        ("SALTA", ["C", "D", "E", "F"]),
+        ("HEINEKEN", ["G", "H", "I", "J"]),
+        ("IMPERIAL", ["K", "L", "M", "N"]),
+        ("MILLER", ["O", "P", "Q", "R"]),
+    ]),
+    ("COBERTURA CERVEZAS 2", [
+        ("BIECKERT", ["V", "W", "X", "Y"]),
+        ("SCHNEIDER", ["Z", "AA", "AB", "AC"]),
+        ("AMSTEL", ["AD", "AE", "AF", "AG"]),
+        ("KUNSTMAN", ["AH", "AI", "AJ", "AK"]),
+        ("BLUE MOON", ["AL", "AM", "AN", "AO"]),
+        ("SALTA CAUTIVA1", ["AP", "AQ", "AR", "AS"]),
+        ("TOTAL CERVEZAS", ["AT", "AU", "AV", "AW"]),
+    ]),
+    ("COBERTURA AGUAS DANONE", [
+        ("LEVITE", ["BA", "BB", "BC", "BD"]),
+        ("VILLAVICENCIO", ["BE", "BF", "BG", "BH"]),
+        ("VILLA DEL SUR", ["BI", "BJ", "BK", "BL"]),
+        ("BRIO", ["BM", "BN", "BO", "BP"]),
+        ("FULL SPORT", ["BQ", "BR", "BS", "BT"]),
+        ("TOTAL AGUAS", ["BU", "BV", "BW", "BX"]),
+    ]),
+    ("COBERTURA VINOS CCU", [
+        ("COLON", ["CB", "CC", "CD"]),
+        ("LA CELIA", ["CE", "CF", "CG"]),
+        ("GRAFFIGNA", ["CH", "CI", "CJ"]),
+        ("EUGENIO BUSTOS", ["CK", "CL", "CM"]),
+        ("O-61", ["CN", "CO", "CP"]),
+        ("SANTA SILVIA", ["CQ", "CR", "CS"]),
+        ("TOTAL VINOS", ["CT", "CU", "CV", "CW"]),
+    ]),
+    ("COBERTURA SIDRAS Y LICORES", [
+        ("REAL", ["DA", "DB", "DC"]),
+        ("LA VICTORIA", ["DD", "DE", "DF"]),
+        ("SAENZ BRIONES", ["DG", "DH", "DI"]),
+        ("EL ABUELO", ["DJ", "DK", "DL"]),
+        ("PEHUENIA", ["DM", "DN", "DO"]),
+        ("MISTRAL", ["DP", "DQ", "DR"]),
+        ("TOTAL SIDRAS", ["DS", "DT", "DU", "DV"]),
+    ]),
+]
+
+COBER_SUBS = {3: ["PDV", "OBJ", "%"], 4: ["PDV", "OBJ", "Faltan", "%"]}
+COBER_CLASES = {3: ["pdv", "obj", "pct"], 4: ["pdv", "obj", "obj", "pct"]}
 
 ENCABEZADOS_IGNORADOS = {"vendedor", "super", "cobertura", "total", "n"}
 
@@ -244,22 +316,23 @@ def _ratio(numerador, denominador):
 
 
 def _cols_volumen_avance() -> list:
-    cols = [c for _, venta, pct, _falta in AVANCE_CATEGORIAS for c in (venta, pct)]
-    return cols + [AVANCE_TOTAL[1], AVANCE_TOTAL[2], AVANCE_TOTAL[3]]
+    cols = [c for _, venta, pct, falta in AVANCE_CATEGORIAS for c in (venta, pct, falta)]
+    return cols + [col for _etiqueta, col, _clase in AVANCE_TOTAL_COLS]
 
 
 def _cols_volumen_multi() -> list:
-    return [c for _, venta, pct, _falta in MULTI_CATEGORIAS for c in (venta, pct)]
+    return [c for _, venta, pct, falta in MULTI_CATEGORIAS for c in (venta, pct, falta)]
 
 
-def _cols_cobertura() -> list:
+def _cols_cobertura_generico() -> list:
+    """Totales por generico — los que van al resumen, sin abrir por marca."""
     return [c for _, *cols in COBER_GENERICOS for c in cols]
 
 
 # Only these add up across rows: a percentage column is a ratio, not a sum.
 def _cols_aditivas_avance() -> list:
     cols = [c for _, venta, _pct, falta in AVANCE_CATEGORIAS for c in (venta, falta)]
-    return cols + [AVANCE_TOTAL[1], AVANCE_TOTAL[2]]
+    return cols + [col for _etiqueta, col, clase in AVANCE_TOTAL_COLS if clase != "pct"]
 
 
 def _cols_aditivas_multi() -> list:
@@ -267,25 +340,32 @@ def _cols_aditivas_multi() -> list:
 
 
 def _cols_aditivas_cobertura() -> list:
-    return [c for _, pdv, obj, falta, _pct in COBER_GENERICOS for c in (pdv, obj, falta)]
+    """Todas las de los slides de marca menos el %: PDV, OBJ y Faltan suman."""
+    cols = []
+    for _titulo, bloques in COBER_SLIDES:
+        for _marca, columnas in bloques:
+            cols += columnas[:-1]  # la ultima siempre es el %
+    return cols
 
 
 def _total_categorias(ws, filas: list, categorias: list) -> list:
-    """[venta, %] per category, summed over `filas`. % = venta / (venta+falta)."""
+    """[venta, %, falta] per category, summed. % = venta / (venta + falta)."""
     valores = []
     for _etiqueta, venta_col, _pct_col, falta_col in categorias:
         venta = _sumar(ws, filas, venta_col)
         falta = _sumar(ws, filas, falta_col)
         cupo = None if venta is None else venta + (falta or 0)
-        valores += [venta, _ratio(venta, cupo)]
+        valores += [venta, _ratio(venta, cupo), falta]
     return valores
 
 
 def _total_volumen_avance(ws, filas: list) -> list:
     valores = _total_categorias(ws, filas, AVANCE_CATEGORIAS)
-    venta = _sumar(ws, filas, AVANCE_TOTAL[1])
-    cupo = _sumar(ws, filas, AVANCE_TOTAL[2])
-    return valores + [venta, cupo, _ratio(venta, cupo)]
+    venta = _sumar(ws, filas, AVANCE_TOTAL_VENTA)
+    cupo = _sumar(ws, filas, AVANCE_TOTAL_CUPO)
+    for _etiqueta, col, clase in AVANCE_TOTAL_COLS:
+        valores.append(_ratio(venta, cupo) if clase == "pct" else _sumar(ws, filas, col))
+    return valores
 
 
 def _total_volumen_multi(ws, filas: list) -> list:
@@ -314,13 +394,24 @@ def _fmt_numero(valor, decimales: int) -> str:
 
 
 def _fmt(valor, clase: str) -> str:
+    """Display only. The stored value is never rounded, just rendered.
+
+    - `num` (venta, cupo, falta): sin decimales, son bultos.
+    - `pct`: con un decimal, porque la diferencia entre 96,4% y 96,9% importa.
+    - `pdv`: PDV son enteros.
+    - `obj`: el objetivo de cobertura es fraccionario y en SIDRAS anda por 9,3:
+      redondearlo lo dejaria sin significado.
+    """
     if valor is None:
         return "-"
     if clase == "pct":
-        return f"{round(valor * 100)}%"
-    if clase == "pdv":
-        return _fmt_numero(valor, 0)
-    return _fmt_numero(valor, 1)
+        # Con objetivos casi en cero el % se dispara (AMSTEL, 1.027%). Ahi el
+        # decimal no aporta y ademas parte la celda en dos lineas.
+        puntos = valor * 100
+        return f"{_fmt_numero(puntos, 0 if abs(puntos) >= 1000 else 1)}%"
+    if clase == "obj":
+        return _fmt_numero(valor, 1)
+    return _fmt_numero(valor, 0)
 
 
 def _color_pct(valor):
@@ -417,8 +508,12 @@ def _dibujar(slide, tabla: Tabla, top_in: float, ancho_primera: float) -> None:
     for fila in tabla_pptx.rows:
         fila.height = Inches(alto_fila)
 
-    fuente_dato = 9 if len(subcols) <= 14 else 8
-    fuente_cab = 9 if len(subcols) <= 14 else 7
+    if len(subcols) <= 14:
+        fuente_dato, fuente_cab = 9, 9
+    elif len(subcols) <= 24:
+        fuente_dato, fuente_cab = 8, 7
+    else:
+        fuente_dato, fuente_cab = 7, 6
 
     celda = tabla_pptx.cell(0, 0)
     celda.merge(tabla_pptx.cell(1, 0))
@@ -512,71 +607,93 @@ def _portada(prs, periodo: str, dias: tuple, origen: Path) -> None:
         run.font.color.rgb = color
 
 
-def _slide_volumen(prs, codigo: str, periodo: str, ws_avance, ws_multi,
-                   bloque_av: Bloque, bloque_mu) -> None:
-    grupos = [(nombre, ["Vta.", "%"], AZUL_OSCURO) for nombre, *_ in AVANCE_CATEGORIAS]
-    grupos.append((AVANCE_TOTAL[0], ["Vta.", "Cupo", "%"], AZUL_OSCURO))
-    grupos += [(nombre, ["Vta.", "%"], AZUL_OSCURO) for nombre, *_ in MULTI_CATEGORIAS]
+def _slide_volumen_cervezas(prs, codigo: str, periodo: str, ws_avance,
+                            bloque: Bloque) -> None:
+    grupos = [(nombre, list(CATEGORIA_SUBS), AZUL_OSCURO) for nombre, *_ in AVANCE_CATEGORIAS]
+    grupos.append((AVANCE_TOTAL_ETIQUETA,
+                   [etiqueta for etiqueta, _col, _clase in AVANCE_TOTAL_COLS],
+                   AZUL_OSCURO))
 
     clases = []
     for _ in AVANCE_CATEGORIAS:
-        clases += ["num", "pct"]
-    clases += ["num", "num", "pct"]
-    for _ in MULTI_CATEGORIAS:
-        clases += ["num", "pct"]
+        clases += list(CATEGORIA_CLASES)
+    clases += [clase for _etiqueta, _col, clase in AVANCE_TOTAL_COLS]
 
-    cols_av, cols_mu = _cols_volumen_avance(), _cols_volumen_multi()
+    columnas = _cols_volumen_avance()
+    filas = [(v, _valores(ws_avance, bloque.filas[v], columnas), False)
+             for v in bloque.vendedores]
+    filas_bloque = [bloque.filas[v] for v in bloque.vendedores]
+    filas.append((f"TOTAL {codigo}", _total_volumen_avance(ws_avance, filas_bloque), True))
 
-    filas = []
-    for vendedor in bloque_av.vendedores:
-        valores = _valores(ws_avance, bloque_av.filas[vendedor], cols_av)
-        fila_mu = bloque_mu.filas.get(vendedor) if bloque_mu else None
-        valores += _valores(ws_multi, fila_mu, cols_mu)
-        filas.append((vendedor, valores, False))
-
-    filas_av = [bloque_av.filas[v] for v in bloque_av.vendedores]
-    filas_mu = [bloque_mu.filas[v] for v in bloque_mu.vendedores] if bloque_mu else []
-    total = _total_volumen_avance(ws_avance, filas_av) + _total_volumen_multi(ws_multi, filas_mu)
-    filas.append((f"TOTAL {codigo}", total, True))
-
-    slide = _slide(prs, f"VOLUMEN — {codigo}", f"{periodo}   ·   bultos y % sobre cupo")
-    _dibujar(slide, Tabla(grupos, "Vendedor", filas, clases), top_in=1.05, ancho_primera=1.65)
+    slide = _slide(prs, f"VOLUMEN CERVEZAS — {codigo}",
+                   f"{periodo}   ·   bultos y % sobre cupo")
+    _dibujar(slide, Tabla(grupos, "Vendedor", filas, clases), top_in=1.05, ancho_primera=1.6)
 
 
-def _slide_cobertura(prs, codigo: str, periodo: str, ws_cober, bloque: Bloque) -> None:
-    grupos = [(nombre, ["PDV", "OBJ", "Faltan", "%"], VERDE_OSCURO)
-              for nombre, *_ in COBER_GENERICOS]
+def _slide_volumen_multi(prs, codigo: str, periodo: str, ws_multi,
+                         bloque: Bloque) -> None:
+    grupos = [(nombre, list(CATEGORIA_SUBS), AZUL_OSCURO) for nombre, *_ in MULTI_CATEGORIAS]
     clases = []
-    for _ in COBER_GENERICOS:
-        clases += ["pdv", "num", "num", "pct"]
-    columnas = _cols_cobertura()
+    for _ in MULTI_CATEGORIAS:
+        clases += list(CATEGORIA_CLASES)
+
+    columnas = _cols_volumen_multi()
+    filas = [(v, _valores(ws_multi, bloque.filas[v], columnas), False)
+             for v in bloque.vendedores]
+    filas_bloque = [bloque.filas[v] for v in bloque.vendedores]
+    filas.append((f"TOTAL {codigo}", _total_volumen_multi(ws_multi, filas_bloque), True))
+
+    slide = _slide(prs, f"VOLUMEN ADO / MULTI CCU — {codigo}",
+                   f"{periodo}   ·   bultos y % sobre cupo")
+    _dibujar(slide, Tabla(grupos, "Vendedor", filas, clases), top_in=1.05, ancho_primera=2.4)
+
+
+def _total_marcas(ws, filas: list, bloques: list) -> list:
+    """Suma PDV/OBJ/Faltan de cada marca; el % se deriva como PDV / OBJ."""
+    valores = []
+    for _marca, columnas in bloques:
+        sumas = [_sumar(ws, filas, c) for c in columnas[:-1]]
+        valores += sumas + [_ratio(sumas[0], sumas[1])]
+    return valores
+
+
+def _slide_cobertura(prs, titulo: str, bloques: list, codigo: str, periodo: str,
+                     ws_cober, bloque: Bloque) -> None:
+    grupos = [(marca, COBER_SUBS[len(columnas)], VERDE_OSCURO) for marca, columnas in bloques]
+    clases = []
+    for _marca, columnas in bloques:
+        clases += COBER_CLASES[len(columnas)]
+    columnas = [c for _marca, cols in bloques for c in cols]
 
     filas = [(v, _valores(ws_cober, bloque.filas[v], columnas), False) for v in bloque.vendedores]
     filas_bloque = [bloque.filas[v] for v in bloque.vendedores]
-    filas.append((f"TOTAL {codigo}", _total_cobertura(ws_cober, filas_bloque), True))
+    filas.append((f"TOTAL {codigo}", _total_marcas(ws_cober, filas_bloque, bloques), True))
 
-    slide = _slide(prs, f"COBERTURA — {codigo}", f"{periodo}   ·   PDV cubiertos sobre objetivo")
-    _dibujar(slide, Tabla(grupos, "Vendedor", filas, clases), top_in=1.05, ancho_primera=1.75)
+    slide = _slide(prs, f"{titulo} — {codigo}",
+                   f"{periodo}   ·   PDV cubiertos sobre objetivo")
+    _dibujar(slide, Tabla(grupos, "Vendedor", filas, clases), top_in=1.05, ancho_primera=1.55)
 
 
 def _slide_resumen(prs, periodo: str, ws_avance, ws_multi, ws_cober, entradas: list) -> None:
     """`entradas`: [(etiqueta, filas_avance, filas_multi, filas_cober, es_total)]."""
     grupos = [
-        (AVANCE_TOTAL[0], ["Vta.", "Cupo", "%"], AZUL_OSCURO),
-        ("AGUAS DANONE", ["Vta.", "%"], AZUL_OSCURO),
-        ("MULTI CCU", ["Vta.", "%"], AZUL_OSCURO),
+        (AVANCE_TOTAL_ETIQUETA, ["Venta", "Cupo", "%"], AZUL_OSCURO),
+        ("AGUAS DANONE", ["Venta", "%"], AZUL_OSCURO),
+        ("MULTI CCU", ["Venta", "%"], AZUL_OSCURO),
     ]
     grupos += [(nombre, ["PDV", "OBJ", "%"], VERDE_OSCURO) for nombre, *_ in COBER_GENERICOS]
     clases = ["num", "num", "pct", "num", "pct", "num", "pct"]
     for _ in COBER_GENERICOS:
-        clases += ["pdv", "num", "pct"]
+        clases += ["pdv", "obj", "pct"]
 
     filas = []
     for etiqueta, filas_av, filas_mu, filas_cb, es_total in entradas:
-        venta = _sumar(ws_avance, filas_av, AVANCE_TOTAL[1])
-        cupo = _sumar(ws_avance, filas_av, AVANCE_TOTAL[2])
+        venta = _sumar(ws_avance, filas_av, AVANCE_TOTAL_VENTA)
+        cupo = _sumar(ws_avance, filas_av, AVANCE_TOTAL_CUPO)
         valores = [venta, cupo, _ratio(venta, cupo)]
-        valores += _total_volumen_multi(ws_multi, filas_mu)
+        multi = _total_volumen_multi(ws_multi, filas_mu)
+        for i in range(len(MULTI_CATEGORIAS)):  # venta y %, sin la columna Falta
+            valores += multi[i * 3:i * 3 + 2]
         cobertura = _total_cobertura(ws_cober, filas_cb)
         for i in range(len(COBER_GENERICOS)):  # PDV, OBJ, % (Faltan queda fuera)
             pdv, obj, _falta, pct = cobertura[i * 4:i * 4 + 4]
@@ -712,12 +829,21 @@ def construir(archivo: Path, salida: Path, diagnostico: bool = False) -> int:
     _portada(prs, periodo, dias, archivo)
     _slide_resumen(prs, periodo, ws_avance, ws_multi, ws_cober, entradas)
 
+    # Primero todo el volumen, despues toda la cobertura: son dos lecturas
+    # distintas y mezclarlas obliga a saltar de una a otra en la reunion.
     for bloque in bloques_av:
-        _slide_volumen(prs, bloque.codigo, periodo, ws_avance, ws_multi,
-                       bloque, bloques_mu.get(bloque.codigo))
+        _slide_volumen_cervezas(prs, bloque.codigo, periodo, ws_avance, bloque)
+        bloque_mu = bloques_mu.get(bloque.codigo)
+        if bloque_mu:
+            _slide_volumen_multi(prs, bloque.codigo, periodo, ws_multi, bloque_mu)
+
+    for bloque in bloques_av:
         bloque_cb = bloques_cb.get(bloque.codigo)
-        if bloque_cb:
-            _slide_cobertura(prs, bloque.codigo, periodo, ws_cober, bloque_cb)
+        if not bloque_cb:
+            continue
+        for titulo, bloques_marca in COBER_SLIDES:
+            _slide_cobertura(prs, titulo, bloques_marca, bloque.codigo, periodo,
+                             ws_cober, bloque_cb)
 
     salida.parent.mkdir(parents=True, exist_ok=True)
     prs.save(salida)

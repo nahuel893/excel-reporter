@@ -118,14 +118,23 @@ class TestRatio:
 
 
 class TestFormato:
-    def test_miles_con_punto_y_decimal_con_coma(self):
-        assert avance_pptx._fmt(23340.65, "num") == "23.340,7"
+    def test_miles_con_punto_y_venta_sin_decimales(self):
+        assert avance_pptx._fmt(23340.65, "num") == "23.341"
 
     def test_pdv_sin_decimales(self):
         assert avance_pptx._fmt(1593, "pdv") == "1.593"
 
-    def test_porcentaje_entero(self):
-        assert avance_pptx._fmt(0.9695, "pct") == "97%"
+    def test_el_objetivo_de_cobertura_conserva_un_decimal(self):
+        """En SIDRAS el objetivo anda por 9,3: redondearlo lo deja sin sentido."""
+        assert avance_pptx._fmt(9.3116883, "obj") == "9,3"
+
+    def test_porcentaje_con_un_decimal(self):
+        assert avance_pptx._fmt(0.9695, "pct") == "97,0%"
+        assert avance_pptx._fmt(0.9644, "pct") == "96,4%"
+
+    def test_un_porcentaje_disparado_pierde_el_decimal(self):
+        """AMSTEL con objetivo 2,3 da 1.027,8%: el decimal parte la celda en dos."""
+        assert avance_pptx._fmt(10.278, "pct") == "1.028%"
 
     def test_vacio_se_muestra_como_guion(self):
         assert avance_pptx._fmt(None, "num") == "-"
@@ -156,14 +165,16 @@ class TestColumnasAditivas:
     def test_las_columnas_de_porcentaje_quedan_fuera(self):
         aditivas = set(avance_pptx._cols_aditivas_avance())
         porcentajes = {pct for _n, _v, pct, _f in avance_pptx.AVANCE_CATEGORIAS}
+        porcentajes |= {col for _e, col, clase in avance_pptx.AVANCE_TOTAL_COLS
+                        if clase == "pct"}
         assert not (aditivas & porcentajes)
-        assert avance_pptx.AVANCE_TOTAL[3] not in aditivas
 
-    def test_cobertura_suma_pdv_obj_y_faltan(self):
-        aditivas = avance_pptx._cols_aditivas_cobertura()
-        for _nombre, pdv, obj, falta, pct in avance_pptx.COBER_GENERICOS:
-            assert pdv in aditivas and obj in aditivas and falta in aditivas
-            assert pct not in aditivas
+    def test_cobertura_suma_todo_menos_el_porcentaje(self):
+        aditivas = set(avance_pptx._cols_aditivas_cobertura())
+        for _titulo, bloques in avance_pptx.COBER_SLIDES:
+            for _marca, columnas in bloques:
+                assert set(columnas[:-1]) <= aditivas
+                assert columnas[-1] not in aditivas
 
 
 class TestDiagnostico:
@@ -193,15 +204,52 @@ class TestDiagnostico:
 
 
 class TestLayoutDeColumnas:
-    def test_volumen_muestra_venta_y_porcentaje_por_categoria(self):
-        cols = avance_pptx._cols_volumen_avance()
-        # 6 categorias x (venta, %) + total cerveza (venta, cupo, %)
-        assert len(cols) == len(avance_pptx.AVANCE_CATEGORIAS) * 2 + 3
+    """La hoja da tres columnas por categoria y cinco en el total: van todas."""
 
-    def test_cobertura_muestra_cuatro_columnas_por_generico(self):
-        cols = avance_pptx._cols_cobertura()
-        assert len(cols) == len(avance_pptx.COBER_GENERICOS) * 4
+    def test_cada_categoria_de_cervezas_trae_sus_tres_columnas(self):
+        cols = avance_pptx._cols_volumen_avance()
+        assert len(cols) == len(avance_pptx.AVANCE_CATEGORIAS) * 3 + len(avance_pptx.AVANCE_TOTAL_COLS)
+        for _nombre, venta, pct, falta in avance_pptx.AVANCE_CATEGORIAS:
+            assert venta in cols and pct in cols and falta in cols
+
+    def test_el_total_cerveza_trae_cinco_columnas(self):
+        assert [e for e, _c, _cl in avance_pptx.AVANCE_TOTAL_COLS] == [
+            "Venta", "Cupo", "Tend.", "% Tend.", "Dif."]
+
+    def test_la_venta_diaria_por_cupo_queda_fuera(self):
+        """AR es #DIV/0! en todas las filas del libro: mostrarla es una columna de guiones."""
+        assert "AR" not in [c for _e, c, _cl in avance_pptx.AVANCE_TOTAL_COLS]
+
+    def test_multicategoria_tambien_trae_tres_columnas(self):
+        cols = avance_pptx._cols_volumen_multi()
+        assert len(cols) == len(avance_pptx.MULTI_CATEGORIAS) * 3
+
+    def test_cobertura_se_abre_por_marca_no_solo_por_generico(self):
+        marcas = [m for _t, bloques in avance_pptx.COBER_SLIDES for m, _c in bloques]
+        for marca in ["SALTA", "SCHNEIDER", "LEVITE", "VILLA DEL SUR", "COLON", "MISTRAL"]:
+            assert marca in marcas
+
+    def test_cada_bloque_de_cobertura_cierra_con_su_total(self):
+        for _titulo, bloques in avance_pptx.COBER_SLIDES:
+            if _titulo == "COBERTURA CERVEZAS 1":
+                continue  # su total vive en el slide de Cervezas 2
+            assert bloques[-1][0].startswith("TOTAL")
+
+    def test_las_marcas_de_vinos_y_sidras_tienen_tres_columnas(self):
+        """La hoja no les calcula 'Faltan'; inventarlo seria dato nuevo."""
+        for titulo, bloques in avance_pptx.COBER_SLIDES:
+            if "VINOS" not in titulo and "SIDRAS" not in titulo:
+                continue
+            for marca, columnas in bloques:
+                assert len(columnas) == (4 if marca.startswith("TOTAL") else 3)
 
     def test_los_cuatro_genericos_pedidos_estan_y_pernod_no(self):
         nombres = [n for n, *_ in avance_pptx.COBER_GENERICOS]
         assert nombres == ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
+        titulos = " ".join(t for t, _b in avance_pptx.COBER_SLIDES)
+        assert "PERNOD" not in titulos
+
+    def test_ninguna_columna_se_repite_dentro_de_un_slide(self):
+        for titulo, bloques in avance_pptx.COBER_SLIDES:
+            columnas = [c for _m, cols in bloques for c in cols]
+            assert len(columnas) == len(set(columnas)), titulo

@@ -217,34 +217,67 @@ python scripts/avance_pptx.py \
 Sin `--salida` escribe el `.pptx` al lado del xlsx, y se niega a pisar uno que ya
 exista salvo `--force`.
 
-**8 slides**: portada, resumen por supervisor, y dos por bloque de supervisor —
-`VOLUMEN` (azul: `Avance` + `Multicategoria`) y `COBERTURA` (verde: los cuatro
-genéricos de `Cober Nueva`). Los bloques se detectan solos: un supervisor es un
-código de la columna `Super` cuyos miembros son vendedores. `GFARAH` queda
-afuera porque sus miembros son códigos, y `DIRECTA` / `SUB DISTRIBUIDOR` solo
-aparecen en el resumen porque son de una fila.
+**23 slides**: portada, resumen por supervisor, después **todo el volumen** y
+recién después **toda la cobertura** — nunca intercalados: son dos lecturas
+distintas y mezclarlas obliga a saltar de una a otra en la reunión.
 
-Las columnas ocultas quedan fuera a propósito — el deck muestra lo que la hoja
-muestra: `SALTA CAUTIVA1` y `Y:AL` en `Avance`, `K:V` en `Multicategoria` (esas
-están además rotas con `#REF!`), y PERNOD en `Cober Nueva`.
+Por cada bloque de supervisor (GFLORES, FGUANTAY, VCHAPUR):
+
+| Slide | Hoja | Contenido |
+|---|---|---|
+| `VOLUMEN CERVEZAS` | `Avance` | 6 categorías × (Venta, % Cupo, Falta) + TOTAL CERVEZA × 5 |
+| `VOLUMEN ADO / MULTI CCU` | `Multicategoria` | va **aparte**, no pegado a cervezas |
+| `COBERTURA CERVEZAS 1` | `Cober Nueva` | SALTA, HEINEKEN, IMPERIAL, MILLER |
+| `COBERTURA CERVEZAS 2` | `Cober Nueva` | BIECKERT…SALTA CAUTIVA1 + TOTAL CERVEZAS |
+| `COBERTURA AGUAS DANONE` | `Cober Nueva` | LEVITE, VILLAVICENCIO, VILLA DEL SUR, BRIO, FULL SPORT + TOTAL |
+| `COBERTURA VINOS CCU` | `Cober Nueva` | COLON…SANTA SILVIA + TOTAL |
+| `COBERTURA SIDRAS Y LICORES` | `Cober Nueva` | REAL…MISTRAL + TOTAL |
+
+**La cantidad de columnas es la de la hoja**, no una selección: si una categoría
+tiene tres columnas, van las tres. CERVEZAS son 10 marcas y no entran legibles
+en una diapositiva, así que se abren con el mismo corte que usa la hoja
+(Cervezas 1 / Cervezas 2). Las marcas de VINOS y SIDRAS traen tres columnas
+porque la hoja no les calcula `Faltan` — el TOTAL de cada genérico sí lo trae.
+
+Formato: venta y cupo sin decimales (son bultos), porcentajes con un decimal,
+objetivo de cobertura con uno (en SIDRAS anda por 9,3 y redondearlo lo deja sin
+sentido). Un % por encima de 1.000% pierde el decimal: pasa cuando el objetivo
+es casi cero (AMSTEL) y con el decimal la celda se parte en dos líneas.
+
+Los bloques se detectan solos: un supervisor es un código de la columna `Super`
+cuyos miembros son vendedores. `GFARAH` queda afuera porque sus miembros son
+códigos, y `DIRECTA` / `SUB DISTRIBUIDOR` solo aparecen en el resumen porque son
+de una fila.
+
+Queda afuera lo que la hoja tiene oculto o roto: `SALTA CAUTIVA1` y `Y:AL` en
+`Avance`, `K:V` en `Multicategoria` (además con `#REF!`), PERNOD en `Cober
+Nueva`, y la columna `AR` (`Vta. Diaria p/ Cupo`), que es `#DIV/0!` en todas las
+filas del libro.
 
 ### 6.1. Los totales se suman, no se leen
 
 **Las filas de total del libro no son confiables.** El deck totaliza sumando las
 filas que muestra y deriva el % igual que la hoja (`venta / cupo`, `PDV / OBJ`).
-Verificado contra JULIO 2026, hay dos filas desactualizadas, cada una en un lado
-distinto, y las dos contradicen el gran total que el propio libro informa:
+Verificado contra JULIO 2026, hay 30 celdas de total desactualizadas repartidas
+en tres lugares distintos:
 
 | Dónde | Dice | La suma de sus filas da |
 |---|---|---|
 | `Avance`, banda de resumen, FGUANTAY (`AM54`) | 22.594,57 | 23.340,65 |
 | `Cober Nueva`, total del bloque VCHAPUR (`DS44`) | 23 PDV | 21 PDV |
+| `Cober Nueva`, totales de Cervezas 1 (`C17`, `C32`, …) | 1.228 PDV | 1.535 PDV |
 
-La primera es un `SUM` cuyo rango nunca creció cuando se agregó LORENA
-TARITOLAY; la segunda arrastra el número de FGUANTAY. `--diagnostico` lista
-todas las celdas donde un total del libro no cierra con sus propias filas — vale
-la pena correrlo cada mes, es la forma barata de detectar un rango que quedó
-corto. Los porcentajes quedan fuera de esa comparación: un ratio no se suma.
+La forma de saber cuál gana no es elegir: **el gran total del propio libro cierra
+con la suma de las filas, no con esos totales de bloque**. `Cober Nueva!C55`
+(GFARAH) da 4.129 y la suma de los 31 vendedores da 4.129; la suma de las filas
+de total da 3.557. Lo mismo en `Avance!AM57` = 79.720,68. Las bandas de resumen
+(filas 51-54) también coinciden con la suma.
+
+Son rangos de `SUM` que quedaron cortos: el de FGUANTAY nunca creció cuando se
+agregó LORENA TARITOLAY. `--diagnostico` lista cada celda donde un total no
+cierra con sus propias filas — conviene correrlo cada mes, es la forma barata de
+detectar un rango que quedó viejo. Los porcentajes quedan fuera de esa
+comparación: un ratio no se suma.
 
 ## 7. Historial de trampas ya pisadas
 
