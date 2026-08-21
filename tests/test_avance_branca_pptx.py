@@ -107,7 +107,7 @@ def _tablas(pptx_path):
 @pytest.fixture
 def deck(libro, tmp_path):
     salida = tmp_path / "deck.pptx"
-    branca.construir(libro, salida, rechazos=None)
+    branca.construir(libro, salida, rechazos=None, con_capturas=False)
     return _tablas(salida)
 
 
@@ -169,7 +169,7 @@ class TestCoberturaNoSeSuma:
         fila = self._fila_total(deck, "VOLUMEN")
         assert fila[0].startswith("TOTAL LINEA")
         assert fila[1] == "40"          # 10 + 30
-        assert fila[3] == "10"          # 2 + 8
+        assert fila[3] == "10,0"        # 2 + 8; Faltan lleva un decimal, como la hoja
 
     def test_el_porcentaje_del_total_se_deriva_no_se_suma(self, deck):
         fila = self._fila_total(deck, "VOLUMEN")
@@ -212,3 +212,24 @@ class TestRechazos:
 
     def test_el_deck_sale_igual_sin_imagen(self, deck):
         assert any(t.startswith("VOLUMEN") for t, _f in deck)
+
+
+class TestCapturasDeLaHoja:
+    def test_las_capturas_de_backup_se_descartan(self, tmp_path):
+        """Los `backup-*` son de una corrida vieja del mismo mes."""
+        xlsx = tmp_path / "AVANCE BRANCA - JULIO 2026.xlsx"
+        xlsx.touch()
+        vigente = tmp_path / "AVANCE BRANCA - JULIO 2026_AVANCE_B2_AX35.png"
+        vieja = tmp_path / "AVANCE BRANCA - JULIO 2026_AVANCE_B2_AX35_backup-20260708.png"
+        for png in (vigente, vieja):
+            png.write_bytes(b"x")
+        assert branca._capturas(xlsx) == {"AVANCE": vigente}
+
+    def test_reconoce_la_captura_de_cada_hoja(self, tmp_path):
+        xlsx = tmp_path / "AVANCE BRANCA - JULIO 2026.xlsx"
+        xlsx.touch()
+        avance = tmp_path / "AVANCE BRANCA - JULIO 2026_AVANCE_B2_AX35.png"
+        cober = tmp_path / "AVANCE BRANCA - JULIO 2026_Cobertura_B2_AR37.png"
+        for png in (avance, cober):
+            png.write_bytes(b"x")
+        assert branca._capturas(xlsx) == {"AVANCE": avance, "COBERTURA": cober}

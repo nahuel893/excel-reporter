@@ -444,8 +444,9 @@ def _fmt(valor, clase: str) -> str:
     - `num` (venta, cupo, falta): sin decimales, son bultos.
     - `pct`: con un decimal, porque la diferencia entre 96,4% y 96,9% importa.
     - `pdv`: PDV son enteros.
-    - `obj`: el objetivo de cobertura es fraccionario y en SIDRAS anda por 9,3:
-      redondearlo lo dejaria sin significado.
+    - `obj` / `dec1`: un decimal. El objetivo de cobertura es fraccionario y en
+      SIDRAS anda por 9,3, asi que redondearlo lo dejaria sin significado; lo
+      mismo vale para cualquier columna que la hoja muestre con un decimal.
     """
     if valor is None:
         return "-"
@@ -454,7 +455,7 @@ def _fmt(valor, clase: str) -> str:
         # decimal no aporta y ademas parte la celda en dos lineas.
         puntos = valor * 100
         return f"{_fmt_numero(puntos, 0 if abs(puntos) >= 1000 else 1)}%"
-    if clase == "obj":
+    if clase in ("obj", "dec1"):
         return _fmt_numero(valor, 1)
     return _fmt_numero(valor, 0)
 

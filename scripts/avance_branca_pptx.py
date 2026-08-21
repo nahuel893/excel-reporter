@@ -89,7 +89,9 @@ AVANCE_BLOQUES = [
     ("AS", ["AS", "AT", "AU"]),
 ]
 AVANCE_SUBS = ["Avance", "%Tend", "Faltan"]
-AVANCE_CLASES = ["num", "pct", "num"]
+# `Faltan` va con un decimal porque asi lo muestra la hoja (24,6 y no 25); el
+# Avance va entero, tambien como la hoja.
+AVANCE_CLASES = ["num", "pct", "dec1"]
 
 # Una sola columna visible por vendedor: el % y el Faltan estan ocultos.
 COBERTURA_BLOQUES = [
@@ -327,6 +329,24 @@ def _slide_imagen(prs, titulo: str, subtitulo: str, imagen: Path) -> None:
     )
 
 
+def _capturas(archivo: Path) -> dict:
+    """Los PNG que `capture_images` ya genera al lado del xlsx.
+
+    Van al deck junto con las tablas: la tabla se lee y se filtra, la imagen es
+    la hoja tal cual la ve Nahuel, con sus colores y sus guiones. Se descartan
+    los `backup-*`, que son de una corrida vieja del mismo mes.
+    """
+    encontradas = {}
+    for png in archivo.parent.glob(f"{archivo.stem}_*.png"):
+        if "backup-" in png.name:
+            continue
+        if f"_{HOJA_AVANCE}_" in png.name:
+            encontradas["AVANCE"] = png
+        elif f"_{HOJA_COBERTURA}_" in png.name:
+            encontradas["COBERTURA"] = png
+    return encontradas
+
+
 def _buscar_rechazos(periodo_iso: str) -> Path | None:
     """El PNG de rebotes del mes, ubicado por CARPETA y no por nombre.
 
@@ -376,7 +396,7 @@ def _diagnostico(ws, bloques: list, secciones: list) -> list:
 
 
 def construir(archivo: Path, salida: Path, rechazos: Path | None = None,
-              diagnostico: bool = False) -> int:
+              diagnostico: bool = False, con_capturas: bool = True) -> int:
     libro, recalculado = _abrir(archivo)
     if recalculado:
         print("El libro no traia valores cacheados: se recalculo una copia con LibreOffice.")
@@ -396,11 +416,19 @@ def construir(archivo: Path, salida: Path, rechazos: Path | None = None,
     prs.slide_width = Inches(base.ANCHO_IN)
     prs.slide_height = Inches(base.ALTO_IN)
 
+    capturas = _capturas(archivo) if con_capturas else {}
+
     _portada(prs, periodo, dias, archivo)
     for titulo, desde, hasta in AVANCE_SECCIONES:
         _slide_volumen(prs, ws_avance, periodo, titulo, desde, hasta)
+    if "AVANCE" in capturas:
+        _slide_imagen(prs, "VOLUMEN — LA HOJA", f"{periodo}   ·   captura de `AVANCE`",
+                      capturas["AVANCE"])
     for titulo, desde, hasta in COBERTURA_SECCIONES:
         _slide_cobertura(prs, ws_cober, periodo, titulo, desde, hasta)
+    if "COBERTURA" in capturas:
+        _slide_imagen(prs, "COBERTURA — LA HOJA", f"{periodo}   ·   captura de `Cobertura`",
+                      capturas["COBERTURA"])
 
     if rechazos and rechazos.is_file():
         _slide_imagen(prs, "RECHAZOS", f"{periodo}   ·   % de bultos rechazados por preventista",
@@ -422,6 +450,8 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="sobrescribir el pptx si ya existe")
     parser.add_argument("--diagnostico", action="store_true",
                         help="listar los totales de la hoja que no cierran")
+    parser.add_argument("--sin-capturas", action="store_true",
+                        help="no agregar las diapositivas con la imagen de la hoja")
     args = parser.parse_args()
 
     archivo = Path(args.archivo)
@@ -441,7 +471,8 @@ def main() -> int:
         if rechazos:
             print(f"Rechazos: {rechazos.name}  (carpeta {archivo.parent.name})")
 
-    slides = construir(archivo, salida, rechazos, diagnostico=args.diagnostico)
+    slides = construir(archivo, salida, rechazos, diagnostico=args.diagnostico,
+                       con_capturas=not args.sin_capturas)
     print(f"OK: {slides} slides -> {salida}")
     return 0
 
