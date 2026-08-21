@@ -215,21 +215,25 @@ class TestRamGuardWiring:
         rc = run_daily._ejecutar_servicio(svc, date(2026, 8, 15), enviar=True)
         return rc, captured, alerted
 
-    def test_low_ram_degrada_a_archivo_sin_apagar_whatsapp(self, tmp_path, monkeypatch):
-        """El canal de WhatsApp SOBREVIVE; solo se cae el render de imagenes.
+    def test_low_ram_saca_las_capturas_y_no_cambia_el_payload(self, tmp_path, monkeypatch):
+        """Sin RAM se cae el render, no el canal ni el contenido.
 
-        Este test afirmaba lo contrario (enviar_whatsapp is False) y por eso el
-        bug del 2026-08-19 no lo detecto nadie: avance-badie tiene
-        destinatarios que SOLO tienen WhatsApp (Preventa Salta, Alejandro
-        Nogales) y se quedaron sin informe.
+        Historial de este test, que fue mal dos veces:
+        - afirmaba `enviar_whatsapp is False`, y por eso el bug del 2026-08-19
+          (el que solo tiene WhatsApp se quedaba sin nada) no lo vio nadie;
+        - despues afirmaba `whatsapp_enviar_como == "archivo"`, y por eso el
+          2026-08-21 el grupo de preventistas recibio el xlsx de 8,4 MB.
+        Lo correcto: sacar las capturas. WhatsApp sigue en "imagen" y sin
+        imagenes no manda nada, que es lo que el grupo tiene que ver.
         """
-        rc, captured, alerted = self._run(tmp_path, monkeypatch, avail_mb=1000)
+        rc, captured, alerted = self._run(tmp_path, monkeypatch, avail_mb=500)
 
-        filtros = captured["report_config"].filtros
+        cfg = captured["report_config"]
         assert rc == 0
-        assert filtros.enviar_whatsapp is True
-        assert filtros.whatsapp_enviar_como == "archivo"
-        assert alerted == {"called": True, "nombre": "avance-badie", "avail": 1000}
+        assert cfg.filtros.enviar_whatsapp is True
+        assert cfg.filtros.whatsapp_enviar_como == "imagen"
+        assert all(not r.capture_images for r in cfg.reportes)
+        assert alerted == {"called": True, "nombre": "avance-badie", "avail": 500}
 
     def test_sufficient_ram_keeps_whatsapp_and_does_not_alert(self, tmp_path, monkeypatch):
         rc, captured, alerted = self._run(tmp_path, monkeypatch, avail_mb=5000)
@@ -246,14 +250,15 @@ class TestRamGuardWiring:
         assert alerted["called"] is False
 
 
-class TestRamGuardNoDejaANadieSinInforme:
-    """El guard no puede dejar sin nada al que solo tiene WhatsApp.
+class TestRamGuardNoCambiaElPayload:
+    """El guard apaga el render. No apaga canales ni cambia lo que se manda.
 
-    Paso el 2026-08-19 con avance-badie: RAM 2497 MB, el guard puso
-    enviar_whatsapp=False, el mail salio a los seis supervisores y Preventa
-    Salta y Alejandro Nogales —que solo tienen WhatsApp— no recibieron nada.
-    La alerta ademas decia que el xlsx habia salido por email, que para ellos
-    era falso.
+    Dos incidentes, el mismo error de fondo — el guard tocando la entrega:
+    - 2026-08-19: ponia enviar_whatsapp=False. Preventa Salta y Alejandro
+      Nogales, que solo tienen WhatsApp, no recibieron nada y nadie se entero.
+    - 2026-08-21: degradaba a enviar_como="archivo". El grupo de preventistas
+      recibio el xlsx de 8,4 MB en lugar de las 5 imagenes.
+    Mandar OTRA COSA es peor que no mandar: parece el informe y no lo es.
     """
 
     def _patched_como_avance_badie(self):
@@ -266,7 +271,7 @@ class TestRamGuardNoDejaANadieSinInforme:
             "reportes": [{"capture_images": [{"hoja": "Avance", "rango": "A1:B2"}]}],
         }
 
-    def test_degrada_a_archivo_y_no_apaga_whatsapp(self, monkeypatch):
+    def test_saca_las_capturas_y_deja_los_canales_como_estaban(self, monkeypatch):
         import importlib.util
         import sys
 
@@ -277,22 +282,27 @@ class TestRamGuardNoDejaANadieSinInforme:
 
         patched = self._patched_como_avance_badie()
         # Relativo al piso, no un valor fijo: el piso se recalibra cuando cambia
-        # el costo del render (bajo de 3000 a 1500 el 2026-08-19) y este test
-        # prueba la DEGRADACION, no el numero.
+        # el costo del render (3000 -> 1500 -> 1000) y este test prueba el
+        # COMPORTAMIENTO, no el numero.
         assert mod._ram_guard_omite_imagenes(
             patched, mod.RAM_MIN_MB_IMAGENES - 1
         ) is True
 
         # Lo que hace el runner cuando el guard se dispara.
-        patched["filtros"]["whatsapp_enviar_como"] = "archivo"
+        patched = mod._sacar_capturas(patched)
 
-        assert patched["filtros"]["enviar_whatsapp"] is True, (
-            "el canal de WhatsApp tiene que sobrevivir: hay destinatarios que "
-            "SOLO tienen ese canal"
-        )
         assert mod._report_renderiza_imagenes(patched) is False, (
-            "con enviar_como=archivo no se renderiza, que es lo que ahorra la RAM"
+            "sin capturas no se renderiza, que es lo que ahorra la RAM"
         )
+        assert patched["filtros"]["enviar_whatsapp"] is True, (
+            "el canal no se apaga: apagarlo dejo sin nada y sin aviso a los que "
+            "solo tienen WhatsApp el 2026-08-19"
+        )
+        assert patched["filtros"]["whatsapp_enviar_como"] == "imagen", (
+            "el payload no cambia: degradarlo a archivo le mando el xlsx de "
+            "8,4 MB al grupo de preventistas el 2026-08-21"
+        )
+        assert all(not r.get("capture_images") for r in patched["reportes"])
 
     def test_con_ram_suficiente_no_toca_nada(self):
         import importlib.util

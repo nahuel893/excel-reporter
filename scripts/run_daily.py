@@ -163,16 +163,21 @@ FechaModo = Literal["hoy", "mes_a_hoy", "mes_completo", "solo_hasta", "ventana_m
 # Below this floor we skip images rather than risk an OOM-killed render silently
 # dropping the WhatsApp send.
 #
-# Calibrado 2026-08-19 midiendo el render real de avance-badie (5 capturas, ver
-# docs/avance-badie.md). El piso anterior era 3000 MB, medido en julio cuando el
-# reporte generaba 25 imagenes; con 5 sobra:
-#   - arrancando con 1108 MB disponibles completo las 5 sin fallar (736 s)
-#   - arrancando con 3918 MB disponibles tardo 567 s
-# O sea que abajo del piso viejo el render funciona igual, solo mas lento porque
-# se apoya en swap. 1500 deja margen sobre el minimo probado y evita seguir
-# bloqueando envios perfectamente viables: el 2026-08-19 el guard salto con
-# 2497 MB y el grupo se quedo sin las imagenes por nada.
-RAM_MIN_MB_IMAGENES = 1500
+# Mediciones del render real de avance-badie (5 capturas, ver docs/avance-badie.md):
+#   2026-08-19  3918 MB disponibles  -> 5/5 en 567 s
+#   2026-08-19  1108 MB disponibles  -> 5/5 en 736 s (se apoya en swap, no muere)
+#   2026-08-21  1503 MB disponibles  -> 5/5 en ~596 s, ~119 s por imagen
+# El render NO muere con poca memoria: se vuelve mas lento. El piso protege
+# contra un OOM-kill, no contra la lentitud, asi que ponerlo alto no compra
+# seguridad — solo bloquea envios que iban a funcionar.
+#
+# Historial de pisos, cada uno demasiado alto para el costo real del render:
+#   3000 MB  medido en julio con 25 imagenes; al pasar a 5 quedo viejo y el
+#            2026-08-19 salto con 2497 MB disponibles.
+#   1500 MB  el 2026-08-21 salto con 1482 MB — 18 MB — y tres horas despues el
+#            mismo render completo las 5 con 1503 MB.
+# 1000 queda por debajo del minimo probado (1108 MB) sin llegar a cero.
+RAM_MIN_MB_IMAGENES = 1000
 _MEMINFO_PATH = Path("/proc/meminfo")
 
 
@@ -532,6 +537,20 @@ def _report_renderiza_imagenes(patched: dict) -> bool:
     return False
 
 
+def _sacar_capturas(patched: dict) -> dict:
+    """Saca `capture_images` de cada reporte, sin tocar los canales.
+
+    Es lo que apaga el render: sin capturas, CaptureImageStep se saltea y
+    `rutas_imagenes` queda vacio. `whatsapp_enviar_como` queda en "imagen", asi
+    que SendWhatsAppStep no manda nada — que es lo correcto cuando lo que el
+    grupo espera son imagenes. El mail sigue saliendo con el xlsx.
+    """
+    for reporte in patched.get("reportes", []):
+        reporte.pop("capture_images", None)
+        reporte.pop("capture_image", None)
+    return patched
+
+
 def _ram_guard_omite_imagenes(patched: dict, avail_mb: int | None) -> bool:
     """True when the RAM guard must suppress image delivery for this report.
 
@@ -565,8 +584,8 @@ def _alertar_ram_baja(nombre: str, avail_mb: int | None) -> None:
             return
         msg = (
             f"⚠️ {nombre}: RAM baja ({avail_mb} MB) a las 07:00 — se OMITIERON las "
-            f"imágenes. El xlsx salió igual por los canales configurados (email y/o "
-            f"WhatsApp como archivo). Cerrá el VM y regenerá si querés las imágenes."
+            f"imágenes. El mail salió igual con el xlsx, pero *al grupo de WhatsApp "
+            f"no le llegó nada*: hay que liberar memoria y mandarlas a mano."
         )
         WhatsAppClient(WHATSAPP_SERVICE_URL).send_text(target=telefono, text=msg)
     except Exception as exc:  # noqa: BLE001
@@ -597,26 +616,25 @@ def _ejecutar_servicio(
 
     # RAM guard: image-rendering reports (LibreOffice capture, ~2.5 GB) can get
     # OOM-killed if a VM is eating RAM at 07:00, silently dropping the WhatsApp
-    # send. If RAM is short, DEGRADE the WhatsApp channel to "archivo" instead
-    # of turning it off: mandar el xlsx no renderiza nada, asi que no cuesta RAM,
-    # y el grupo sigue recibiendo el informe.
+    # send. Si falta RAM se saltea el render y NO se toca el config: con
+    # enviar_como="imagen" y sin imagenes, SendWhatsAppStep no manda nada. El
+    # mail sale igual con el xlsx y Nahuel recibe la alerta.
     #
-    # Antes esto ponia enviar_whatsapp=False, y ahi el que solo tiene WhatsApp se
-    # quedaba sin NADA sin que nadie se enterara. Paso el 2026-08-19 con
-    # avance-badie: el mail salio a los seis supervisores, pero Preventa Salta y
-    # Alejandro Nogales —que solo tienen WhatsApp— no recibieron nada, y la
-    # alerta decia que el xlsx habia salido por email, que para ellos era falso.
-    #
-    # Con enviar_como="archivo", `_report_renderiza_imagenes` da False, asi que
-    # CaptureImageStep no renderiza y no hay OOM.
+    # El guard NO cambia el payload. Lo hizo dos veces y las dos salieron mal:
+    #   2026-08-19  ponia enviar_whatsapp=False y el que solo tiene WhatsApp se
+    #               quedaba sin NADA en silencio (Preventa Salta, Nogales).
+    #   2026-08-21  degradaba a enviar_como="archivo" y le mando al grupo de
+    #               preventistas el xlsx de 8,4 MB, que en el celular no sirve.
+    # Mandar OTRA COSA es peor que no mandar: parece el informe y no lo es. Si
+    # las imagenes no salieron, el que las espera tiene que enterarse.
     if enviar and _report_renderiza_imagenes(patched):
         avail = _mem_available_mb()
         if _ram_guard_omite_imagenes(patched, avail):
             print(
                 f"  🧠 {svc.nombre}: RAM insuficiente ({avail} MB < {RAM_MIN_MB_IMAGENES} MB) — "
-                f"se OMITEN las imágenes; el xlsx sale igual por email y por WhatsApp"
+                f"se OMITEN las imágenes; el mail sale igual, el grupo no recibe nada"
             )
-            patched.setdefault("filtros", {})["whatsapp_enviar_como"] = "archivo"
+            patched = _sacar_capturas(patched)
             _alertar_ram_baja(svc.nombre, avail)
 
     if not enviar:

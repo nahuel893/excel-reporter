@@ -145,26 +145,46 @@ corre y entrega solo. Un `ejecutar: false` explícito le gana al calendario, y u
 valor inválido se ignora con warning (fail-open: un typo no debe apagar un
 informe para siempre en silencio).
 
-**Compuerta de RAM** — `RAM_MIN_MB_IMAGENES = 1500` en `run_daily.py`: si a las
+**Compuerta de RAM** — `RAM_MIN_MB_IMAGENES = 1000` en `run_daily.py`: si a las
 07:00 hay menos memoria disponible, se omiten las imágenes, **el xlsx igual sale
 por email** y Nahuel recibe un aviso por WhatsApp. Nunca falla en silencio.
 
-El piso se **recalibra cuando cambia el costo del render**. Medición del
-2026-08-19 con las 5 capturas actuales:
+**El guard apaga el render, NO toca la entrega.** Saca `capture_images` del
+config y nada más. Con `enviar_como="imagen"` y sin imágenes, `SendWhatsAppStep`
+no manda nada — que es lo correcto: al grupo le tiene que faltar el informe, no
+llegarle otra cosa.
 
-| Disponible al arrancar | Duración | Resultado |
+Esa regla salió de pisar el mismo palito dos veces, las dos con el guard
+metiéndose con la entrega:
+
+| Fecha | Qué hacía el guard | Qué pasó |
 |---|---|---|
-| 3918 MB | 567 s | 5/5 |
-| 1108 MB | 736 s | 5/5 |
+| 2026-08-19 | `enviar_whatsapp = False` | Preventa Salta y Nogales, que **solo** tienen WhatsApp, no recibieron nada y nadie se enteró |
+| 2026-08-21 | `whatsapp_enviar_como = "archivo"` | al grupo de preventistas le llegó el xlsx de 8,4 MB en vez de las 5 imágenes |
+
+Mandar **otra cosa** es peor que no mandar: parece el informe y no lo es.
+
+### El piso se recalibra cuando cambia el costo del render
+
+| Fecha | Disponible al arrancar | Duración | Resultado |
+|---|---|---|---|
+| 2026-08-19 | 3918 MB | 567 s | 5/5 |
+| 2026-08-19 | 1108 MB | 736 s | 5/5 |
+| 2026-08-21 | 1503 MB | ~596 s | 5/5, ~119 s por imagen |
 
 Picos de RSS: `soffice` 1151 MB, Python 2588 MB. Con poca memoria el render
 **no muere, se apoya en swap y tarda ~30% más**. Por eso el piso protege contra
-un OOM-kill, no contra la lentitud.
+un OOM-kill, no contra la lentitud — subirlo no compra seguridad, solo bloquea
+envíos que iban a funcionar.
 
-El piso anterior era 3000 MB, medido en julio cuando el reporte generaba 25
-imágenes. Quedó desactualizado al pasar a 5: el 2026-08-19 el guard se disparó
-con 2497 MB disponibles y el grupo se quedó sin imágenes por nada — el render
-funciona con bastante menos.
+Historial de pisos, cada uno demasiado alto:
+
+- **3000 MB** — medido en julio con 25 imágenes. Al pasar a 5 quedó viejo: el
+  2026-08-19 saltó con 2497 MB disponibles.
+- **1500 MB** — el 2026-08-21 saltó con **1482 MB**, 18 MB de diferencia. Tres
+  horas después el mismo render completó las 5 con 1503 MB.
+
+1000 queda por debajo del mínimo probado (1108 MB) sin llegar a cero.
 
 ### 4.2. A quién le llega
 
@@ -217,9 +237,25 @@ python scripts/avance_pptx.py \
 Sin `--salida` escribe el `.pptx` al lado del xlsx, y se niega a pisar uno que ya
 exista salvo `--force`.
 
-**23 slides**: portada, resumen por supervisor, después **todo el volumen** y
-recién después **toda la cobertura** — nunca intercalados: son dos lecturas
-distintas y mezclarlas obliga a saltar de una a otra en la reunión.
+**29 slides**: portada, después **todo el volumen** y recién después **toda la
+cobertura** — nunca intercalados: son dos lecturas distintas y mezclarlas
+obliga a saltar de una a otra en la reunión.
+
+Cada sección **abre con sus totales por supervisor**, sacados de la hoja que esa
+sección lee: dos slides `TOTALES POR SUPERVISOR` al empezar volumen (una de
+`Avance`, otra de `Multicategoria`) y cinco al empezar cobertura, una por cada
+corte de marca de `Cober Nueva`.
+
+> Esas filas se **leen** de la banda de resumen del libro, celda por celda. No se
+> suman los vendedores ni se recalcula ningún porcentaje: el número de la slide
+> es el que está en el Excel. Ojo con la forma de la banda, que **no es igual en
+> las tres hojas**: en `Avance` (filas 52-55) el código va en `B` con la columna
+> `A` vacía, pero en `Cober Nueva` (filas 51-54) `A` trae un `0` numérico. Por eso
+> la búsqueda usa `_filas_resumen(..., exigir_nombre_vacio=True)` para cobertura.
+> Sin ese flag la banda no aparece y la sección sale sin su slide de totales.
+>
+> La fila `TOTAL <código>` al pie de cada slide de detalle es la excepción: esa
+> **sí** se calcula, porque totaliza exactamente las filas que tiene encima.
 
 Por cada bloque de supervisor (GFLORES, FGUANTAY, VCHAPUR):
 
