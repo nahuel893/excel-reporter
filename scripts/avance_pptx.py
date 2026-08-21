@@ -8,34 +8,43 @@ the xlsx back.
 Deck layout
 -----------
 1. Cover.
-2. Summary: one row per supervisor block plus the grand-total row.
-3. Every VOLUMEN slide, then every COBERTURA slide — never interleaved: they
+2. Every VOLUMEN slide, then every COBERTURA slide — never interleaved: they
    are two different readings and mixing them forces the room to jump back and
-   forth. Per supervisor block:
+   forth. Each of the two sections opens with its own "TOTALES POR SUPERVISOR"
+   slide, built from the sheet that section reads. Then, per supervisor block:
    - "VOLUMEN CERVEZAS": sheet `Avance`, three columns per category (Venta,
      % Cupo, Falta) plus the five of TOTAL CERVEZA.
    - "VOLUMEN ADO / MULTI CCU": sheet `Multicategoria`, on its own slide.
-   - "COBERTURA": sheet `Cober Nueva`, generic-level totals for CERVEZAS,
-     AGUAS DANONE, VINOS CCU and SIDRAS Y LICORES.
+   - "COBERTURA": sheet `Cober Nueva`, opened by brand, with the same cut the
+     sheet uses (Cervezas 1 and 2, Aguas, Vinos, Sidras).
 
 Hidden columns are skipped, matching what the sheet actually shows.
 
-Vendor rows are copied verbatim from the workbook; only the on-screen rendering
-is formatted. Nothing is rounded in the data itself.
+Where the numbers come from
+---------------------------
+Two different rules, on purpose:
 
-Total rows are the sum of the vendor rows shown on the slide, with percentages
-derived the same way the sheet derives them (venta / cupo, PDV / OBJ). They are
-NOT read from the workbook because two of its own total rows are stale, each in
-a different place, and both disagree with the grand total that the workbook
-itself reports (checked against JULIO 2026):
+- **Vendor rows and the section-opening supervisor rows are READ from the
+  workbook, cell by cell.** Nothing is summed, averaged or rounded — what the
+  slide shows is what Nahuel sees in the Excel. Only the on-screen rendering is
+  formatted.
+- **The `TOTAL <codigo>` row at the foot of each detail slide is COMPUTED** as
+  the sum of the vendor rows on that same slide, with percentages derived the
+  way the sheet derives them (venta / cupo, PDV / OBJ). It has to be: it totals
+  exactly the rows above it, so reading a workbook cell there could contradict
+  the very rows it sits under.
+
+That distinction matters because several of the workbook's own total rows are
+stale, each in a different place (checked against JULIO 2026):
 
 - `Avance`, summary band, FGUANTAY: TOTAL CERVEZA 22.594,57 instead of
   23.340,65 — its SUM range never grew when LORENA TARITOLAY was added.
 - `Cober Nueva`, VCHAPUR block total: SIDRAS Y LICORES 23 PDV instead of 21 —
   the row carries FGUANTAY's figure.
 
-`--diagnostico` prints every cell where the workbook's own total row disagrees
-with the sum of its vendors.
+The deck does not silently pick a winner. `--diagnostico` prints every cell
+where the workbook's own total row disagrees with the sum of its vendors, so the
+mismatch gets fixed in the Excel instead of being papered over here.
 
 Usage
 -----
@@ -285,6 +294,42 @@ def _filas_resumen(ws, col_codigo: str, col_nombre: str, max_row: int,
     return encontrado
 
 
+def _filas_por_supervisor(ws, col_nombre: str, col_codigo: str, max_row: int,
+                          columnas: list, col_banda: str = "B",
+                          col_vacia: str = "A",
+                          exigir_nombre_vacio: bool = False) -> list:
+    """Una fila por supervisor, LEIDA de la banda de resumen del libro.
+
+    Estas son las filas que abren cada seccion. El valor sale de la celda tal
+    cual: no se suman los vendedores, no se recalcula ningun porcentaje y no se
+    redondea nada. Lo que se ve en la slide es lo que Nahuel ve en el Excel.
+
+    La banda vive al pie de la hoja y NO tiene la misma forma en las tres:
+
+    - `Avance` (52-55): el codigo va en B, la columna A queda vacia.
+    - `Cober Nueva` (51-54): el codigo tambien va en B, pero A trae un 0
+      numerico, no un vacio.
+
+    Por eso la busqueda va por `_filas_resumen`, que es el mismo helper que usa
+    `--diagnostico` y ya contempla esa diferencia via `exigir_nombre_vacio`.
+    Buscar "filas cuyo nombre es un codigo" no sirve: en `Cober Nueva` el 0 de
+    la columna A no es texto y la banda entera se pierde.
+
+    Se filtran contra los bloques reales para dejar afuera las bandas de una
+    sola linea (DIRECTA, SUB DISTRIBUIDOR), que no son supervisores.
+
+    Cuando la hoja y la suma de sus propias filas no cierran, eso lo reporta
+    `--diagnostico`; el deck no elige un ganador por su cuenta.
+    """
+    supervisores = {b.codigo for b in _bloques(ws, col_nombre, col_codigo, max_row)}
+    if not supervisores:
+        return []
+    banda = _filas_resumen(ws, col_banda, col_vacia, max_row, supervisores,
+                           exigir_nombre_vacio)
+    return [(codigo, _valores(ws, row, columnas), False)
+            for codigo, row in sorted(banda.items(), key=lambda par: par[1])]
+
+
 def _valores(ws, row, columnas: list) -> list:
     if not row:
         return [None] * len(columnas)
@@ -430,8 +475,15 @@ def _color_pct(valor):
 
 
 def _run(celda, texto: str, size: int, bold: bool, color: RGBColor,
-         align=PP_ALIGN.RIGHT) -> None:
+         align=PP_ALIGN.RIGHT, wrap: bool = True, margen: float = 0.03) -> None:
+    """`wrap=False` y margen chico para las celdas de dato.
+
+    Un numero partido en dos lineas ("142,5" arriba y "%" abajo) se lee mucho
+    peor que uno que roza el borde, y ademas estira toda la fila. Los
+    encabezados si envuelven: ahi el salto de linea ayuda.
+    """
     celda.text_frame.clear()
+    celda.text_frame.word_wrap = wrap
     parrafo = celda.text_frame.paragraphs[0]
     parrafo.alignment = align
     run = parrafo.add_run()
@@ -441,8 +493,8 @@ def _run(celda, texto: str, size: int, bold: bool, color: RGBColor,
     run.font.bold = bold
     run.font.color.rgb = color
     celda.vertical_anchor = MSO_ANCHOR.MIDDLE
-    celda.margin_left = Inches(0.03)
-    celda.margin_right = Inches(0.03)
+    celda.margin_left = Inches(margen)
+    celda.margin_right = Inches(margen)
     celda.margin_top = 0
     celda.margin_bottom = 0
 
@@ -508,12 +560,16 @@ def _dibujar(slide, tabla: Tabla, top_in: float, ancho_primera: float) -> None:
     for fila in tabla_pptx.rows:
         fila.height = Inches(alto_fila)
 
+    # El escalon de 28 sale de medir: con 30 subcolumnas un "142,5%" a 7 pt no
+    # entra en 0,37" y LibreOffice lo parte en dos lineas.
     if len(subcols) <= 14:
         fuente_dato, fuente_cab = 9, 9
     elif len(subcols) <= 24:
         fuente_dato, fuente_cab = 8, 7
-    else:
+    elif len(subcols) <= 28:
         fuente_dato, fuente_cab = 7, 6
+    else:
+        fuente_dato, fuente_cab = 6.5, 6
 
     celda = tabla_pptx.cell(0, 0)
     celda.merge(tabla_pptx.cell(1, 0))
@@ -546,7 +602,8 @@ def _dibujar(slide, tabla: Tabla, top_in: float, ancho_primera: float) -> None:
             celda = tabla_pptx.cell(fila, 1 + j)
             _pintar(celda, fondo)
             color = _color_pct(valor) if clase == "pct" else None
-            _run(celda, _fmt(valor, clase), fuente_dato, es_total, color or NEGRO)
+            _run(celda, _fmt(valor, clase), fuente_dato, es_total, color or NEGRO,
+                 wrap=False, margen=0.015)
 
 
 # --------------------------------------------------------------------------
@@ -607,8 +664,12 @@ def _portada(prs, periodo: str, dias: tuple, origen: Path) -> None:
         run.font.color.rgb = color
 
 
-def _slide_volumen_cervezas(prs, codigo: str, periodo: str, ws_avance,
-                            bloque: Bloque) -> None:
+def _cabecera_volumen_cervezas() -> tuple:
+    """(grupos, clases) de la tabla de cervezas.
+
+    La comparte el detalle por vendedor con la apertura por supervisor: si
+    manana entra una categoria nueva, las dos tablas la toman juntas.
+    """
     grupos = [(nombre, list(CATEGORIA_SUBS), AZUL_OSCURO) for nombre, *_ in AVANCE_CATEGORIAS]
     grupos.append((AVANCE_TOTAL_ETIQUETA,
                    [etiqueta for etiqueta, _col, _clase in AVANCE_TOTAL_COLS],
@@ -618,6 +679,28 @@ def _slide_volumen_cervezas(prs, codigo: str, periodo: str, ws_avance,
     for _ in AVANCE_CATEGORIAS:
         clases += list(CATEGORIA_CLASES)
     clases += [clase for _etiqueta, _col, clase in AVANCE_TOTAL_COLS]
+    return grupos, clases
+
+
+def _cabecera_volumen_multi() -> tuple:
+    grupos = [(nombre, list(CATEGORIA_SUBS), AZUL_OSCURO) for nombre, *_ in MULTI_CATEGORIAS]
+    clases = []
+    for _ in MULTI_CATEGORIAS:
+        clases += list(CATEGORIA_CLASES)
+    return grupos, clases
+
+
+def _cabecera_cobertura(bloques: list) -> tuple:
+    grupos = [(marca, COBER_SUBS[len(columnas)], VERDE_OSCURO) for marca, columnas in bloques]
+    clases = []
+    for _marca, columnas in bloques:
+        clases += COBER_CLASES[len(columnas)]
+    return grupos, clases
+
+
+def _slide_volumen_cervezas(prs, codigo: str, periodo: str, ws_avance,
+                            bloque: Bloque) -> None:
+    grupos, clases = _cabecera_volumen_cervezas()
 
     columnas = _cols_volumen_avance()
     filas = [(v, _valores(ws_avance, bloque.filas[v], columnas), False)
@@ -674,35 +757,46 @@ def _slide_cobertura(prs, titulo: str, bloques: list, codigo: str, periodo: str,
     _dibujar(slide, Tabla(grupos, "Vendedor", filas, clases), top_in=1.05, ancho_primera=1.55)
 
 
-def _slide_resumen(prs, periodo: str, ws_avance, ws_multi, ws_cober, entradas: list) -> None:
-    """`entradas`: [(etiqueta, filas_avance, filas_multi, filas_cober, es_total)]."""
-    grupos = [
-        (AVANCE_TOTAL_ETIQUETA, ["Venta", "Cupo", "%"], AZUL_OSCURO),
-        ("AGUAS DANONE", ["Venta", "%"], AZUL_OSCURO),
-        ("MULTI CCU", ["Venta", "%"], AZUL_OSCURO),
-    ]
-    grupos += [(nombre, ["PDV", "OBJ", "%"], VERDE_OSCURO) for nombre, *_ in COBER_GENERICOS]
-    clases = ["num", "num", "pct", "num", "pct", "num", "pct"]
-    for _ in COBER_GENERICOS:
-        clases += ["pdv", "obj", "pct"]
+def _slide_totales(prs, titulo: str, subtitulo: str, grupos: list, clases: list,
+                   filas: list, ancho_primera: float) -> None:
+    """Apertura de seccion: los supervisores y sus totales, nada mas."""
+    if not filas:
+        return
+    slide = _slide(prs, titulo, subtitulo)
+    _dibujar(slide, Tabla(grupos, "Supervisor", filas, clases),
+             top_in=1.05, ancho_primera=ancho_primera)
 
-    filas = []
-    for etiqueta, filas_av, filas_mu, filas_cb, es_total in entradas:
-        venta = _sumar(ws_avance, filas_av, AVANCE_TOTAL_VENTA)
-        cupo = _sumar(ws_avance, filas_av, AVANCE_TOTAL_CUPO)
-        valores = [venta, cupo, _ratio(venta, cupo)]
-        multi = _total_volumen_multi(ws_multi, filas_mu)
-        for i in range(len(MULTI_CATEGORIAS)):  # venta y %, sin la columna Falta
-            valores += multi[i * 3:i * 3 + 2]
-        cobertura = _total_cobertura(ws_cober, filas_cb)
-        for i in range(len(COBER_GENERICOS)):  # PDV, OBJ, % (Faltan queda fuera)
-            pdv, obj, _falta, pct = cobertura[i * 4:i * 4 + 4]
-            valores += [pdv, obj, pct]
-        filas.append((etiqueta, valores, es_total))
 
-    slide = _slide(prs, "RESUMEN POR SUPERVISOR",
-                   f"{periodo}   ·   volumen en bultos, cobertura en PDV")
-    _dibujar(slide, Tabla(grupos, "Supervisor", filas, clases), top_in=1.05, ancho_primera=1.55)
+def _slide_totales_volumen_cervezas(prs, periodo: str, ws_avance) -> None:
+    grupos, clases = _cabecera_volumen_cervezas()
+    filas = _filas_por_supervisor(ws_avance, "B", "C", ws_avance.max_row,
+                                  _cols_volumen_avance())
+    _slide_totales(prs, "VOLUMEN CERVEZAS — TOTALES POR SUPERVISOR",
+                   f"{periodo}   ·   bultos y % sobre cupo",
+                   grupos, clases, filas, ancho_primera=1.6)
+
+
+def _slide_totales_volumen_multi(prs, periodo: str, ws_multi) -> None:
+    grupos, clases = _cabecera_volumen_multi()
+    filas = _filas_por_supervisor(ws_multi, "B", "C", ws_multi.max_row,
+                                  _cols_volumen_multi())
+    _slide_totales(prs, "VOLUMEN ADO / MULTI CCU — TOTALES POR SUPERVISOR",
+                   f"{periodo}   ·   bultos y % sobre cupo",
+                   grupos, clases, filas, ancho_primera=2.4)
+
+
+def _slide_totales_cobertura(prs, titulo: str, bloques: list, periodo: str,
+                             ws_cober) -> None:
+    grupos, clases = _cabecera_cobertura(bloques)
+    columnas = [c for _marca, cols in bloques for c in cols]
+    # En `Cober Nueva` la columna A de la banda trae un 0, no un vacio, y las
+    # filas de vendedor sí llevan el codigo en B: sin este flag la banda se
+    # confunde con la ultima fila de vendedor de cada supervisor.
+    filas = _filas_por_supervisor(ws_cober, "A", "B", ws_cober.max_row, columnas,
+                                  exigir_nombre_vacio=True)
+    _slide_totales(prs, f"{titulo} — TOTALES POR SUPERVISOR",
+                   f"{periodo}   ·   PDV cubiertos sobre objetivo",
+                   grupos, clases, filas, ancho_primera=1.55)
 
 
 def _otros(ws, col_nombre: str, col_codigo: str, max_row: int, codigos_bloque: set) -> list:
@@ -769,14 +863,6 @@ def construir(archivo: Path, salida: Path, diagnostico: bool = False) -> int:
     bloques_cb = {b.codigo: b for b in _bloques(ws_cober, "A", "B", ws_cober.max_row)}
     codigos_bloque = {b.codigo for b in bloques_av}
 
-    otros_av = _otros(ws_avance, "B", "C", ws_avance.max_row, codigos_bloque)
-    filas_mu_por_nombre = {n: r for _c, pares in
-                           _miembros_por_codigo(ws_multi, "B", "C", ws_multi.max_row).items()
-                           for n, r in pares}
-    filas_cb_por_nombre = {n: r for _c, pares in
-                           _miembros_por_codigo(ws_cober, "A", "B", ws_cober.max_row).items()
-                           for n, r in pares}
-
     if diagnostico:
         rollup = _codigo_rollup(ws_avance, "B", "C", ws_avance.max_row)
         codigos = set(_miembros_por_codigo(ws_avance, "B", "C", ws_avance.max_row))
@@ -794,48 +880,30 @@ def construir(archivo: Path, salida: Path, diagnostico: bool = False) -> int:
         print("Filas de total del libro que no cierran con sus propias filas:")
         print("\n".join(avisos) if avisos else "  (ninguna)")
 
-    # Summary rows: one per supervisor block, then the single-line bands, then
-    # the grand total as the sum of everything above it.
-    entradas = []
-    todas_av, todas_mu, todas_cb = [], [], []
-    for bloque in bloques_av:
-        filas_av = [bloque.filas[v] for v in bloque.vendedores]
-        bloque_mu = bloques_mu.get(bloque.codigo)
-        bloque_cb = bloques_cb.get(bloque.codigo)
-        filas_mu = [bloque_mu.filas[v] for v in bloque_mu.vendedores] if bloque_mu else []
-        filas_cb = [bloque_cb.filas[v] for v in bloque_cb.vendedores] if bloque_cb else []
-        entradas.append((bloque.codigo, filas_av, filas_mu, filas_cb, False))
-        todas_av += filas_av
-        todas_mu += filas_mu
-        todas_cb += filas_cb
-
-    for nombre, fila in otros_av:
-        fila_mu = filas_mu_por_nombre.get(nombre)
-        fila_cb = filas_cb_por_nombre.get(nombre)
-        entradas.append((nombre, [fila], [fila_mu] if fila_mu else [],
-                         [fila_cb] if fila_cb else [], False))
-        todas_av.append(fila)
-        if fila_mu:
-            todas_mu.append(fila_mu)
-        if fila_cb:
-            todas_cb.append(fila_cb)
-
-    entradas.append(("TOTAL GENERAL", todas_av, todas_mu, todas_cb, True))
 
     prs = Presentation()
     prs.slide_width = Inches(ANCHO_IN)
     prs.slide_height = Inches(ALTO_IN)
 
     _portada(prs, periodo, dias, archivo)
-    _slide_resumen(prs, periodo, ws_avance, ws_multi, ws_cober, entradas)
 
     # Primero todo el volumen, despues toda la cobertura: son dos lecturas
     # distintas y mezclarlas obliga a saltar de una a otra en la reunion.
+    #
+    # Cada seccion abre con los totales por supervisor de SU hoja, leidos de la
+    # banda de resumen del libro. Antes habia una sola slide de resumen que
+    # ponia volumen y cobertura en la misma tabla: eso era justamente el salto
+    # que se queria evitar.
+    _slide_totales_volumen_cervezas(prs, periodo, ws_avance)
+    _slide_totales_volumen_multi(prs, periodo, ws_multi)
     for bloque in bloques_av:
         _slide_volumen_cervezas(prs, bloque.codigo, periodo, ws_avance, bloque)
         bloque_mu = bloques_mu.get(bloque.codigo)
         if bloque_mu:
             _slide_volumen_multi(prs, bloque.codigo, periodo, ws_multi, bloque_mu)
+
+    for titulo, bloques_marca in COBER_SLIDES:
+        _slide_totales_cobertura(prs, titulo, bloques_marca, periodo, ws_cober)
 
     for bloque in bloques_av:
         bloque_cb = bloques_cb.get(bloque.codigo)
