@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import sys
 import warnings
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -41,9 +41,79 @@ BASE_XLSX = REPO / "data/output/acciones-comerciales/2026-07/BASE control Accion
 INFORME_XLSM = REPO / "data/backups/acciones-comerciales-2026-07-20/engine-informe/INFO - ACCIONES BADIE JULIO 2026.xlsm"
 OUT_DEFAULT = REPO / "data/output/acciones-comerciales/2026-07/Informe Analitico Acciones Comerciales - JULIO 2026.xlsx"
 IMG_DIR = Path(__file__).resolve().parent / "_img"
+# compras.xls: insumo que baja el watcher solo. De aca sale la columna
+# Compras del modelo de tasa, en vez de leerla del .xlsm manual.
+COMPRAS_DIR = Path("/home/nahuel/VM shared/archivos_diarios/acciones")
+COMPRAS_XLS = COMPRAS_DIR / "compras.xls"   # nombre canonico; ver _resolver_compras
 
 PERIODO_DESDE, PERIODO_HASTA = "2026-07-01", "2026-07-21"
 CCU = {"CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES", "PERNOD RICARD"}
+
+# ─────────────────────────────────────────────────────────────────────────
+# id de lista de precios -> descripcion. Va fijo porque NO hay de donde
+# leerlo: gold.dim_lista_precio esta VACIA y dim_cliente.des_lista_precio
+# viene en blanco en las 11 listas. El .xlsm trae el nombre pero no el id.
+#
+# Derivado (no tipeado): se cruzo el padron LISTA del .xlsm contra
+# gold.dim_cliente.id_lista_precio por cliente. Cada descripcion mapea a un
+# id dominante con 96,9%-100% de los clientes; el resto es el fan-out
+# conocido de joinear id_cliente sin id_sucursal (REGLA DE ORO). Coincide
+# con el universo ON PREMISE ya documentado: listas 4 y 8.
+#
+# Si aparece una lista nueva, la hoja Canal la muestra sin id en vez de
+# romper — un id inventado seria peor que no tenerlo.
+# ─────────────────────────────────────────────────────────────────────────
+LISTA_PRECIO_ID = {
+    "LISTA SALTA MAYORISTA": 1,
+    "LISTA SALTA MINORISTA": 3,
+    "LISTA SALTA ON PREMISE": 4,
+    "LISTA SALTA AUTOSERVICIOS": 5,
+    "INTERIOR MAYORISTA": 6,
+    "INTERIOR MINORISTA": 7,
+    "INTERIOR ON PREMISE": 8,
+    "INTERIOR AUTOSERVICIOS": 9,
+    "SUB DISTRIBUIDORES SALTA CAPIT": 11,
+    "SUB DISTRIBUIDORES INTERIOR": 12,
+    "NORTE EMPRENDIMIENTOS SAS": 14,
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Tasa% NEGOCIADA con CCU que pisa lo que trae el .xlsm.
+#
+# La Tasa% es el unico numero del modelo que no produce ningun sistema: se
+# acuerda con CCU y llega por mensaje. Cuando cambia, el .xlsm manual tarda
+# en reflejarlo, asi que se declara aca — con fecha y origen, para que
+# dentro de dos meses se sepa de donde salio cada valor.
+#
+# Informado por CCU el 2026-08-18 ("por todo concepto"):
+#   CCU (CERVEZAS)     Jujuy Interior 5,3%   Salta Int. Norte 7,5%
+#   ADO (AGUAS DANONE) Jujuy Interior 9,5%   Salta Int. Norte 9,1%
+# Corregido el 2026-08-19:
+#   CCU (CERVEZAS)     Salta Capital 13,4%   (el .xlsm traia 12,8%)
+#
+# SALTA INT. SUR no se informo: sigue saliendo del .xlsm. Una zona ausente
+# aca NO se pisa.
+# ─────────────────────────────────────────────────────────────────────────
+TASA_OVERRIDE = {
+    ("CERVEZAS", "SALTA CAPITAL"): 0.134,
+    ("CERVEZAS", "JUJUY INTERIOR"): 0.053,
+    ("CERVEZAS", "SALTA INT. NORTE"): 0.075,
+    ("AGUAS DANONE", "JUJUY INTERIOR"): 0.095,
+    ("AGUAS DANONE", "SALTA INT. NORTE"): 0.091,
+}
+TASA_OVERRIDE_FUENTE = "informada por CCU (18/19-ago-2026)"
+
+
+def etiquetar_lista(nombre) -> str:
+    """'LISTA SALTA ON PREMISE' -> '4 - LISTA SALTA ON PREMISE'.
+
+    Misma convencion que SUCURSAL ('1 - CASA CENTRAL'). Sin id conocido
+    devuelve el nombre pelado.
+    """
+    s = str(nombre).strip()
+    i = LISTA_PRECIO_ID.get(s.upper())
+    return f"{i} - {s}" if i is not None else s
 
 # ---------------- paleta ----------------
 # Nucleo: la misma del dashboard. Pasteles: agregados para las series.
@@ -161,6 +231,16 @@ def style_chart(ch, title_txt, x_title=None, y_title=None, w=24, h=11):
     return ch
 
 
+def _f(v) -> float:
+    """Numero o 0.0. Nunca revienta por un string suelto en una celda."""
+    if v is None or v == "":
+        return 0.0
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 # ---------------- carga de datos ----------------
 def load_base():
     from openpyxl import load_workbook
@@ -182,17 +262,38 @@ def load_base():
                         "descuento": float(r[6] or 0)})
     acc = pd.DataFrame(acc)
 
+    # Las columnas del wapi se resuelven por NOMBRE DE HEADER, no por posicion.
+    # Con indices fijos, agregar una columna al enriquecido (paso 19-bis sumo
+    # "PRECIO FINAL (terna)" y "Origen Precio") corre todo y el lector empieza
+    # a sumar strings como si fueran plata — falla ruidosa si hay suerte,
+    # silenciosa si la columna corrida tambien es numerica.
+    ws_wapi = wb["wapi"]
+    hdr_wapi = [
+        str(c.value).strip() if c.value is not None else ""
+        for c in next(ws_wapi.iter_rows(min_row=1, max_row=1))
+    ]
+
+    def _idx(nombre: str) -> int:
+        if nombre in hdr_wapi:
+            return hdr_wapi.index(nombre)
+        raise KeyError(
+            f"La hoja wapi no trae la columna {nombre!r}. "
+            f"Columnas presentes: {hdr_wapi}"
+        )
+
+    i_fecha, i_total2, i_desc = _idx("Fecha"), _idx("Total2"), _idx("Descuento")
+
     daily = {}
-    for r in wb["wapi"].iter_rows(min_row=2, values_only=True):
-        if not r or not r[0]:
+    for r in ws_wapi.iter_rows(min_row=2, values_only=True):
+        if not r or not r[i_fecha]:
             continue
-        f = r[0]
+        f = r[i_fecha]
         f = f.date().isoformat() if hasattr(f, "date") else str(f)[:10]
         if not f[:4].isdigit():
             continue
         d = daily.setdefault(f, {"fecha": f, "facturacion": 0.0, "descuentos": 0.0, "operaciones": 0})
-        d["facturacion"] += float(r[26] or 0)
-        d["descuentos"] += float(r[27] or 0)
+        d["facturacion"] += _f(r[i_total2])
+        d["descuentos"] += _f(r[i_desc])
         d["operaciones"] += 1
     daily = pd.DataFrame(sorted(daily.values(), key=lambda x: x["fecha"]))
 
@@ -250,6 +351,37 @@ def load_informe():
         "AGUAS DANONE": _fecha(r0[3]) if len(r0) > 3 else None,
     }
 
+    # --- maestros para RECALCULAR la tasa desde los insumos frescos ---
+    # Tasa% por (generico, zona): valor NEGOCIADO con CCU, tipeado a mano en
+    # la columna D. No lo produce ningun sistema y cambia una vez por mes, asi
+    # que leerlo de un .xlsm de hace unos dias no lo desactualiza.
+    tasa_pct = {}
+    for gen, ini, fin in [("CERVEZAS", 20, 23), ("AGUAS DANONE", 27, 30)]:
+        for idx in range(ini - 1, fin):
+            r = rows[idx]
+            if r and r[0] and isinstance(r[3], (int, float)) and r[3]:
+                tasa_pct[(gen, str(r[0]).strip())] = float(r[3])
+    # Pisar con lo negociado. Se loguea cada cambio: una tasa que se mueve
+    # sola y sin dejar rastro es la peor forma de equivocarse en este informe.
+    for clave, pct in TASA_OVERRIDE.items():
+        previo = tasa_pct.get(clave)
+        if previo is not None and abs(previo - pct) < 1e-12:
+            continue
+        tasa_pct[clave] = pct
+        anterior = f"{previo:.3%}" if previo is not None else "sin valor en el .xlsm"
+        print(f"    tasa {clave[0]} / {clave[1]}: {anterior} -> {pct:.3%} "
+              f"({TASA_OVERRIDE_FUENTE})")
+    out["tasa_pct"] = tasa_pct
+
+    # sucursal -> ZONA del modelo de tasa, del bloque superior de la hoja
+    # (col A sucursal, col B zona) — es lo que agrupa el SUMIF del original.
+    zona_por_suc = {}
+    for idx in range(2, 16):
+        r = rows[idx] if idx < len(rows) else None
+        if r and r[0] and r[1]:
+            zona_por_suc[str(r[0]).strip()] = str(r[1]).strip()
+    out["zona_por_sucursal"] = zona_por_suc
+
     tasa = []
     for gen, ini, fin, tot in [("CERVEZAS", 20, 23, 24), ("AGUAS DANONE", 27, 30, 31)]:
         for i in range(ini - 1, fin):
@@ -259,6 +391,19 @@ def load_informe():
                 tasa.append({"generico": gen, "zona": r[0], "descuentos": desc, "compras": comp,
                              "tasa_pct": pct, "tasa_generada": genr, "diferencia": genr - desc,
                              "compra_necesaria": (comp - desc / pct) if pct else 0})
+        # 'Compra' (G) y 'Extra Tasa' (H) estan vacias todos los meses, y por eso
+        # computar_tasa arma la Diferencia como Generada - Descuentos. Si alguien
+        # las carga, esa Diferencia deja de ser la del original SIN avisar. Se
+        # chequea aca, que es donde se ve el dato.
+        for i in range(ini - 1, fin):
+            rr = rows[i]
+            extra = [v for v in (rr[6] if len(rr) > 6 else None,
+                                 rr[7] if len(rr) > 7 else None)
+                     if isinstance(v, (int, float)) and v]
+            if extra:
+                print(f"    ALERTA: '{gen} / {rr[0]}' tiene Compra/Extra Tasa cargada "
+                      f"({extra}) en 'COMPRAS & DESC'. La Diferencia recalculada NO las "
+                      f"suma — revisar antes de usar el cuadro.")
         rt = rows[tot - 1]
         tasa.append({"generico": gen, "zona": "— TOTAL " + gen, "descuentos": float(rt[1] or 0),
                      "compras": float(rt[2] or 0), "tasa_pct": None,
@@ -325,22 +470,28 @@ def load_informe():
         "maestro_total": len(maestro),
     }
 
+    # Padron cliente -> lista de precios. Es un MAESTRO (a que canal pertenece
+    # cada cliente), no una cifra del periodo: leerlo del .xlsm no lo
+    # desactualiza. Los descuentos que se cruzan contra el salen de la BASE
+    # fresca, no de la hoja CLIENTE-FECHA del .xlsm — ver computar_canal.
+    li = pd.read_excel(INFORME_XLSM, sheet_name="LISTA")
+    li.columns = [str(c).strip() for c in li.columns]
+    li = li[[li.columns[0], li.columns[1]]].dropna()
+    li.columns = ["_cli", "LISTA PRECIO"]
+    li["_cli"] = pd.to_numeric(li["_cli"], errors="coerce")
+    li = li.dropna(subset=["_cli"]).drop_duplicates("_cli")
+    out["lista_precio"] = li
+    print(f"    padron LISTA: {len(li):,} clientes -> canal")
+
+    # Fallback: si algo sale mal con la BASE, computar_canal degrada a esto.
     cf = pd.read_excel(INFORME_XLSM, sheet_name="CLIENTE-FECHA", header=2)
     cf["Suma de Descuento"] = pd.to_numeric(cf["Suma de Descuento"], errors="coerce").fillna(0)
     cf = cf[cf["Razón Social"].notna() & cf["Razón Social"].astype(str).ne("(blank)")]
-    # Igual que con reversa: 'LISTA PRECIO' es una columna derivada que puede no
-    # estar. Fuente autoritativa: hoja LISTA (Cliente -> Descripcion lista de precios).
     if "LISTA PRECIO" not in cf.columns:
-        li = pd.read_excel(INFORME_XLSM, sheet_name="LISTA")
-        li.columns = [str(c).strip() for c in li.columns]
-        li = li[[li.columns[0], li.columns[1]]].dropna()
-        li.columns = ["_cli", "LISTA PRECIO"]
-        li["_cli"] = pd.to_numeric(li["_cli"], errors="coerce")
-        li = li.dropna(subset=["_cli"]).drop_duplicates("_cli")
         cf["_cli"] = pd.to_numeric(cf["Cod. Cliente"], errors="coerce")
         cf = cf.merge(li, on="_cli", how="left")
-        print(f"    canal derivado de LISTA ({len(li):,} clientes mapeados)")
-    cf["LISTA PRECIO"] = cf["LISTA PRECIO"].fillna("SIN CANAL (#N/D)")
+    cf["LISTA PRECIO"] = (cf["LISTA PRECIO"].fillna("SIN CANAL (#N/D)")
+                          .map(etiquetar_lista))
     out["canal"] = (cf.groupby("LISTA PRECIO")["Suma de Descuento"]
                     .agg(descuento="sum", lineas="size").reset_index()
                     .rename(columns={"LISTA PRECIO": "canal"})
@@ -352,6 +503,39 @@ def load_informe():
     su = pd.read_excel(INFORME_XLSM, sheet_name="sucu", header=None)
     out["zona_map"] = {str(r[1]).strip(): str(r[3]).strip() for r in su.itertuples(index=False)
                        if len(r) > 3 and str(r[1]) != "nan"}
+
+    # cliente interno (346110, 2348166, ...) -> sucursal. Es la clave con la
+    # que compras.xls identifica la sucursal: VLOOKUP(Cliente, sucu!C:E, 3, 0).
+    cli_suc = {}
+    for r in su.itertuples(index=False):
+        if len(r) < 5:
+            continue
+        try:
+            cli_suc[int(float(r[2]))] = str(r[4]).strip()
+        except (TypeError, ValueError):
+            continue
+    out["sucursal_por_cliente_interno"] = cli_suc
+
+    # Tabla de signos por codigo de movimiento ('extra y tasa' cols I/J/K).
+    # Los codigos ausentes (comodatos 615/616) daban #N/A en el VLOOKUP del
+    # original y por eso el SUMIFS nunca los sumaba: aca se descartan igual.
+    try:
+        et = pd.read_excel(INFORME_XLSM, sheet_name="extra y tasa", header=None)
+        signos = {}
+        for r in et.itertuples(index=False):
+            if len(r) < 11:
+                continue
+            cod, flag, val = r[8], r[9], r[10]
+            if cod is None or str(cod) in ("nan", "tipo", "Comprobante"):
+                continue
+            try:
+                signos[str(cod).strip()] = (float(val), str(flag).strip())
+            except (TypeError, ValueError):
+                continue
+        out["signos_movimiento"] = signos
+    except Exception as e:  # noqa: BLE001
+        print(f"  WARN: 'extra y tasa' ilegible ({e})")
+
     h1 = pd.read_excel(INFORME_XLSM, sheet_name="Hoja1", header=None)
     out["sup_map"] = {str(r[0]).strip(): str(r[1]).strip() for r in h1.itertuples(index=False)
                       if len(r) > 1 and str(r[0]) != "nan"}
@@ -382,7 +566,10 @@ def load_gold():
         FROM gold.cob_sucursal_lista_generico
         WHERE periodo = '2026-07-01'
         GROUP BY 1,2,3""", dl.engine)
-    return ventas, cob
+    # El mapa articulo -> generico sale del mismo cursor: lo necesita el
+    # recalculo de la tasa y no justifica una segunda conexion.
+    art = pd.read_sql("SELECT id_articulo, generico FROM gold.dim_articulo", dl.engine)
+    return ventas, cob, dict(zip(art.id_articulo, art.generico))
 
 
 # ---------------- graficos matplotlib (lo que Excel no hace bien) ----------------
@@ -452,6 +639,335 @@ def make_scatter_cob(df: pd.DataFrame, path: Path):
 
 
 # ---------------- construccion del workbook ----------------
+# ─────────────────────────────────────────────────────────────────────────
+# Modelo de tasa calculado desde los INSUMOS, no leido del .xlsm manual.
+#
+# Replica exacta de las formulas del informe original:
+#
+#   compras!AG articulo = LEFT(Productos, SEARCH("-")-1) * 1
+#   compras!AH generico = VLOOKUP(articulo, art!A:F, 4, 0)
+#   compras!AI Sucursal = VLOOKUP(Cliente, sucu!C:E, 3, 0)
+#   compras!AJ Suma?    = VLOOKUP(Codigo Movimiento, 'extra y tasa'!I:J, 2, 0)
+#   compras!AK Total    = VLOOKUP(Codigo Movimiento, 'extra y tasa'!I:K, 3, 0)
+#                         * [Total Facturado Producto]
+#
+#   Compras = SUMIFS(AK, AH=generico, AI=sucursal, AJ="suma")
+#   Tasa Generada    = Compras * Tasa%
+#   Diferencia       = (Tasa + Reversa + Extra Tasa) - Descuentos
+#   Compra Necesaria = Diferencia / Tasa%
+#
+# Los codigos de movimiento que NO estan en la tabla de signos (comodatos
+# 615/616) daban #N/A en el VLOOKUP y por eso el SUMIFS nunca los sumaba.
+# Aca se replica descartandolos, no asignandoles 0 — el efecto es el mismo
+# pero la intencion queda explicita.
+#
+# La Tasa% se sigue leyendo del .xlsm porque es un valor NEGOCIADO con CCU
+# que cambia una vez por mes: no lo produce ningun sistema. Leerlo de un
+# archivo de hace unos dias no lo desactualiza.
+# ─────────────────────────────────────────────────────────────────────────
+
+_COMPRAS_HEADER_ROW = 3          # 0-indexed: fila 4 de Excel
+_COL_COD_MOVIMIENTO = 3
+_COL_FECHA_MOVIMIENTO = 9
+_COL_PRODUCTOS = 11
+_COL_TOTAL_FACTURADO = 14
+_COL_CLIENTE = 23
+
+
+# Cabecera de la fila 4 que identifica un export de compras. Se compara por
+# contenido y no por nombre de archivo porque el ERP exporta con nombres
+# distintos cada vez ("19-08-1.xls", "FC-NC_0 ...") y quedarse pegado a
+# "compras.xls" hacia que el informe usara un archivo viejo en silencio.
+_COMPRAS_FIRMA = ("Codigo Movimiento", "Fecha Movimiento", "Productos",
+                  "Total Facturado Producto", "Cliente")
+
+
+def _es_export_compras(path: Path) -> bool:
+    import xlrd
+    try:
+        sh = xlrd.open_workbook(str(path)).sheet_by_index(0)
+        if sh.nrows <= _COMPRAS_HEADER_ROW:
+            return False
+        fila = [str(sh.cell_value(_COMPRAS_HEADER_ROW, c)).strip()
+                for c in (_COL_COD_MOVIMIENTO, _COL_FECHA_MOVIMIENTO, _COL_PRODUCTOS,
+                          _COL_TOTAL_FACTURADO, _COL_CLIENTE)]
+        return tuple(fila) == _COMPRAS_FIRMA
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _resolver_compras(directorio: Path, canonico: Path) -> Path | None:
+    """El export de compras mas RECIENTE del directorio, elegido por contenido.
+
+    Devuelve None si no hay ninguno. Si el elegido no es el canonico se avisa,
+    para que quede claro de que archivo salieron las Compras del informe.
+    """
+    candidatos = []
+    for f in sorted(directorio.glob("*.xls")):
+        if f.name.startswith("~$") or f.name.startswith("."):
+            continue
+        if _es_export_compras(f):
+            candidatos.append(f)
+    if not candidatos:
+        return canonico if canonico.exists() else None
+    elegido = max(candidatos, key=lambda f: f.stat().st_mtime)
+    if elegido != canonico:
+        otros = [f.name for f in candidatos if f != elegido]
+        print(f"    compras: se usa {elegido.name} (el mas reciente)"
+              + (f"; descartados por viejos: {', '.join(otros)}" if otros else ""))
+    return elegido
+
+
+
+def _leer_compras(path: Path, signos: dict, sucursal_por_cliente: dict,
+                  generico_por_articulo: dict,
+                  desde: str, hasta: str) -> pd.DataFrame:
+    """compras.xls -> DataFrame con generico, sucursal y total con signo.
+
+    Se acota a [desde, hasta] por Fecha Movimiento. El SUMIFS del original NO
+    filtra por fecha: confia en que el operador exporto justo el periodo. Si el
+    export trae otro mes, el Excel manual cruza Compras de un periodo contra
+    Descuentos de otro y la Diferencia no significa nada. Aca se filtra, asi
+    que las dos columnas miden siempre la misma ventana.
+    """
+    import xlrd
+
+    bk = xlrd.open_workbook(str(path))
+    sh = bk.sheet_by_index(0)
+    d0, d1 = date.fromisoformat(desde), date.fromisoformat(hasta)
+    filas = []
+    fuera_de_rango = 0
+    cubre_desde = cubre_hasta = None
+    desconocidos: dict[str, float] = {}
+    for i in range(_COMPRAS_HEADER_ROW + 1, sh.nrows):
+        f = sh.cell_value(i, _COL_FECHA_MOVIMIENTO)
+        if not isinstance(f, float) or f <= 0:
+            continue                      # sin fecha no se puede ubicar en el periodo
+        fecha = xlrd.xldate.xldate_as_datetime(f, bk.datemode).date()
+        if not (d0 <= fecha <= d1):
+            fuera_de_rango += 1
+            continue
+        cubre_desde = fecha if cubre_desde is None else min(cubre_desde, fecha)
+        cubre_hasta = fecha if cubre_hasta is None else max(cubre_hasta, fecha)
+
+        cod = str(sh.cell_value(i, _COL_COD_MOVIMIENTO)).strip()
+        if cod not in signos:
+            # #N/A en el VLOOKUP del original, asi que el SUMIFS no lo suma.
+            # Se replica, pero se MIDE: un codigo nuevo con plata importante
+            # tiene que aparecer en pantalla, no desaparecer sin ruido.
+            try:
+                desconocidos[cod] = desconocidos.get(cod, 0.0) + abs(
+                    float(sh.cell_value(i, _COL_TOTAL_FACTURADO) or 0))
+            except (TypeError, ValueError):
+                desconocidos[cod] = desconocidos.get(cod, 0.0)
+            continue
+        signo, flag = signos[cod]
+        if flag.strip().lower() != "suma":
+            continue                      # el SUMIFS filtra por AJ="suma"
+
+        productos = str(sh.cell_value(i, _COL_PRODUCTOS))
+        if "-" not in productos:
+            continue
+        try:
+            articulo = int(float(productos.split("-", 1)[0].strip()))
+        except ValueError:
+            continue
+
+        cliente = sh.cell_value(i, _COL_CLIENTE)
+        try:
+            cliente = int(float(cliente))
+        except (TypeError, ValueError):
+            continue
+
+        gen = generico_por_articulo.get(articulo)
+        suc = sucursal_por_cliente.get(cliente)
+        if gen is None or suc is None:
+            continue                      # sin match -> el VLOOKUP daba #N/A
+
+        try:
+            importe = float(sh.cell_value(i, _COL_TOTAL_FACTURADO) or 0)
+        except (TypeError, ValueError):
+            importe = 0.0
+
+        filas.append({"generico": gen, "sucursal": suc, "total": signo * importe})
+
+    if fuera_de_rango:
+        print(f"    {path.name}: {fuera_de_rango} filas fuera de {desde}..{hasta}, descartadas")
+    if desconocidos:
+        sumado = sum(abs(f["total"]) for f in filas)
+        for cod, monto in sorted(desconocidos.items(), key=lambda kv: -kv[1]):
+            peso = (monto / sumado) if sumado else 0.0
+            nivel = "ALERTA" if peso >= 0.05 else "aviso"
+            print(f"    {nivel}: codigo de movimiento '{cod}' sin signo en "
+                  f"'extra y tasa' — ${monto:,.0f} ({peso:.1%} de las Compras) "
+                  f"NO entran en el modelo, igual que en el informe original")
+    if cubre_desde is None:
+        print(f"    WARN: {path.name} no tiene NINGUNA fila en {desde}..{hasta}; "
+              f"la tasa sale del .xlsm")
+    elif cubre_desde > d0 or cubre_hasta < d1:
+        print(f"    WARN: {path.name} cubre {cubre_desde}..{cubre_hasta} pero el "
+              f"periodo es {desde}..{hasta}. Las Compras quedan CORTAS contra los "
+              f"Descuentos: la Diferencia subestima. Reexportar el archivo.")
+    return pd.DataFrame(filas)
+
+
+def computar_tasa(compras_path: Path, inf: dict, fact: pd.DataFrame,
+                  generico_por_articulo: dict) -> tuple[pd.DataFrame, pd.DataFrame] | None:
+    """Recalcula el modelo de tasa desde los insumos frescos.
+
+    Descuentos salen de la BASE (frescos). Compras de compras.xls (fresco).
+    Solo la Tasa% viene del .xlsm, porque es un valor negociado, no calculado.
+    Devuelve (modelo_por_zona, apertura_por_sucursal), o None si falta algun
+    insumo — el informe cae al bloque leido del .xlsm, que es preferible a
+    inventar."""
+    signos = inf.get("signos_movimiento")
+    suc_por_cliente = inf.get("sucursal_por_cliente_interno")
+    tasas = inf.get("tasa_pct")           # {(generico, zona): pct}
+    zona_por_suc = inf.get("zona_por_sucursal")
+    if not (signos and suc_por_cliente and tasas and zona_por_suc):
+        return None
+    if not compras_path.exists():
+        print(f"  WARN: no esta {compras_path.name}; la tasa sale del .xlsm")
+        return None
+
+    compras = _leer_compras(compras_path, signos, suc_por_cliente, generico_por_articulo,
+                            PERIODO_DESDE, PERIODO_HASTA)
+    if compras.empty:
+        return None
+
+    # Compras por (generico, zona) — el original agrega por sucursal y despues
+    # suma por zona con SUMIF; aca se hace en un paso, mismo resultado.
+    compras["zona"] = compras["sucursal"].map(zona_por_suc)
+    compras_zona = (compras.dropna(subset=["zona"])
+                    .groupby(["generico", "zona"])["total"].sum())
+
+    # Descuentos por (generico, zona) desde la BASE.
+    fz = fact.copy()
+    fz["zona"] = fz["sucursal"].map(zona_por_suc)
+    desc_zona = (fz.dropna(subset=["zona"])
+                 .groupby(["generico", "zona"])["descuentos"].sum())
+
+    # Se recorre `tasas` en orden de insercion (CERVEZAS y despues AGUAS, cada
+    # una con sus zonas en el orden de la hoja) y el TOTAL de cada generico se
+    # intercala al cierre de su bloque. Es el mismo layout que produce el
+    # camino que lee el .xlsm: la hoja no puede reordenarse segun cual de los
+    # dos corrio.
+    filas = []
+    bloque = []
+    gen_actual = None
+
+    def _cerrar_bloque():
+        if not bloque:
+            return
+        filas.extend(bloque)
+        filas.append({
+            "generico": gen_actual, "zona": "— TOTAL " + gen_actual,
+            "descuentos": sum(f["descuentos"] for f in bloque),
+            "compras": sum(f["compras"] for f in bloque),
+            "tasa_pct": None,
+            "tasa_generada": sum(f["tasa_generada"] for f in bloque),
+            "diferencia": sum(f["diferencia"] for f in bloque),
+            "compra_necesaria": sum(f["compra_necesaria"] for f in bloque),
+        })
+        bloque.clear()
+
+    for (gen, zona), pct in tasas.items():
+        if gen != gen_actual:
+            _cerrar_bloque()
+            gen_actual = gen
+        comp = float(compras_zona.get((gen, zona), 0.0))
+        desc = float(desc_zona.get((gen, zona), 0.0))
+        generada = comp * pct
+        diferencia = generada - desc          # Reversa y Extra Tasa vienen vacias
+        bloque.append({
+            "generico": gen, "zona": zona,
+            "descuentos": desc, "compras": comp,
+            "tasa_pct": pct, "tasa_generada": generada,
+            "diferencia": diferencia,
+            "compra_necesaria": (diferencia / pct) if pct else 0.0,
+        })
+    _cerrar_bloque()
+
+    if not filas:
+        return None
+
+    # Apertura por SUCURSAL — el bloque superior de 'COMPRAS & DESC', que es
+    # de donde el original saca las cifras de zona con un SUMIF. Sin el, la
+    # unica forma de ver que sucursal mueve una zona es abrir la BASE.
+    # El universo de filas son las 14 sucursales del mapa sucursal->zona, no
+    # las que tengan movimiento: una sucursal en cero es informacion (el
+    # original la lista con 0), no una fila que sobra.
+    compras_suc = compras.groupby(["generico", "sucursal"])["total"].sum()
+    desc_suc = fact.groupby(["generico", "sucursal"])["descuentos"].sum()
+    orden_suc = sorted(zona_por_suc, key=lambda s: (zona_por_suc[s], s))
+    apertura = []
+    for gen in dict.fromkeys(g for g, _ in tasas):
+        bloque_suc = []
+        for suc in orden_suc:
+            bloque_suc.append({
+                "generico": gen, "sucursal": suc, "zona": zona_por_suc[suc],
+                "descuentos": float(desc_suc.get((gen, suc), 0.0)),
+                "compras": float(compras_suc.get((gen, suc), 0.0)),
+            })
+        apertura.extend(bloque_suc)
+        apertura.append({
+            "generico": gen, "sucursal": "— TOTAL " + gen, "zona": "",
+            "descuentos": sum(f["descuentos"] for f in bloque_suc),
+            "compras": sum(f["compras"] for f in bloque_suc),
+        })
+
+    return pd.DataFrame(filas), pd.DataFrame(apertura)
+
+
+def computar_canal(cli: pd.DataFrame, inf: dict) -> tuple | None:
+    """Descuento por canal desde la BASE (fresca), no desde el .xlsm.
+
+    La hoja CLIENTE-FECHA existe en los dos archivos con el MISMO layout, y
+    leerla del .xlsm era el bug: ese archivo se refresca a mano, asi que la
+    hoja Canal se quedaba en el corte del ultimo refresh mientras el resto del
+    informe avanzaba. Del .xlsm se sigue tomando solo el padron LISTA
+    (cliente -> canal), que es un maestro y no una cifra del periodo.
+
+    Devuelve (canal, canal_gen) o None si falta algun insumo — degradar al
+    bloque del .xlsm es preferible a inventar una apertura.
+    """
+    li = inf.get("lista_precio")
+    if li is None or cli is None or cli.empty:
+        return None
+
+    cf = cli.copy()
+    cf = cf[cf["razon_social"].notna() & cf["razon_social"].astype(str).ne("(blank)")]
+    if cf.empty:
+        return None
+    cf["_cli"] = pd.to_numeric(cf["cod_cliente"], errors="coerce")
+    cf = cf.merge(li, on="_cli", how="left")
+    cf["LISTA PRECIO"] = (cf["LISTA PRECIO"].fillna("SIN CANAL (#N/D)")
+                          .map(etiquetar_lista))
+
+    canal = (cf.groupby("LISTA PRECIO")["descuento"]
+             .agg(descuento="sum", lineas="size").reset_index()
+             .rename(columns={"LISTA PRECIO": "canal"})
+             .sort_values("descuento", ascending=False))
+    canal_gen = (cf.groupby(["LISTA PRECIO", "generico"])["descuento"].sum()
+                 .reset_index().rename(columns={"LISTA PRECIO": "canal"}))
+    return canal, canal_gen
+
+
+def _origen_tasa(inf: dict) -> str:
+    """Rotula de donde salio cada Tasa%: del .xlsm o declarada aca.
+
+    Con dos origenes conviviendo, decir 'del informe manual' a secas seria
+    falso para las zonas pisadas por TASA_OVERRIDE.
+    """
+    tasas = inf.get("tasa_pct") or {}
+    pisadas = [z for (g, z) in TASA_OVERRIDE if (g, z) in tasas]
+    if not pisadas:
+        return "del informe manual"
+    if len(pisadas) == len(tasas):
+        return TASA_OVERRIDE_FUENTE
+    return f"{len(pisadas)} de {len(tasas)} zonas {TASA_OVERRIDE_FUENTE}; el resto del informe manual"
+
+
 def _label_periodo() -> str:
     """'01→30 jul' derivado de las constantes del run, nunca hardcodeado."""
     MESES = ["ene", "feb", "mar", "abr", "may", "jun",
@@ -484,10 +1000,53 @@ def build(out_path: Path):
     IMG_DIR.mkdir(exist_ok=True)
     print("Cargando BASE ...")
     fact, acc, daily, cli, accgen = load_base()
+
+    # El periodo se DERIVA del dato real de la BASE, no de constantes ni de
+    # argumentos: si el rotulo y el contenido pueden desincronizarse, tarde o
+    # temprano lo hacen. Con esto el encabezado siempre describe lo que hay.
+    global PERIODO_DESDE, PERIODO_HASTA
+    if len(daily):
+        PERIODO_DESDE = str(daily["fecha"].min())
+        PERIODO_HASTA = str(daily["fecha"].max())
+        print(f"Periodo derivado de la BASE: {PERIODO_DESDE} -> {PERIODO_HASTA}")
     print("Cargando INFORME ...")
     inf = load_informe()
+
     print("Cargando gold ...")
-    ventas, cob = load_gold()
+    ventas, cob, generico_por_articulo = load_gold()
+
+    # Modelo de tasa recalculado desde los insumos. Si algo falta, se cae al
+    # bloque leido del .xlsm — mejor un dato viejo declarado que uno inventado.
+    try:
+        _compras_path = _resolver_compras(COMPRAS_DIR, COMPRAS_XLS)
+        if _compras_path is None:
+            raise FileNotFoundError(f"no hay ningun export de compras en {COMPRAS_DIR}")
+        _res = computar_tasa(_compras_path, inf, fact, generico_por_articulo)
+        _tasa, _apertura = _res if _res is not None else (None, None)
+        if _tasa is not None and len(_tasa):
+            inf["tasa"] = _tasa
+            inf["tasa_apertura"] = _apertura
+            inf["tasa_calculada"] = True
+            print(f"    tasa RECALCULADA desde {_compras_path.name} + BASE")
+        else:
+            print("    tasa leida del .xlsm (no se pudo recalcular)")
+    except Exception as e:  # noqa: BLE001
+        print(f"    WARN: no se pudo recalcular la tasa ({e}); se usa la del .xlsm")
+
+    # Canal desde la BASE fresca. El .xlsm solo aporta el padron LISTA.
+    try:
+        _c = computar_canal(cli, inf)
+        if _c is not None:
+            _viejo = float(inf["canal"].descuento.sum())
+            inf["canal"], inf["canal_gen"] = _c
+            _nuevo = float(inf["canal"].descuento.sum())
+            inf["canal_calculado"] = True
+            print(f"    canal RECALCULADO desde la BASE: ${_nuevo:,.0f} "
+                  f"(el .xlsm traia ${_viejo:,.0f})")
+        else:
+            print("    canal leido del .xlsm (no se pudo recalcular)")
+    except Exception as e:  # noqa: BLE001
+        print(f"    WARN: no se pudo recalcular el canal ({e}); se usa el del .xlsm")
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -606,7 +1165,10 @@ def build(out_path: Path):
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 20, "C": 22, "D": 16, "E": 16, "F": 11, "G": 16, "H": 17, "I": 19})
     r = title(ws, 2, "Modelo de tasa — ¿la inversión promocional se paga sola?",
-              f"Fuente B · informe final · sólo CCU · {_label_corte(inf.get('cortes'))}")
+              ("Descuentos y Compras RECALCULADOS de los insumos · "
+               f"Tasa % {_origen_tasa(inf)} · sólo CCU · período {_label_periodo()}"
+               if inf.get("tasa_calculada")
+               else f"Fuente B · informe final · sólo CCU · {_label_corte(inf.get('cortes'))}"))
     ws.cell(row=r, column=2, value="Tasa Generada = Compras × Tasa%     ·     Diferencia = Tasa Generada − Descuentos     ·     Compra Necesaria = Compras − (Descuentos / Tasa%)").font = Font(name="Consolas", size=8.5, color=TEAL)
     r += 2
 
@@ -658,11 +1220,45 @@ def build(out_path: Path):
     style_chart(ch2, "Diferencia por zona (negativo = BADIE pone de más)", w=25, h=10)
     ws.add_chart(ch2, f"B{r + 25}")
 
+    # --- apertura por sucursal (el bloque superior de 'COMPRAS & DESC') ---
+    # Va DEBAJO de los graficos para no separar el modelo de su lectura. Es la
+    # apertura de donde salen las cifras de zona: sin ella no hay forma de ver
+    # que sucursal mueve una zona sin abrir la BASE.
+    ap = inf.get("tasa_apertura")
+    if ap is not None and len(ap):
+        r = max(r + 48, r + 48)
+        r = band(ws, r, "APERTURA POR SUCURSAL — de acá salen las cifras de zona", col=2, span=6)
+        r += 1
+        for gen in dict.fromkeys(ap["generico"]):
+            g = ap[ap["generico"] == gen].copy()
+            gdf = g.rename(columns={"sucursal": "Sucursal", "zona": "Zona",
+                                    "descuentos": "Descuentos", "compras": "Compras"})[
+                ["Sucursal", "Zona", "Descuentos", "Compras"]]
+            ws.cell(row=r, column=2, value=gen).font = Font(size=11, bold=True, color=TEAL)
+            r += 1
+            ini = r
+            r = write_df(ws, gdf, r, {"Descuentos": F_MONEY, "Compras": F_MONEY0},
+                         total_row=False, start_col=2)
+            for rr in range(ini + 1, r):
+                sv = ws.cell(row=rr, column=2).value
+                if isinstance(sv, str) and sv.startswith("—"):
+                    for cc in range(2, 6):
+                        ws.cell(row=rr, column=cc).font = Font(size=9, bold=True, color=INK)
+                        ws.cell(row=rr, column=cc).fill = PatternFill("solid", fgColor="EFE7D6")
+            r += 2
+
     # ============ 4. EVOLUCION DIARIA ============
     ws = wb.create_sheet("Evolución Diaria")
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 13, "C": 18, "D": 17, "E": 13, "F": 13})
-    r = title(ws, 2, "Evolución diaria", "Fuente A · BASE control · hoja wapi")
+    # OJO: la Facturación de esta hoja NO coincide con la de «Genéricos» y no
+    # tiene por qué. Acá se mide el archivo wapi de CCU — sólo las líneas CON
+    # acción promocional. «Genéricos» mide la venta completa de BADIE. Los
+    # Descuentos sí cierran entre las dos (el descuento sólo existe donde hay
+    # acción); la Facturación no, porque son universos distintos.
+    r = title(ws, 2, "Evolución diaria",
+              "Fuente A · BASE control · hoja wapi — SÓLO líneas con acción CCU "
+              "(la facturación no cuadra con «Genéricos»: ver nota al pie)")
     dd = daily.copy()
     dd["pct"] = dd.descuentos / dd.facturacion.replace(0, pd.NA)
     dd = dd.rename(columns={"fecha": "Fecha", "facturacion": "Facturación",
@@ -696,11 +1292,43 @@ def build(out_path: Path):
     style_chart(lc2, "% Descuento diario (Desc. / Fact.)", x_title="Fecha", w=26, h=10)
     ws.add_chart(lc2, f"H{start + 23}")
 
+    # Conciliacion explicita contra la hoja «Genéricos». Sin esto, dos hojas
+    # con la misma etiqueta «Facturación» y totales distintos se leen como un
+    # error del informe. Los numeros se calculan, no se declaran.
+    rn = r + 2
+    rn = band(ws, rn, "POR QUÉ ESTE TOTAL NO ES EL DE «GENÉRICOS»", col=2, span=5)
+    f_wapi, d_wapi = float(dd["Facturación"].sum()), float(dd["Descuentos"].sum())
+    ccu_mask = fact["generico"].isin(CCU)
+    f_ccu, d_ccu = float(fact.loc[ccu_mask, "facturacion"].sum()), float(fact.loc[ccu_mask, "descuentos"].sum())
+    f_all, d_all = float(fact["facturacion"].sum()), float(fact["descuentos"].sum())
+    for etiqueta, fv, dv in [
+        ("Esta hoja (wapi: sólo líneas con acción CCU)", f_wapi, d_wapi),
+        ("«Genéricos» acotado a los 5 genéricos CCU", f_ccu, d_ccu),
+        ("«Genéricos» completo (toda la venta BADIE)", f_all, d_all),
+    ]:
+        ws.cell(row=rn, column=2, value=etiqueta).font = Font(size=9, color=INK)
+        c = ws.cell(row=rn, column=4, value=fv); c.number_format = F_MONEY; c.font = Font(size=9)
+        c = ws.cell(row=rn, column=5, value=dv); c.number_format = F_MONEY; c.font = Font(size=9)
+        rn += 1
+    ws.cell(row=rn - 3, column=3, value="Facturación").font = Font(size=8, bold=True, color=INK_MUTE)
+    dif_pct = (d_wapi / d_ccu - 1) if d_ccu else 0
+    rn += 1
+    ws.cell(row=rn, column=2, value=(
+        f"Los DESCUENTOS cierran ({dif_pct:+.2%} contra el corte CCU de «Genéricos»): el descuento "
+        f"sólo existe donde hay acción. La FACTURACIÓN no cierra y no debe: el wapi trae únicamente "
+        f"las líneas promocionadas, mientras que «Genéricos» mide la venta completa. Comparar los dos "
+        f"totales de facturación entre sí no significa nada."
+    )).font = Font(size=9, italic=True, color=INK_MUTE)
+    ws.cell(row=rn, column=2).alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells(start_row=rn, start_column=2, end_row=rn + 2, end_column=6)
+
     # ============ 5. GENERICOS ============
     ws = wb.create_sheet("Genéricos")
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 22, "C": 18, "D": 17, "E": 12, "F": 11, "G": 10})
-    r = title(ws, 2, "Mix y presión promocional por genérico", "Fuente A · BASE control · hoja FACT_NET")
+    r = title(ws, 2, "Mix y presión promocional por genérico",
+              "Fuente A · BASE control · hoja FACT_NET — venta COMPLETA de BADIE, "
+              "todos los genéricos (no sólo CCU)")
     g = (fact.groupby("generico").agg(Facturación=("facturacion", "sum"),
                                       Descuentos=("descuentos", "sum"),
                                       Artículos=("codigo", "nunique")).reset_index()
@@ -780,7 +1408,10 @@ def build(out_path: Path):
     ws = wb.create_sheet("Canal")
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 34, "C": 18, "D": 12, "E": 11})
-    r = title(ws, 2, "Descuento por canal (lista de precios)", "Fuente B · informe final · columna LISTA PRECIO")
+    r = title(ws, 2, "Descuento por canal (lista de precios)",
+              ("Descuentos de la BASE · padrón LISTA del informe manual · " + _label_periodo())
+              if inf.get("canal_calculado")
+              else "Fuente B · informe final · columna LISTA PRECIO")
     cn = inf["canal"].rename(columns={"canal": "Canal", "descuento": "Descuento", "lineas": "Líneas"})
     cn["Share"] = cn.Descuento / cn.Descuento.sum()
     start = r
