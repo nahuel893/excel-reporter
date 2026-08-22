@@ -253,3 +253,144 @@ class TestLayoutDeColumnas:
         for titulo, bloques in avance_pptx.COBER_SLIDES:
             columnas = [c for _m, cols in bloques for c in cols]
             assert len(columnas) == len(set(columnas)), titulo
+
+
+class TestTotalesPorSupervisor:
+    """La slide que abre cada seccion: una fila por supervisor, sus totales.
+
+    Antes habia una sola slide de resumen que mezclaba volumen (azul) y
+    cobertura (verde) en la misma tabla. Son dos lecturas distintas y juntarlas
+    obliga a saltar de una a otra; ahora cada seccion arranca con los totales de
+    su propia hoja.
+
+    Estas filas se LEEN de la banda de resumen del libro, celda por celda. No se
+    suman los vendedores ni se recalcula ningun porcentaje: el numero que se
+    muestra es el que Nahuel ve en el Excel. Si la hoja y la suma de sus filas no
+    coinciden, eso lo reporta `--diagnostico`, no lo arregla el deck por su
+    cuenta.
+    """
+
+    @pytest.fixture
+    def hoja(self):
+        """Vendedores arriba, banda de resumen abajo, rollup al pie.
+
+        Los valores de la banda NO son la suma de los vendedores a proposito:
+        asi un test puede distinguir "lei la celda" de "sume las filas".
+        """
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        vendedores = [
+            (8, "ANA PEREZ", "GFLORES", 45, 5),
+            (9, "LUIS GOMEZ", "GFLORES", 45, 5),
+            (11, "MARIA RUIZ", "FGUANTAY", 50, 450),
+            (12, "JUAN DIAZ", "FGUANTAY", 50, 450),
+        ]
+        for fila, nombre, codigo, venta, falta in vendedores:
+            ws.cell(fila, 2).value = nombre
+            ws.cell(fila, 3).value = codigo
+            ws.cell(fila, 4).value = venta
+            ws.cell(fila, 6).value = falta
+
+        # Banda de resumen: nombre = codigo del supervisor, super = rollup.
+        for fila, codigo, venta, falta in [(17, "GFLORES", 111, 22),
+                                           (18, "FGUANTAY", 333, 44)]:
+            ws.cell(fila, 2).value = codigo
+            ws.cell(fila, 3).value = "GFARAH"
+            ws.cell(fila, 4).value = venta
+            ws.cell(fila, 6).value = falta
+        return ws
+
+    def _filas(self, hoja):
+        return avance_pptx._filas_por_supervisor(
+            hoja, "B", "C", 20, ["D", "F"])
+
+    def test_una_fila_por_supervisor_en_el_orden_de_la_hoja(self, hoja):
+        etiquetas = [etiqueta for etiqueta, _valores, _total in self._filas(hoja)]
+
+        assert etiquetas == ["GFLORES", "FGUANTAY"]
+
+    def test_toma_el_dato_de_la_banda_y_no_suma_los_vendedores(self, hoja):
+        """GFLORES: la banda dice 111, sus dos vendedores suman 90."""
+        valores = dict((e, v) for e, v, _t in self._filas(hoja))
+
+        assert valores["GFLORES"] == [111, 22]
+        assert valores["FGUANTAY"] == [333, 44]
+
+    def test_no_toca_el_valor_leido(self, hoja):
+        """Ni redondeo ni escala: la celda entra al deck como esta."""
+        hoja.cell(17, 4).value = 1234.567
+
+        valores = dict((e, v) for e, v, _t in self._filas(hoja))
+
+        assert valores["GFLORES"][0] == 1234.567
+
+    def test_una_celda_vacia_de_la_banda_queda_en_none(self, hoja):
+        """Sin dato no se inventa un cero: la celda del deck queda en '-'."""
+        hoja.cell(18, 6).value = None
+
+        valores = dict((e, v) for e, v, _t in self._filas(hoja))
+
+        assert valores["FGUANTAY"][1] is None
+
+    def test_un_error_de_formula_no_entra_como_dato(self, hoja):
+        hoja.cell(17, 4).value = "#DIV/0!"
+
+        valores = dict((e, v) for e, v, _t in self._filas(hoja))
+
+        assert valores["GFLORES"][0] is None
+
+    def test_ningun_supervisor_va_marcado_como_fila_de_total(self, hoja):
+        assert all(total is False for _e, _v, total in self._filas(hoja))
+
+    def test_sin_banda_de_resumen_no_hay_filas(self):
+        """Si el libro no trae la banda, la slide no inventa una."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.cell(8, 2).value = "ANA PEREZ"
+        ws.cell(8, 3).value = "GFLORES"
+        ws.cell(9, 2).value = "LUIS GOMEZ"
+        ws.cell(9, 3).value = "GFLORES"
+
+        assert avance_pptx._filas_por_supervisor(ws, "B", "C", 20, ["D"]) == []
+
+    def test_la_banda_de_cober_nueva_trae_un_cero_y_no_un_vacio(self):
+        """`Cober Nueva` no tiene la misma forma que `Avance`.
+
+        Ahi la banda de resumen (filas 51-54 del libro real) lleva un 0 numerico
+        en la columna A en vez de dejarla vacia, y las filas de vendedor tambien
+        llevan el codigo del supervisor en B. Buscar "filas cuyo nombre es un
+        codigo" perdia la banda entera y la seccion de cobertura salia sin su
+        slide de totales.
+        """
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        for fila, nombre, codigo, pdv in [(8, "ANA PEREZ", "GFLORES", 10),
+                                          (9, "LUIS GOMEZ", "GFLORES", 20)]:
+            ws.cell(fila, 1).value = nombre      # A = vendedor
+            ws.cell(fila, 2).value = codigo      # B = supervisor
+            ws.cell(fila, 3).value = pdv
+        ws.cell(51, 1).value = 0                 # la banda: A trae un 0
+        ws.cell(51, 2).value = "GFLORES"
+        ws.cell(51, 3).value = 1577
+
+        filas = avance_pptx._filas_por_supervisor(
+            ws, "A", "B", 55, ["C"], exigir_nombre_vacio=True)
+
+        assert filas == [("GFLORES", [1577], False)]
+
+    def test_la_ultima_fila_de_vendedor_no_se_confunde_con_la_banda(self):
+        """Sin el flag, la fila 9 (B=GFLORES) ganaria por ser la ultima."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        for fila, nombre, pdv in [(8, "ANA PEREZ", 10), (9, "LUIS GOMEZ", 20)]:
+            ws.cell(fila, 1).value = nombre
+            ws.cell(fila, 2).value = "GFLORES"
+            ws.cell(fila, 3).value = pdv
+        ws.cell(51, 1).value = 0
+        ws.cell(51, 2).value = "GFLORES"
+        ws.cell(51, 3).value = 1577
+
+        filas = avance_pptx._filas_por_supervisor(
+            ws, "A", "B", 55, ["C"], exigir_nombre_vacio=True)
+
+        assert filas[0][1] == [1577]   # la banda, no el 20 de LUIS GOMEZ
