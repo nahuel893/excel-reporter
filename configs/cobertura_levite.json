@@ -21,12 +21,18 @@
     },
     "reportes": [
         {
-            "nombre": "Cobertura Aguas por Calibre y Marca - CASA CENTRAL - {MES} {AÑO}",
-            "asunto_email": "Cobertura Aguas por Calibre y Marca - CASA CENTRAL - {MES} {AÑO}",
+            "nombre": "Cobertura por Calibre y Marca - CASA CENTRAL - {MES} {AÑO}",
+            "asunto_email": "Cobertura por Calibre y Marca - CASA CENTRAL - {MES} {AÑO}",
+            "_captura_nota": "auto:hoja, no un rango fijo: cada hoja lleva TRES cuadros y su alto depende de los calibres que se vendieron en las tres ventanas. Un rango escrito a mano recorta filas unos meses y deja franjas vacias otros.",
             "capture_images": [
                 {
-                    "hoja": "Calibre x Marca",
-                    "rango": "A1:J14",
+                    "hoja": "Aguas",
+                    "rango": "auto:hoja",
+                    "renderer": "libreoffice"
+                },
+                {
+                    "hoja": "Cervezas",
+                    "rango": "auto:hoja",
                     "renderer": "libreoffice"
                 }
             ],

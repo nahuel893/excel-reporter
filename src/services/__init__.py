@@ -19,4 +19,14 @@ __all__ = [
     "SubdistribuidoresConfig", "SubdistribuidoresResult", "SubdistribuidoresService",
     "CupoDesagregadoConfig", "CupoDesagregadoResult", "CupoDesagregadoService",
 ]
+from src.services.cobertura_levite import (
+    CoberturaLeviteConfig,
+    CoberturaLeviteResult,
+    CoberturaLeviteService,
+)
 from src.services.volumen_cobertura import VolumenCoberturaConfig, VolumenCoberturaResult, VolumenCoberturaService
+
+__all__ += [
+    "CoberturaLeviteService", "CoberturaLeviteConfig", "CoberturaLeviteResult",
+    "VolumenCoberturaConfig", "VolumenCoberturaResult", "VolumenCoberturaService",
+]

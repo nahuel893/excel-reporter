@@ -210,14 +210,24 @@ def test_el_config_manda_a_los_tres_por_mail_y_wpp():
     assert cfg.filtros.enviar_whatsapp is True
 
 
-def test_el_config_captura_la_hoja_del_cuadro():
+def test_el_config_captura_una_hoja_por_generico():
     from pathlib import Path
 
     from src.config.resolver import load_report_config
 
     cap = load_report_config(Path("configs/cobertura_levite.json")).reportes[0].capture_images
-    assert len(cap) == 1
-    assert cap[0].hoja == "Calibre x Marca"
+    assert [c.hoja for c in cap] == ["Aguas", "Cervezas"]
+
+
+def test_el_config_no_escribe_el_rango_a_mano():
+    """El alto de la hoja depende de los calibres que se vendieron: un rango
+    fijo recorta filas unos meses y deja franjas vacias otros."""
+    from pathlib import Path
+
+    from src.config.resolver import load_report_config
+
+    cap = load_report_config(Path("configs/cobertura_levite.json")).reportes[0].capture_images
+    assert all(c.rango == "auto:hoja" for c in cap)
 
 
 def test_el_config_solo_toma_casa_central():
@@ -248,3 +258,137 @@ def test_esta_registrado_en_el_daily():
     srv = {s.nombre: s for s in mod.SERVICIOS}
     assert "cobertura-levite" in srv
     assert srv["cobertura-levite"].fecha_modo == "mes_a_hoy"
+
+
+# --- calibre en cervezas ----------------------------------------------------
+
+
+def test_extraer_calibre_acepta_la_x_como_multiplicador():
+    """`HEINEKEN 330 X 24 VNR` usa X, no *. Sin esto el articulo cae en OTRO
+    y sus clientes desaparecen de la fila de 330cc."""
+    assert extraer_calibre("HEINEKEN  330 X 24 VNR") == "330cc"
+    assert extraer_calibre("SALTA RUBIA 1200 X 10") == "1200cc"
+
+
+def test_extraer_calibre_de_cervezas():
+    assert extraer_calibre("IMPERIAL GOLDEN 473*24 LATA") == "473cc"
+    assert extraer_calibre("IMPERIAL RUB 710*24 1412") == "710cc"
+    assert extraer_calibre("SALTA RUBIA 1200 * 10") == "1200cc"
+    assert extraer_calibre("MILLER RUB 600 * 12") == "600cc"
+    assert extraer_calibre("SALTA NEGRA 1000 * 12 VR") == "1000cc"
+
+
+def test_el_barril_no_tiene_calibre():
+    """30 litros es un barril de chopp: no es un envase de la grilla."""
+    assert extraer_calibre("IMPERIAL RUB * 30 LITROS") == "OTRO"
+
+
+# --- cuadro generalizado ----------------------------------------------------
+
+from src.services.cobertura_levite.processor import CUADROS
+
+CERVEZAS = (("PRINCIPALES", ("SALTA", "HEINEKEN", "IMPERIAL", "MILLER")),)
+
+
+def test_el_barril_cuenta_en_el_total_aunque_no_tenga_fila_de_calibre():
+    """Quien solo compro chopp esta cubierto en CERVEZAS. Descartarlo antes de
+    totalizar lo borraria del total, que es una cobertura del generico."""
+    v = _v([
+        (1, "S", 7, "IMPERIAL", "473cc", 5.0),
+        (1, "S", 9, "IMPERIAL", "OTRO", 5.0),
+    ])
+    df, _ = matriz_calibre_marca(
+        v, CERVEZAS, total_label="TOTAL CERVEZAS", con_subtotales=False
+    )
+    assert list(df["calibre"]) == ["473cc", "TOTAL"], "OTRO no es una fila"
+    assert df[df["calibre"] == "TOTAL"].iloc[0]["TOTAL CERVEZAS"] == 2
+
+
+def test_sin_subtotales_no_aparece_la_columna_de_categoria():
+    """En cervezas se piden las 4 marcas y el total del generico, nada mas."""
+    v = _v([(1, "S", 7, "SALTA", "473cc", 5.0)])
+    df, bloques = matriz_calibre_marca(
+        v, CERVEZAS, total_label="TOTAL CERVEZAS", con_subtotales=False
+    )
+    assert "TOTAL PRINCIPALES" not in df.columns
+    assert "TOTAL CERVEZAS" in df.columns
+
+
+def test_el_total_del_generico_incluye_marcas_que_no_son_columna():
+    """SCHNEIDER no es una de las principales pero es CERVEZAS: suma al total."""
+    v = _v([
+        (1, "S", 7, "SALTA", "473cc", 5.0),
+        (1, "S", 9, "SCHNEIDER", "473cc", 5.0),
+    ])
+    df, _ = matriz_calibre_marca(
+        v, CERVEZAS, total_label="TOTAL CERVEZAS", con_subtotales=False
+    )
+    fila = df[df["calibre"] == "473cc"].iloc[0]
+    assert fila["SALTA"] == 1
+    assert "SCHNEIDER" not in df.columns
+    assert fila["TOTAL CERVEZAS"] == 2
+
+
+def test_los_bloques_fijos_fuerzan_la_columna_aunque_no_haya_ventas():
+    """Los tres cuadros de una hoja comparan periodos: si una marca vendio en
+    julio y no en agosto, la columna tiene que seguir estando o los cuadros
+    dejan de estar alineados."""
+    v = _v([(1, "S", 7, "LEVITE", "500cc", 5.0)])
+    fijos = [("AGUA SABORIZADA", ["LEVITE", "BRIO"])]
+    df, bloques = matriz_calibre_marca(v, bloques=fijos)
+    assert bloques == fijos
+    assert df[df["calibre"] == "500cc"].iloc[0]["BRIO"] == 0
+
+
+def test_los_calibres_fijos_fuerzan_la_fila_aunque_no_haya_ventas():
+    v = _v([(1, "S", 7, "LEVITE", "500cc", 5.0)])
+    df, _ = matriz_calibre_marca(v, calibres=["500cc", "1500cc"])
+    assert list(df["calibre"]) == ["500cc", "1500cc", "TOTAL"]
+    assert df[df["calibre"] == "1500cc"].iloc[0]["LEVITE"] == 0
+
+
+def test_hay_un_cuadro_para_aguas_y_otro_para_cervezas():
+    por_generico = {c.generico: c for c in CUADROS}
+    assert set(por_generico) == {"AGUAS DANONE", "CERVEZAS"}
+    assert por_generico["AGUAS DANONE"].total_label == "TOTAL AGUAS"
+
+    cerv = por_generico["CERVEZAS"]
+    assert cerv.total_label == "TOTAL CERVEZAS"
+    assert cerv.con_subtotales is False
+    assert [m for _, ms in cerv.categorias for m in ms] == [
+        "SALTA", "HEINEKEN", "IMPERIAL", "MILLER",
+    ]
+    assert cerv.marcas_total is None, "el total abarca TODAS las marcas del generico"
+
+
+def test_el_total_de_aguas_se_queda_en_las_cinco_marcas_del_generico():
+    """SER esta en el generico pero fuera del universo comercial del informe."""
+    aguas = {c.generico: c for c in CUADROS}["AGUAS DANONE"]
+    assert set(aguas.marcas_total) == {
+        "VILLA DEL SUR", "VILLAVICENCIO", "LEVITE", "BRIO", "FULL SPORT",
+    }
+
+
+def test_las_filas_siguen_a_las_columnas():
+    """Un calibre que solo vendio una marca SIN columna no genera fila: la
+    fila saldria toda en cero salvo el total. KUNSTMAN 470cc es CERVEZAS pero
+    no es una de las cuatro principales."""
+    from src.services.cobertura_levite.service import CoberturaLeviteService
+
+    df = pd.DataFrame(
+        [
+            (1, "S", 7, "CERVEZAS", "SALTA", "473cc", 5.0),
+            (1, "S", 9, "CERVEZAS", "KUNSTMAN", "470cc", 5.0),
+        ],
+        columns=["id_sucursal", "sucursal", "id_cliente", "generico", "marca", "calibre", "bultos"],
+    )
+    cuadro = {c.generico: c for c in CUADROS}["CERVEZAS"]
+    bloques, calibres = CoberturaLeviteService._ejes([("X", df)], cuadro)
+
+    assert calibres == ["473cc"], "470cc no tiene ninguna columna que mostrar"
+    # El total del generico sigue contando a KUNSTMAN.
+    cuadro_df, _ = matriz_calibre_marca(
+        df, cuadro.categorias, total_label=cuadro.total_label,
+        con_subtotales=False, bloques=bloques, calibres=calibres,
+    )
+    assert cuadro_df[cuadro_df["calibre"] == "TOTAL"].iloc[0]["TOTAL CERVEZAS"] == 2

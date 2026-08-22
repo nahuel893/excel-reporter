@@ -7,6 +7,8 @@ Calculates coverage and volumes per client, branch, and caliber.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+
 import pandas as pd
 
 
@@ -14,28 +16,44 @@ import pandas as pd
 CALIBRE_ORDER = ["300cc", "500cc", "575cc", "600cc", "1000cc", "1350cc", "1500cc", "2000cc", "2250cc", "2500cc"]
 
 
+# Volumenes conocidos, para el patron secundario. Los de cerveza (330, 473,
+# 710, 1200) hacen falta desde que el cuadro abrio ese generico: sin ellos,
+# una descripcion sin multiplicador reconocible caia en OTRO.
+VOLUMENES_CONOCIDOS = (
+    "300", "330", "473", "500", "575", "600", "710", "1000",
+    "1200", "1350", "1500", "2000", "2250", "2500",
+)
+
+
 def extraer_calibre(descripcion: str | None) -> str:
     """Extrae el calibre normalizado a partir de la descripcion del articulo.
-    
-    Busca patrones de empaque como '1500*6', '500*12', '2250*6', '1000*6', etc.
-    o menciones directas del volumen en centimetros cubicos.
+
+    Busca patrones de empaque como '1500*6', '500*12', '2250*6', '330 X 24'.
+    El multiplicador se escribe indistinto con `*` o con `X` — `HEINEKEN 330 X
+    24 VNR` es el mismo formato que `HEINEKEN CERO 330*24 NR`, y leer solo el
+    `*` mandaba ese articulo a OTRO junto con todos sus clientes.
+
+    Devuelve ``"OTRO"`` cuando no hay envase reconocible. El barril de chopp
+    (`IMPERIAL RUB * 30 LITROS`) cae ahi a proposito: no es un envase de la
+    grilla, pero sus clientes SI cuentan para el total del generico (ver
+    :func:`matriz_calibre_marca`).
     """
     if not descripcion:
         return "OTRO"
-    
+
     desc = descripcion.upper().strip()
-    
-    # Patron principal: numero antes del multiplicador de bulto (ej: 1500*6, 500*12, 2250*6)
-    m = re.search(r"(\d+)\s*\*\s*\d+", desc)
+
+    # Patron principal: volumen antes del multiplicador de bulto.
+    m = re.search(r"(\d+)\s*[*X]\s*\d+", desc)
     if m:
         val = int(m.group(1))
         return f"{val}cc"
-    
+
     # Patron secundario: volumen explicito en la descripcion
-    m2 = re.search(r"\b(300|500|575|600|1000|1350|1500|2000|2250|2500)\b", desc)
+    m2 = re.search(rf"\b({'|'.join(VOLUMENES_CONOCIDOS)})\b", desc)
     if m2:
         return f"{m2.group(1)}cc"
-    
+
     return "OTRO"
 
 
@@ -226,7 +244,51 @@ CATEGORIAS: list[tuple[str, tuple[str, ...]]] = [
     ("ISOTONICA", ("FULL SPORT",)),
 ]
 
+# Cervezas se abre por las marcas principales, sin banda de categoria: lo que
+# se mira son esas cuatro y el total del generico.
+CATEGORIAS_CERVEZAS: list[tuple[str, tuple[str, ...]]] = [
+    ("PRINCIPALES", ("SALTA", "HEINEKEN", "IMPERIAL", "MILLER")),
+]
+
 CLAVE_CLIENTE = ["id_sucursal", "id_cliente"]
+
+
+@dataclass(frozen=True)
+class Cuadro:
+    """Un generico y como se abre en el cuadro calibre x marca.
+
+    `marcas_total` acota el universo del total. En AGUAS son las cinco marcas
+    comerciales del informe: `gold.dim_articulo` tiene alguna mas (SER) que no
+    entra en el negocio que se mide. En CERVEZAS es ``None`` — el total abarca
+    TODAS las marcas del generico, incluidas las que no tienen columna propia.
+    """
+
+    generico: str
+    hoja: str
+    total_label: str
+    categorias: tuple[tuple[str, tuple[str, ...]], ...]
+    con_subtotales: bool = True
+    marcas_total: tuple[str, ...] | None = None
+
+
+CUADROS: tuple[Cuadro, ...] = (
+    Cuadro(
+        generico="AGUAS DANONE",
+        hoja="Aguas",
+        total_label="TOTAL AGUAS",
+        categorias=tuple((e, ms) for e, ms in CATEGORIAS),
+        con_subtotales=True,
+        marcas_total=tuple(m for _, ms in CATEGORIAS for m in ms),
+    ),
+    Cuadro(
+        generico="CERVEZAS",
+        hoja="Cervezas",
+        total_label="TOTAL CERVEZAS",
+        categorias=tuple((e, ms) for e, ms in CATEGORIAS_CERVEZAS),
+        con_subtotales=False,
+        marcas_total=None,
+    ),
+)
 
 
 def _cubiertos(df: pd.DataFrame, umbral: float = 0.0) -> int:
@@ -245,58 +307,82 @@ def matriz_calibre_marca(
     df_ventas: pd.DataFrame,
     categorias: list[tuple[str, tuple[str, ...]]] | None = None,
     umbral: float = 0.0,
+    total_label: str = "TOTAL AGUAS",
+    con_subtotales: bool = True,
+    bloques: list[tuple[str, list[str]]] | None = None,
+    calibres: list[str] | None = None,
 ) -> tuple[pd.DataFrame, list[tuple[str, list[str]]]]:
     """Cobertura con el CALIBRE en filas y las marcas en columnas.
 
     Cada celda es la cantidad de clientes DISTINTOS que compraron ese calibre
     de esa marca. La cobertura no es aditiva ni entre calibres ni entre marcas
     —el mismo cliente compra varias—, asi que **ningun total se suma**: la fila
-    TOTAL, la columna de cada categoria y el TOTAL AGUAS se recalculan sobre su
-    propio corte. Sumar la columna de LEVITE 500cc + 1500cc + 2250cc cuenta dos
-    veces al que compro los tres.
+    TOTAL, la columna de cada categoria y la del generico se recalculan sobre
+    su propio corte. Sumar la columna de LEVITE 500cc + 1500cc + 2250cc cuenta
+    dos veces al que compro los tres.
+
+    Las filas son los calibres reconocidos; ``OTRO`` no genera fila (no es un
+    envase de la grilla) pero **sus clientes si cuentan** en la columna del
+    total y en la fila TOTAL: el barril de 30 litros es venta de CERVEZAS
+    aunque no tenga calibre, y descartarlo antes de totalizar bajaria la
+    cobertura del generico.
+
+    Args:
+        categorias: agrupacion ``[(etiqueta, (marca, ...))]`` de las columnas.
+        total_label: nombre de la columna del total del generico.
+        con_subtotales: ``False`` saca la banda de categoria y las columnas
+            ``TOTAL <categoria>``, para un cuadro que solo quiere las marcas y
+            el total.
+        bloques: fuerza las columnas en vez de derivarlas de lo que vendio.
+            Los cuadros de una misma hoja comparan periodos: si una marca
+            vendio en julio y no en agosto, la columna tiene que seguir estando
+            o los cuadros dejan de estar alineados.
+        calibres: idem para las filas.
 
     Returns:
         ``(df, bloques)`` donde `df` tiene una fila por calibre mas la fila
         TOTAL, y `bloques` es ``[(categoria, [columnas...])]`` para que la hoja
         sepa como agrupar los encabezados.
     """
-    categorias = categorias or CATEGORIAS
-    if df_ventas.empty:
+    categorias = categorias if categorias is not None else CATEGORIAS
+    if df_ventas.empty and bloques is None:
         return pd.DataFrame(), []
 
-    presentes = set(df_ventas["marca"].unique())
-    bloques: list[tuple[str, list[str]]] = []
-    for etiqueta, marcas in categorias:
-        # Solo las marcas con movimiento: una columna entera en cero es ruido.
-        cols = [m for m in marcas if m in presentes]
-        if cols:
-            bloques.append((etiqueta, cols))
+    if bloques is None:
+        presentes = set(df_ventas["marca"].unique())
+        bloques = []
+        for etiqueta, marcas in categorias:
+            # Solo las marcas con movimiento: una columna entera en cero es ruido.
+            cols = [m for m in marcas if m in presentes]
+            if cols:
+                bloques.append((etiqueta, cols))
 
-    calibres = ordenar_calibres([c for c in df_ventas["calibre"].unique()])
+    con_calibre = df_ventas[df_ventas["calibre"] != "OTRO"] if not df_ventas.empty else df_ventas
+    if calibres is None:
+        calibres = ordenar_calibres(list(con_calibre["calibre"].unique())) if not con_calibre.empty else []
+
+    def _celdas(corte: pd.DataFrame, universo: pd.DataFrame) -> dict:
+        """Una fila del cuadro. `corte` acota el calibre; `universo` es el mismo
+        corte SIN filtrar calibre, que es de donde sale el total del generico."""
+        celda: dict = {}
+        for etiqueta, cols in bloques:
+            for marca in cols:
+                celda[marca] = _cubiertos(corte[corte["marca"] == marca], umbral)
+            if con_subtotales:
+                # Subtotal de categoria: se RECALCULA, no se suman sus marcas.
+                celda[f"TOTAL {etiqueta}"] = _cubiertos(
+                    corte[corte["marca"].isin(cols)], umbral
+                )
+        celda[total_label] = _cubiertos(universo, umbral)
+        return celda
 
     filas = []
     for cal in calibres:
-        del_cal = df_ventas[df_ventas["calibre"] == cal]
-        fila: dict = {"calibre": cal}
-        for etiqueta, cols in bloques:
-            for marca in cols:
-                fila[marca] = _cubiertos(del_cal[del_cal["marca"] == marca], umbral)
-            # Subtotal de categoria: se RECALCULA, no se suman sus marcas.
-            fila[f"TOTAL {etiqueta}"] = _cubiertos(
-                del_cal[del_cal["marca"].isin(cols)], umbral
-            )
-        fila["TOTAL AGUAS"] = _cubiertos(del_cal, umbral)
-        filas.append(fila)
+        del_cal = con_calibre[con_calibre["calibre"] == cal] if not con_calibre.empty else con_calibre
+        filas.append({"calibre": cal, **_celdas(del_cal, del_cal)})
 
-    # Fila TOTAL: cada celda sobre la ventana entera, sin sumar los calibres.
-    total: dict = {"calibre": "TOTAL"}
-    for etiqueta, cols in bloques:
-        for marca in cols:
-            total[marca] = _cubiertos(df_ventas[df_ventas["marca"] == marca], umbral)
-        total[f"TOTAL {etiqueta}"] = _cubiertos(
-            df_ventas[df_ventas["marca"].isin(cols)], umbral
-        )
-    total["TOTAL AGUAS"] = _cubiertos(df_ventas, umbral)
-    filas.append(total)
+    # Fila TOTAL: cada celda sobre la ventana entera, sin sumar los calibres, y
+    # con OTRO adentro — quien compro solo barril tambien compro esa marca.
+    filas.append({"calibre": "TOTAL", **_celdas(df_ventas, df_ventas)})
 
     return pd.DataFrame(filas), bloques
