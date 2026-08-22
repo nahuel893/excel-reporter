@@ -77,6 +77,11 @@ en el subtítulo de la diapositiva.
 
 ## 4. La imagen de rechazos
 
+> En el **deck mensual único** (`scripts/avance_deck.py`) esta slide NO sale
+> acá: el informe de rebotes es de todos los preventistas de BADIE, no de las
+> líneas de Fratelli Branca, así que va a nivel de deck. Ese deck llama a
+> `poblar(..., con_rechazos=False)`. Ver `docs/avance-deck-mensual.md`.
+
 La última diapositiva es el PNG de rebotes del mes, insertado como imagen.
 
 Se lo busca **por carpeta, nunca por nombre**: `configs/rebotes.json` tiene el

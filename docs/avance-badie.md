@@ -225,6 +225,10 @@ d = resolve_delivery(rep, contactos,
 
 ## 6. El PowerPoint del avance
 
+> Este deck también sale solo, pero el que va a la reunión es el **deck mensual
+> único** (`scripts/avance_deck.py`): BADIE + BRANCA + rechazos + Vinos
+> Danielito en un archivo. Ver `docs/avance-deck-mensual.md`.
+
 `scripts/avance_pptx.py` arma un deck a partir del xlsx. **Solo lee**: nunca
 escribe el libro.
 

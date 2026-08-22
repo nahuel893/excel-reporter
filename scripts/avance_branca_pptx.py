@@ -311,22 +311,8 @@ def _slide_cobertura(prs, ws, periodo: str, titulo: str, desde: int, hasta: int)
     return True
 
 
-def _slide_imagen(prs, titulo: str, subtitulo: str, imagen: Path) -> None:
-    from PIL import Image
-
-    slide = base._slide(prs, titulo, subtitulo)
-    ancho_px, alto_px = Image.open(imagen).size
-    disponible_alto = base.ALTO_IN - 1.25
-    disponible_ancho = base.ANCHO_IN - 0.7
-
-    escala = min(disponible_ancho / ancho_px, disponible_alto / alto_px)
-    ancho_in, alto_in = ancho_px * escala, alto_px * escala
-    slide.shapes.add_picture(
-        str(imagen),
-        Inches((base.ANCHO_IN - ancho_in) / 2),
-        Inches(1.15 + (disponible_alto - alto_in) / 2),
-        Inches(ancho_in), Inches(alto_in),
-    )
+# La slide de imagen es la misma en los dos decks: vive en el modulo base.
+_slide_imagen = base._slide_imagen
 
 
 def _capturas(archivo: Path) -> dict:
@@ -395,8 +381,9 @@ def _diagnostico(ws, bloques: list, secciones: list) -> list:
     return avisos
 
 
-def construir(archivo: Path, salida: Path, rechazos: Path | None = None,
-              diagnostico: bool = False, con_capturas: bool = True) -> int:
+def poblar(prs, archivo: Path, rechazos: Path | None = None,
+           diagnostico: bool = False, con_capturas: bool = True,
+           portada: bool = True, con_rechazos: bool = True) -> None:
     libro, recalculado = _abrir(archivo)
     if recalculado:
         print("El libro no traia valores cacheados: se recalculo una copia con LibreOffice.")
@@ -412,13 +399,10 @@ def construir(archivo: Path, salida: Path, rechazos: Path | None = None,
         print("Totales de la hoja AVANCE que no cierran con sus propias filas:")
         print("\n".join(avisos) if avisos else "  (ninguno)")
 
-    prs = Presentation()
-    prs.slide_width = Inches(base.ANCHO_IN)
-    prs.slide_height = Inches(base.ALTO_IN)
-
     capturas = _capturas(archivo) if con_capturas else {}
 
-    _portada(prs, periodo, dias, archivo)
+    if portada:
+        _portada(prs, periodo, dias, archivo)
     for titulo, desde, hasta in AVANCE_SECCIONES:
         _slide_volumen(prs, ws_avance, periodo, titulo, desde, hasta)
     if "AVANCE" in capturas:
@@ -430,12 +414,23 @@ def construir(archivo: Path, salida: Path, rechazos: Path | None = None,
         _slide_imagen(prs, "COBERTURA — LA HOJA", f"{periodo}   ·   captura de `Cobertura`",
                       capturas["COBERTURA"])
 
+    # `con_rechazos=False` es el deck unificado: ahi la slide va a nivel de deck
+    # porque el informe de rebotes es de toda BADIE, no de la linea Branca.
+    # Poner la slide aca la dejaria dentro de la seccion equivocada, y ademas
+    # repetida si el deck tambien la agrega.
+    if not con_rechazos:
+        return
     if rechazos and rechazos.is_file():
         _slide_imagen(prs, "RECHAZOS", f"{periodo}   ·   % de bultos rechazados por preventista",
                       rechazos)
     else:
         print("AVISO: sin imagen de rechazos, el deck sale sin esa diapositiva.")
 
+
+def construir(archivo: Path, salida: Path, rechazos: Path | None = None,
+              diagnostico: bool = False, con_capturas: bool = True) -> int:
+    prs = base.nuevo_deck()
+    poblar(prs, archivo, rechazos, diagnostico=diagnostico, con_capturas=con_capturas)
     salida.parent.mkdir(parents=True, exist_ok=True)
     prs.save(salida)
     return len(prs.slides._sldIdLst)

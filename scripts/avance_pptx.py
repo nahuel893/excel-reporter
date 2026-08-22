@@ -710,6 +710,29 @@ def _portada(prs, periodo: str, dias: tuple, origen: Path) -> None:
         run.font.color.rgb = color
 
 
+def _slide_imagen(prs, titulo: str, subtitulo: str, imagen: Path) -> None:
+    """Una hoja o un informe entero, como imagen, centrado y a escala.
+
+    Se escala por el lado que primero toca el borde para no deformar nada: un
+    PNG estirado en una reunion se lee como un error de la planilla.
+    """
+    from PIL import Image
+
+    slide = _slide(prs, titulo, subtitulo)
+    ancho_px, alto_px = Image.open(imagen).size
+    disponible_alto = ALTO_IN - 1.25
+    disponible_ancho = ANCHO_IN - 0.7
+
+    escala = min(disponible_ancho / ancho_px, disponible_alto / alto_px)
+    ancho_in, alto_in = ancho_px * escala, alto_px * escala
+    slide.shapes.add_picture(
+        str(imagen),
+        Inches((ANCHO_IN - ancho_in) / 2),
+        Inches(1.15 + (disponible_alto - alto_in) / 2),
+        Inches(ancho_in), Inches(alto_in),
+    )
+
+
 def _cabecera_volumen_cervezas() -> tuple:
     """(grupos, clases) de la tabla de cervezas.
 
@@ -895,7 +918,8 @@ def _avisos_totales(ws, etiqueta: str, bloques: list, columnas: list,
     return avisos
 
 
-def construir(archivo: Path, salida: Path, diagnostico: bool = False) -> int:
+def poblar(prs, archivo: Path, diagnostico: bool = False,
+           portada: bool = True) -> None:
     libro = openpyxl.load_workbook(archivo, data_only=True)
     ws_avance = libro["Avance"]
     ws_multi = libro["Multicategoria"]
@@ -927,11 +951,8 @@ def construir(archivo: Path, salida: Path, diagnostico: bool = False) -> int:
         print("\n".join(avisos) if avisos else "  (ninguna)")
 
 
-    prs = Presentation()
-    prs.slide_width = Inches(ANCHO_IN)
-    prs.slide_height = Inches(ALTO_IN)
-
-    _portada(prs, periodo, dias, archivo)
+    if portada:
+        _portada(prs, periodo, dias, archivo)
 
     # Primero todo el volumen, despues toda la cobertura: son dos lecturas
     # distintas y mezclarlas obliga a saltar de una a otra en la reunion.
@@ -959,6 +980,18 @@ def construir(archivo: Path, salida: Path, diagnostico: bool = False) -> int:
             _slide_cobertura(prs, titulo, bloques_marca, bloque.codigo, periodo,
                              ws_cober, bloque_cb)
 
+
+def nuevo_deck() -> Presentation:
+    """Presentacion vacia con el tamano que comparten todos los decks."""
+    prs = Presentation()
+    prs.slide_width = Inches(ANCHO_IN)
+    prs.slide_height = Inches(ALTO_IN)
+    return prs
+
+
+def construir(archivo: Path, salida: Path, diagnostico: bool = False) -> int:
+    prs = nuevo_deck()
+    poblar(prs, archivo, diagnostico=diagnostico)
     salida.parent.mkdir(parents=True, exist_ok=True)
     prs.save(salida)
     return len(prs.slides._sldIdLst)
