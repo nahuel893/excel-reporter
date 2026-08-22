@@ -1748,6 +1748,54 @@ def _run_cobertura_cupos_report(report, merged: dict) -> list[tuple[Path, dict]]
     ]
 
 
+def cmd_variable_mensual(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando variable-mensual (INCENTIVO HERNAN).
+
+    Actualiza las hojas base del libro in-place: no pasa por el pipeline de
+    delivery ni genera un archivo nuevo. Las hojas de informe (ramal, qbrd, inte,
+    salta, ORIGINAL, suc) quedan intactas.
+    """
+    from src.services.variable_mensual import (
+        VariableMensualConfig,
+        VariableMensualService,
+    )
+
+    genericos = None
+    if args.genericos:
+        genericos = [g.strip() for g in args.genericos.split(",") if g.strip()]
+
+    kwargs = {
+        "archivo": args.archivo,
+        "fecha_desde": args.desde,
+        "fecha_hasta": args.hasta,
+        "salida": args.salida,
+        "backup": not args.sin_backup,
+    }
+    if genericos:
+        kwargs["genericos"] = genericos
+
+    try:
+        config = VariableMensualConfig(**kwargs)
+    except ValueError as exc:
+        print(f"Error de configuracion: {exc}")
+        return 1
+
+    print(f"Variable mensual — {config.fecha_desde} a {config.fecha_hasta}")
+    print(f"Libro: {config.archivo}")
+
+    resultado = VariableMensualService().generar_reporte(config)
+
+    print(f"  AX .................. {resultado.filas_ax:>7,} filas")
+    print(f"  marcas_x_pdv (pivot)  {resultado.filas_pivot:>7,} filas")
+    print(f"  puntos de venta ..... {resultado.puntos_de_venta:>7,}")
+    print(f"  cober_marca ......... {resultado.filas_cober_marca:>7,} filas")
+    print(f"  cober_gen ........... {resultado.filas_cober_gen:>7,} filas")
+    print(f"  villav y villa sur .. {resultado.filas_villa:>7,} filas")
+    print(f"  referencia ma ....... {resultado.filas_referencia:>7,} filas")
+    print(f"Listo: {resultado.ruta_archivo}")
+    return 0
+
+
 def cmd_inteligencia_comercial(args, test_mode: bool = False) -> int:
     """Ejecuta el comando inteligencia-comercial.
 
@@ -2401,6 +2449,47 @@ Ejemplos:
         help="Nombre del xlsx sin extension. Se deriva de la fecha si se omite.",
     )
     inteligencia_parser.set_defaults(func=cmd_inteligencia_comercial)
+
+    # variable-mensual: recarga las hojas base del libro INCENTIVO HERNAN
+    variable_mensual_parser = subparsers.add_parser(
+        "variable-mensual",
+        help="Recarga las hojas base (azules) del libro INCENTIVO HERNAN y recalcula marcas_x_pdv.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Actualiza el libro in-place: reescribe AX, cober_marca, cober_gen y\n"
+            "villav y villa sur desde gold, y pega marcas_x_pdv ya calculado.\n"
+            "Las hojas de informe no se tocan.\n\n"
+            "Ejemplo:\n"
+            "  python main.py variable-mensual \\\n"
+            "    --archivo 'data/output/variable_mensual/INCENTIVO HERNAN 2025.xlsm' \\\n"
+            "    --desde 2026-07-01 --hasta 2026-07-31\n"
+        ),
+    )
+    variable_mensual_parser.add_argument(
+        "--archivo", required=True, metavar="RUTA",
+        help="Libro .xlsm a actualizar.",
+    )
+    variable_mensual_parser.add_argument(
+        "--desde", required=True, metavar="YYYY-MM-DD",
+        help="Inicio de la ventana de ventas (inclusive).",
+    )
+    variable_mensual_parser.add_argument(
+        "--hasta", required=True, metavar="YYYY-MM-DD",
+        help="Fin de la ventana de ventas (inclusive). Define el periodo de cobertura.",
+    )
+    variable_mensual_parser.add_argument(
+        "--salida", default=None, metavar="RUTA",
+        help="Escribir en otro archivo en vez de actualizar el original.",
+    )
+    variable_mensual_parser.add_argument(
+        "--genericos", default=None, metavar="A,B",
+        help="Genericos a cargar en AX, separados por coma. Por defecto los cuatro del incentivo.",
+    )
+    variable_mensual_parser.add_argument(
+        "--sin-backup", action="store_true", dest="sin_backup",
+        help="No dejar copia de la version anterior del libro.",
+    )
+    variable_mensual_parser.set_defaults(func=cmd_variable_mensual)
 
     # check-delivery: mostrar estado de envios del dia
     check_parser = subparsers.add_parser(

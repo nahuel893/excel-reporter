@@ -3520,6 +3520,351 @@ class DataLoader:
         return self.execute_query(query, params)
 
 
+    # ------------------------------------------------------------------ #
+    # Variable mensual (INCENTIVO HERNAN)
+    # ------------------------------------------------------------------ #
+
+    def get_ventas_variable_mensual(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        genericos: list[str],
+        valle_salta_rutas: list[int] | None = None,
+        valle_salta_label: str = "VALLE SALTA",
+        casa_central_id: int = 1,
+    ) -> pd.DataFrame:
+        """Base sales rows for the AX sheet of the variable-mensual workbook.
+
+        One row per (fecha, cliente, sucursal, articulo, lista de precios). The
+        workbook's own export split rows further by unit price, but nothing
+        downstream reads price: every consumer aggregates with SUMIFS or a pivot,
+        so the coarser grain gives identical totals with ~10% fewer rows.
+
+        CASA CENTRAL is split into the virtual VALLE SALTA branch by the client's
+        preventa route, matching the sucursal labels the workbook already used.
+
+        Args:
+            fecha_desde: inclusive start date, ``YYYY-MM-DD``.
+            fecha_hasta: inclusive end date, ``YYYY-MM-DD``.
+            genericos: generics to include.
+            valle_salta_rutas: preventa routes reported as VALLE SALTA.
+            valle_salta_label: label for those routes.
+            casa_central_id: sucursal id that gets split.
+
+        Returns:
+            DataFrame with fecha, id_cliente, sucursal, id_articulo, marca,
+            generico, id_lista_precio, cantidad, cantidad_htls. The price list
+            arrives as an id: ``gold.dim_lista_precio`` is empty and
+            ``dim_cliente.des_lista_precio`` is blank for every client, so the
+            caller maps the id to its name.
+        """
+        rutas = valle_salta_rutas or []
+        params: dict = {
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+            "valle_label": valle_salta_label,
+            "casa_central_id": casa_central_id,
+        }
+        gen_params = []
+        for i, generico in enumerate(genericos):
+            key = f"gen_{i}"
+            params[key] = generico
+            gen_params.append(f":{key}")
+
+        ruta_params = []
+        for i, ruta in enumerate(rutas):
+            key = f"ruta_{i}"
+            params[key] = ruta
+            ruta_params.append(f":{key}")
+
+        # No routes configured -> the CASE can never fire; keep the SQL valid.
+        ruta_clause = f"dc.id_ruta_fv1 IN ({', '.join(ruta_params)})" if ruta_params else "false"
+
+        query = f"""
+        SELECT
+            fv.fecha_comprobante AS fecha,
+            fv.id_cliente,
+            CASE
+                WHEN fv.id_sucursal = :casa_central_id AND {ruta_clause}
+                    THEN :valle_label
+                ELSE fv.id_sucursal || ' - ' || ds.descripcion
+            END AS sucursal,
+            fv.id_articulo,
+            da.marca,
+            da.generico,
+            dc.id_lista_precio,
+            SUM(fv.cantidades_total) AS cantidad,
+            SUM(fv.cantidad_total_htls) AS cantidad_htls
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo da
+          ON fv.id_articulo = da.id_articulo
+        JOIN gold.dim_cliente dc
+          ON fv.id_cliente = dc.id_cliente
+         AND fv.id_sucursal = dc.id_sucursal
+        JOIN gold.dim_sucursal ds
+          ON fv.id_sucursal = ds.id_sucursal
+        WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+          AND fv.anulado = false
+          AND da.generico IN ({', '.join(gen_params)})
+        GROUP BY 1, 2, 3, 4, 5, 6, 7
+        ORDER BY 1, 2, 4
+        """
+        return self.execute_query(query, params)
+
+    def get_cobertura_preventista_variable(
+        self,
+        periodo: str,
+        nivel: str = "marca",
+        id_fuerza_ventas: int = 1,
+        valle_salta_rutas: list[int] | None = None,
+        valle_salta_label: str = "VALLE SALTA",
+        casa_central_id: int = 1,
+        genericos: list[str] | None = None,
+        genericos_excluidos: list[str] | None = None,
+        marcas_excluidas: list[str] | None = None,
+    ) -> pd.DataFrame:
+        """Coverage per preventista and brand (or generic) for the AX workbook.
+
+        Coverage IS additive across routes, so splitting CASA CENTRAL into VALLE
+        SALTA here is just a relabel of rows that were already per route.
+
+        ``nivel="generico"`` filters on ``genericos`` directly. ``nivel="marca"``
+        cannot: a brand can sit under several generics (FRATELLI BRANCA lives in
+        FRATELLI B, BOUTIQUE and MARKETING at once), so filtering brands by
+        generic would drop rows the workbook keeps. It instead drops brands that
+        belong to ``genericos_excluidos`` and nothing else, plus ``marcas_excluidas``.
+
+        Args:
+            periodo: month of the coverage table, ``YYYY-MM-01``.
+            nivel: ``"marca"`` or ``"generico"``.
+            id_fuerza_ventas: 1 = preventa, the force the workbook counts.
+            valle_salta_rutas: preventa routes reported as VALLE SALTA.
+            valle_salta_label: label for those routes.
+            casa_central_id: sucursal id that gets split.
+            genericos: generics to keep when ``nivel="generico"``. None keeps all.
+            genericos_excluidos: brands living exclusively under these generics are
+                dropped when ``nivel="marca"``.
+            marcas_excluidas: brands dropped by name when ``nivel="marca"``.
+
+        Returns:
+            DataFrame with sucursal, vendedor, ruta, concepto, clientes.
+        """
+        if nivel not in ("marca", "generico"):
+            raise ValueError(f"nivel must be 'marca' or 'generico', got {nivel!r}")
+
+        tabla = f"gold.cob_preventista_{nivel}"
+        params: dict = {
+            "periodo": periodo,
+            "id_fuerza_ventas": id_fuerza_ventas,
+            "valle_label": valle_salta_label,
+            "casa_central_id": casa_central_id,
+        }
+        ruta_params = []
+        for i, ruta in enumerate(valle_salta_rutas or []):
+            key = f"ruta_{i}"
+            params[key] = ruta
+            ruta_params.append(f":{key}")
+        ruta_clause = f"cob.id_ruta IN ({', '.join(ruta_params)})" if ruta_params else "false"
+
+        filtros = ""
+        if nivel == "generico" and genericos:
+            keys = []
+            for i, generico in enumerate(genericos):
+                key = f"gen_{i}"
+                params[key] = generico
+                keys.append(f":{key}")
+            filtros += f"\n          AND cob.generico IN ({', '.join(keys)})"
+        if nivel == "marca":
+            if genericos_excluidos:
+                keys = []
+                for i, generico in enumerate(genericos_excluidos):
+                    key = f"genx_{i}"
+                    params[key] = generico
+                    keys.append(f":{key}")
+                filtros += f"""
+          AND cob.marca NOT IN (
+              SELECT da.marca FROM gold.dim_articulo da
+              WHERE da.marca IS NOT NULL
+              GROUP BY da.marca
+              HAVING bool_and(da.generico IN ({', '.join(keys)}))
+          )"""
+            if marcas_excluidas:
+                keys = []
+                for i, marca in enumerate(marcas_excluidas):
+                    key = f"marcax_{i}"
+                    params[key] = marca
+                    keys.append(f":{key}")
+                filtros += f"\n          AND cob.marca NOT IN ({', '.join(keys)})"
+
+        query = f"""
+        SELECT
+            CASE
+                WHEN cob.id_sucursal = :casa_central_id AND {ruta_clause}
+                    THEN :valle_label
+                ELSE cob.id_sucursal || ' - ' || ds.descripcion
+            END AS sucursal,
+            dv.des_vendedor AS vendedor,
+            cob.id_ruta AS ruta,
+            cob.{nivel} AS concepto,
+            cob.clientes_compradores AS clientes
+        FROM {tabla} cob
+        JOIN gold.dim_sucursal ds
+          ON cob.id_sucursal = ds.id_sucursal
+        LEFT JOIN gold.dim_vendedor dv
+          ON cob.id_vendedor = dv.id_vendedor
+         AND cob.id_sucursal = dv.id_sucursal
+        WHERE cob.periodo = :periodo
+          AND cob.id_fuerza_ventas = :id_fuerza_ventas{filtros}
+        ORDER BY cob.id_sucursal, dv.des_vendedor, cob.id_ruta, cob.{nivel}
+        """
+        return self.execute_query(query, params)
+
+    def get_cobertura_marcas_union(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        marcas: list[str],
+        id_fuerza_ventas: int = 1,
+        valle_salta_rutas: list[int] | None = None,
+        valle_salta_label: str = "VALLE SALTA",
+        casa_central_id: int = 1,
+    ) -> pd.DataFrame:
+        """Coverage of a set of brands treated as ONE concept, per preventista.
+
+        Coverage is not additive across brands: a client who buys both brands must
+        count once, not twice, so this cannot be summed out of
+        ``cob_preventista_marca`` and is totalled from fact_ventas instead. The
+        cut is applied first, the net is totalled per (cliente, sucursal) inside
+        the cut, and only then filtered by ``> 0``.
+
+        The route comes from dim_cliente, never from the fact: the fact's vendor is
+        whoever invoiced, not the preventista who owns the objective.
+
+        Args:
+            fecha_desde: inclusive start date, ``YYYY-MM-DD``.
+            fecha_hasta: inclusive end date, ``YYYY-MM-DD``.
+            marcas: brands whose client sets are unioned.
+            id_fuerza_ventas: 1 = preventa (uses ``id_ruta_fv1``).
+            valle_salta_rutas: preventa routes reported as VALLE SALTA.
+            valle_salta_label: label for those routes.
+            casa_central_id: sucursal id that gets split.
+
+        Returns:
+            DataFrame with sucursal, vendedor, ruta, clientes.
+        """
+        ruta_col = "id_ruta_fv1" if id_fuerza_ventas == 1 else "id_ruta_fv4"
+        personal_col = "des_personal_fv1" if id_fuerza_ventas == 1 else "des_personal_fv4"
+
+        params: dict = {
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+            "valle_label": valle_salta_label,
+            "casa_central_id": casa_central_id,
+        }
+        marca_params = []
+        for i, marca in enumerate(marcas):
+            key = f"marca_{i}"
+            params[key] = marca
+            marca_params.append(f":{key}")
+
+        ruta_params = []
+        for i, ruta in enumerate(valle_salta_rutas or []):
+            key = f"ruta_{i}"
+            params[key] = ruta
+            ruta_params.append(f":{key}")
+        # The CTE already exposes the route as ``ruta``, so the outer CASE reads it
+        # from there rather than re-joining dim_cliente.
+        ruta_clause = f"nc.ruta IN ({', '.join(ruta_params)})" if ruta_params else "false"
+
+        query = f"""
+        WITH neto_cliente AS (
+            SELECT
+                fv.id_cliente,
+                fv.id_sucursal,
+                dc.{ruta_col} AS ruta,
+                dc.{personal_col} AS vendedor,
+                SUM(fv.cantidades_total) AS neto
+            FROM gold.fact_ventas fv
+            JOIN gold.dim_articulo da
+              ON fv.id_articulo = da.id_articulo
+            JOIN gold.dim_cliente dc
+              ON fv.id_cliente = dc.id_cliente
+             AND fv.id_sucursal = dc.id_sucursal
+            WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+              AND fv.anulado = false
+              AND da.marca IN ({', '.join(marca_params)})
+            GROUP BY 1, 2, 3, 4
+        )
+        SELECT
+            CASE
+                WHEN nc.id_sucursal = :casa_central_id AND {ruta_clause}
+                    THEN :valle_label
+                ELSE nc.id_sucursal || ' - ' || ds.descripcion
+            END AS sucursal,
+            nc.vendedor,
+            nc.ruta,
+            COUNT(*) AS clientes
+        FROM neto_cliente nc
+        JOIN gold.dim_sucursal ds
+          ON nc.id_sucursal = ds.id_sucursal
+        WHERE nc.neto > 0
+        GROUP BY 1, 2, 3
+        ORDER BY 1, 2, 3
+        """
+        return self.execute_query(query, params)
+
+
+    def get_cobertura_articulos(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        articulos: list[int],
+    ) -> pd.DataFrame:
+        """Clients with positive net purchases of a given article set, per branch.
+
+        Used for the COLON DULCE block, whose article list lives in the workbook
+        (``art_colon_dulce``) because nothing in gold identifies those products.
+
+        The cut is applied first, the net is totalled per (cliente, sucursal)
+        inside it, and only then filtered by ``> 0`` — grouping after filtering
+        would count a client who bought and returned the same volume.
+
+        Args:
+            fecha_desde: inclusive start date, ``YYYY-MM-DD``.
+            fecha_hasta: inclusive end date, ``YYYY-MM-DD``.
+            articulos: article ids to treat as one concept.
+
+        Returns:
+            DataFrame with id_sucursal and clientes. Empty if ``articulos`` is.
+        """
+        if not articulos:
+            return pd.DataFrame(columns=["id_sucursal", "clientes"])
+
+        params: dict = {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta}
+        keys = []
+        for i, articulo in enumerate(sorted(set(articulos))):
+            key = f"art_{i}"
+            params[key] = int(articulo)
+            keys.append(f":{key}")
+
+        query = f"""
+        WITH neto_cliente AS (
+            SELECT fv.id_cliente, fv.id_sucursal, SUM(fv.cantidades_total) AS neto
+            FROM gold.fact_ventas fv
+            WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+              AND fv.anulado = false
+              AND fv.id_articulo IN ({', '.join(keys)})
+            GROUP BY 1, 2
+        )
+        SELECT id_sucursal, COUNT(*) AS clientes
+        FROM neto_cliente
+        WHERE neto > 0
+        GROUP BY 1
+        ORDER BY 1
+        """
+        return self.execute_query(query, params)
+
+
 # Instancia por defecto para compatibilidad
 _default_loader = None
 
