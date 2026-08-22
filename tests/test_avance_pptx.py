@@ -394,3 +394,102 @@ class TestTotalesPorSupervisor:
             ws, "A", "B", 55, ["C"], exigir_nombre_vacio=True)
 
         assert filas[0][1] == [1577]   # la banda, no el 20 de LUIS GOMEZ
+
+
+class TestBordesDeCelda:
+    """Toda celda de la tabla lleva sus cuatro bordes.
+
+    python-pptx no expone API de bordes: hay que meter los `a:lnL/R/T/B` a mano
+    en el XML. `a:tcPr` tiene un esquema ORDENADO y las lineas van ANTES del
+    relleno; si quedan despues de `a:solidFill`, PowerPoint se niega a abrir el
+    archivo. Por eso el test de orden no es cosmetico.
+    """
+
+    @pytest.fixture
+    def tabla(self):
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        prs = Presentation()
+        prs.slide_width = Inches(avance_pptx.ANCHO_IN)
+        prs.slide_height = Inches(avance_pptx.ALTO_IN)
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        spec = avance_pptx.Tabla(
+            grupos=[("SALTA", ["Venta", "% Cupo"], avance_pptx.AZUL_OSCURO)],
+            etiqueta_primera="Vendedor",
+            filas=[("ANA PEREZ", [100, 0.9], False),
+                   ("TOTAL", [100, 0.9], True)],
+            clases=["num", "pct"],
+        )
+        avance_pptx._dibujar(slide, spec, top_in=1.05, ancho_primera=1.6)
+        return next(sh.table for sh in slide.shapes if sh.has_table)
+
+    def _lineas(self, celda):
+        from pptx.oxml.ns import qn
+        tc_pr = celda._tc.find(qn("a:tcPr"))
+        if tc_pr is None:
+            return []
+        return [e.tag.split("}")[1] for e in tc_pr
+                if e.tag.split("}")[1].startswith("ln")]
+
+    def test_toda_celda_lleva_los_cuatro_bordes(self, tabla):
+        faltan = []
+        for f in range(len(tabla.rows)):
+            for c in range(len(tabla.columns)):
+                lineas = set(self._lineas(tabla.cell(f, c)))
+                if not {"lnL", "lnR", "lnT", "lnB"} <= lineas:
+                    faltan.append((f, c, sorted(lineas)))
+
+        assert faltan == []
+
+    def test_los_bordes_van_antes_del_relleno(self, tabla):
+        """El orden del esquema: si `a:solidFill` queda primero, no abre."""
+        from pptx.oxml.ns import qn
+
+        for f in range(len(tabla.rows)):
+            for c in range(len(tabla.columns)):
+                tc_pr = tabla.cell(f, c)._tc.find(qn("a:tcPr"))
+                hijos = [e.tag.split("}")[1] for e in tc_pr]
+                relleno = [i for i, t in enumerate(hijos)
+                           if t.endswith("Fill")]
+                lineas = [i for i, t in enumerate(hijos) if t.startswith("ln")]
+                if relleno and lineas:
+                    assert max(lineas) < min(relleno), f"celda ({f},{c}): {hijos}"
+
+    def test_el_orden_entre_lineas_es_el_del_esquema(self, tabla):
+        """lnL, lnR, lnT, lnB — en ese orden, no cualquiera."""
+        lineas = self._lineas(tabla.cell(2, 1))
+
+        assert lineas == ["lnL", "lnR", "lnT", "lnB"]
+
+    def test_el_borde_tiene_color_y_ancho(self, tabla):
+        from pptx.oxml.ns import qn
+
+        tc_pr = tabla.cell(2, 1)._tc.find(qn("a:tcPr"))
+        ln = tc_pr.find(qn("a:lnL"))
+        color = ln.find(qn("a:solidFill")).find(qn("a:srgbClr"))
+
+        assert ln.get("w") == str(int(avance_pptx.BORDE_ANCHO_PT * 12700))
+        assert color.get("val") == str(avance_pptx.BORDE_COLOR)
+
+    def test_bordear_dos_veces_no_duplica(self):
+        """Idempotente: duplicar las lineas deja el `a:tcPr` invalido."""
+        from pptx import Presentation
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        forma = slide.shapes.add_table(2, 2, 0, 0, 1000000, 1000000)
+        celda = forma.table.cell(0, 0)
+
+        avance_pptx._borde(celda)
+        avance_pptx._borde(celda)
+
+        assert self._lineas(celda) == ["lnL", "lnR", "lnT", "lnB"]
+
+    def test_la_celda_absorbida_por_un_merge_tambien_lleva_borde(self, tabla):
+        """(1,0) y (0,2) las come un merge y no pasan por `_pintar`.
+
+        PowerPoint y LibreOffice no coinciden en de donde toman el borde
+        exterior de un rango combinado, asi que se pintan igual."""
+        assert set(self._lineas(tabla.cell(1, 0))) == {"lnL", "lnR", "lnT", "lnB"}
+        assert set(self._lineas(tabla.cell(0, 2))) == {"lnL", "lnR", "lnT", "lnB"}

@@ -64,6 +64,8 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.oxml import parse_xml
+from pptx.oxml.ns import nsdecls, qn
 from pptx.util import Inches, Pt
 
 
@@ -191,6 +193,11 @@ GRIS_TOTAL = RGBColor(0xD9, 0xDF, 0xEA)
 VERDE = RGBColor(0x1E, 0x7B, 0x34)
 AMBAR = RGBColor(0xB8, 0x6E, 0x00)
 ROJO = RGBColor(0xB3, 0x1B, 0x1B)
+
+# Borde de celda. Gris azulado y fino: con 30 subcolumnas un borde negro a 1 pt
+# tapa el dato, y la grilla tiene que guiar la lectura, no competir con ella.
+BORDE_COLOR = RGBColor(0xA8, 0xB6, 0xCC)
+BORDE_ANCHO_PT = 0.75
 
 UMBRAL_OK = 1.0
 UMBRAL_ALERTA = 0.9
@@ -500,6 +507,35 @@ def _run(celda, texto: str, size: int, bold: bool, color: RGBColor,
     celda.margin_bottom = 0
 
 
+# Los cuatro bordes van en ORDEN DE ESQUEMA. `a:tcPr` es una secuencia
+# ordenada de DrawingML: primero las lineas (lnL, lnR, lnT, lnB), despues el
+# relleno. Si una linea queda detras de `a:solidFill`, PowerPoint da el archivo
+# por corrupto y no lo abre. Se insertan al principio en orden inverso para que
+# terminen en el orden correcto y siempre por delante del relleno.
+BORDES = ("a:lnB", "a:lnT", "a:lnR", "a:lnL")
+
+
+def _borde(celda, color: RGBColor = None, ancho_pt: float = None) -> None:
+    """Dibuja los cuatro bordes de una celda.
+
+    python-pptx no expone API de bordes, asi que los elementos van a mano.
+    Es idempotente: primero saca los que hubiera, para que llamarla dos veces
+    sobre la misma celda no deje el XML con lineas repetidas.
+    """
+    color = BORDE_COLOR if color is None else color
+    ancho = BORDE_ANCHO_PT if ancho_pt is None else ancho_pt
+    tc_pr = celda._tc.get_or_add_tcPr()
+    emu = int(ancho * 12700)  # 1 pt = 12700 EMU
+    for tag in BORDES:
+        for previo in tc_pr.findall(qn(tag)):
+            tc_pr.remove(previo)
+        tc_pr.insert(0, parse_xml(
+            f'<{tag} {nsdecls("a")} w="{emu}" cap="flat" cmpd="sng" algn="ctr">'
+            f'<a:solidFill><a:srgbClr val="{color}"/></a:solidFill>'
+            f'<a:prstDash val="solid"/>'
+            f'</{tag}>'))
+
+
 def _pintar(celda, color: RGBColor) -> None:
     celda.fill.solid()
     celda.fill.fore_color.rgb = color
@@ -605,6 +641,15 @@ def _dibujar(slide, tabla: Tabla, top_in: float, ancho_primera: float) -> None:
             color = _color_pct(valor) if clase == "pct" else None
             _run(celda, _fmt(valor, clase), fuente_dato, es_total, color or NEGRO,
                  wrap=False, margen=0.015)
+
+    # Los bordes van al final y sobre TODAS las celdas, incluidas las que un
+    # merge absorbio. Esas no pasan por `_pintar`, y PowerPoint y LibreOffice no
+    # coinciden en de donde sacan el borde exterior de un rango combinado: uno
+    # usa la celda de origen, el otro la ultima del tramo. Pintando todas, la
+    # grilla sale completa en los dos.
+    for fila in tabla_pptx.rows:
+        for celda in fila.cells:
+            _borde(celda)
 
 
 # --------------------------------------------------------------------------
