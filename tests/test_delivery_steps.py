@@ -1449,3 +1449,87 @@ class TestCaptureImageStepBatchRouting:
         assert artifact.rutas_imagenes == [png1, png3]
         assert "Avance" in result.message
         assert "LibreOffice fallo al exportar PDF" in result.message
+
+
+# ---------------------------------------------------------------------------
+# CaptureImageStep — "auto:hoja" sentinel expansion
+# ---------------------------------------------------------------------------
+
+
+def _xlsx_con_hojas(tmp_path: Path, hojas: dict[str, tuple[int, int]]) -> ReportArtifact:
+    """Escribe un xlsx real con las hojas pedidas, cada una llena hasta
+    (filas, columnas). Hace falta un archivo de verdad: `auto:hoja` lee el
+    rango usado con openpyxl."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    for nombre, (filas, columnas) in hojas.items():
+        ws = wb.create_sheet(nombre)
+        for r in range(1, filas + 1):
+            for c in range(1, columnas + 1):
+                ws.cell(r, c, r * c)
+    ruta = tmp_path / "reporte.xlsx"
+    wb.save(ruta)
+    return ReportArtifact(ruta_excel=ruta)
+
+
+class TestCaptureImageStepAutoHojaExpansion:
+    def test_expande_al_rango_usado_de_la_hoja(self, tmp_path):
+        """El cuadro crece o se achica con los calibres que vendieron ese mes,
+        asi que el rango no se puede escribir fijo en el config."""
+        artifact = _xlsx_con_hojas(tmp_path, {"Aguas": (14, 10)})
+
+        expanded = CaptureImageStep._expand_auto_bordes(
+            artifact,
+            [CaptureConfig(hoja="Aguas", rango="auto:hoja")],
+            [],
+            logging.getLogger("test"),
+        )
+
+        assert len(expanded) == 1
+        cfg, crop = expanded[0]
+        assert cfg.rango == "A1:J14"
+        assert crop is True
+
+    def test_una_captura_por_hoja(self, tmp_path):
+        artifact = _xlsx_con_hojas(tmp_path, {"Aguas": (14, 10), "Cervezas": (9, 6)})
+
+        expanded = CaptureImageStep._expand_auto_bordes(
+            artifact,
+            [
+                CaptureConfig(hoja="Aguas", rango="auto:hoja"),
+                CaptureConfig(hoja="Cervezas", rango="auto:hoja"),
+            ],
+            [],
+            logging.getLogger("test"),
+        )
+
+        assert [c.rango for c, _ in expanded] == ["A1:J14", "A1:F9"]
+
+    def test_una_hoja_que_no_existe_es_un_error_registrado_no_una_excepcion(self, tmp_path):
+        artifact = _xlsx_con_hojas(tmp_path, {"Aguas": (5, 3)})
+        errores: list[str] = []
+
+        expanded = CaptureImageStep._expand_auto_bordes(
+            artifact,
+            [CaptureConfig(hoja="Cervezas", rango="auto:hoja")],
+            errores,
+            logging.getLogger("test"),
+        )
+
+        assert expanded == []
+        assert len(errores) == 1
+        assert "Cervezas" in errores[0]
+
+    def test_no_toca_los_rangos_fijos(self, tmp_path):
+        artifact = _xlsx_con_hojas(tmp_path, {"Aguas": (14, 10)})
+
+        expanded = CaptureImageStep._expand_auto_bordes(
+            artifact,
+            [CaptureConfig(hoja="Aguas", rango="A1:C3")],
+            [],
+            logging.getLogger("test"),
+        )
+
+        assert [c.rango for c, _ in expanded] == ["A1:C3"]

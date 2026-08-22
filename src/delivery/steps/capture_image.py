@@ -7,6 +7,7 @@ from pathlib import Path
 from src.delivery.pipeline import CaptureConfig, DeliveryConfig, DeliveryStep, ReportArtifact, StepResult
 
 AUTO_BORDES_SENTINEL = "auto:bordes"
+AUTO_HOJA_SENTINEL = "auto:hoja"
 AUTO_BORDES_RENDERER = "libreoffice"  # only backend that supports print_area cropping
 
 
@@ -250,6 +251,41 @@ class CaptureImageStep(DeliveryStep):
         return candidate
 
     @staticmethod
+    def _rango_usado(
+        artifact: ReportArtifact,
+        hoja: str,
+        errores: list[str],
+        logger: logging.Logger,
+    ) -> str | None:
+        """Rango A1 que ocupa la hoja entera, o ``None`` si no se pudo leer.
+
+        Para informes cuyo alto NO se conoce al escribir el config: el cuadro
+        de cobertura por calibre crece o se achica con los envases que se
+        vendieron ese mes, asi que un rango fijo recorta filas algunos meses y
+        deja franjas vacias otros.
+
+        Es mucho mas barato que ``auto:bordes``: abre el workbook en modo
+        read_only y lee el rango usado, sin recorrer bordes celda por celda.
+        """
+        try:
+            from openpyxl import load_workbook
+
+            wb = load_workbook(artifact.ruta_excel, read_only=True)
+            try:
+                if hoja not in wb.sheetnames:
+                    raise KeyError(f"la hoja '{hoja}' no existe en el archivo")
+                return wb[hoja].calculate_dimension()
+            finally:
+                wb.close()
+        except Exception as exc:
+            logger.error(
+                "Fallo resolviendo '%s' en hoja '%s': %s",
+                AUTO_HOJA_SENTINEL, hoja, exc,
+            )
+            errores.append(f"{hoja}/{AUTO_HOJA_SENTINEL}: {exc}")
+            return None
+
+    @staticmethod
     def _expand_auto_bordes(
         artifact: ReportArtifact,
         captures: list[CaptureConfig],
@@ -268,6 +304,14 @@ class CaptureImageStep(DeliveryStep):
         recognizer = None
         try:
             for cfg in captures:
+                if cfg.rango == AUTO_HOJA_SENTINEL:
+                    rango = CaptureImageStep._rango_usado(
+                        artifact, cfg.hoja, errores, logger
+                    )
+                    if rango is not None:
+                        expanded.append((cfg.model_copy(update={"rango": rango}), True))
+                    continue
+
                 if cfg.rango != AUTO_BORDES_SENTINEL:
                     expanded.append((cfg, cfg.recortar))
                     continue
