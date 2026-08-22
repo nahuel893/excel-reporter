@@ -97,3 +97,39 @@ class TestMesesAbarcados:
     def test_fecha_no_iso(self):
         with pytest.raises(ValueError):
             meses_abarcados("10/08/2026", "2026-08-10")
+
+
+# --- rango_mes --------------------------------------------------------------
+
+
+def test_rango_mes_devuelve_el_mes_calendario_entero():
+    from src.core.periodos import rango_mes
+
+    assert rango_mes("2026-07-14") == ("2026-07-01", "2026-07-31")
+    assert rango_mes("2026-08-01") == ("2026-08-01", "2026-08-31")
+
+
+def test_rango_mes_saca_el_ultimo_dia_del_calendario_no_de_una_tabla():
+    """Febrero bisiesto: 29, no 28."""
+    from src.core.periodos import rango_mes
+
+    assert rango_mes("2024-02-10") == ("2024-02-01", "2024-02-29")
+    assert rango_mes("2026-02-10") == ("2026-02-01", "2026-02-28")
+
+
+def test_rango_mes_compone_con_periodo_meses_atras():
+    """Asi derivan los informes su mes anterior y su mismo mes del anio pasado."""
+    from src.core.periodos import periodo_meses_atras, rango_mes
+
+    hasta = "2026-08-21"
+    assert rango_mes(periodo_meses_atras(hasta, 1)) == ("2026-07-01", "2026-07-31")
+    assert rango_mes(periodo_meses_atras(hasta, 12)) == ("2025-08-01", "2025-08-31")
+
+
+def test_rango_mes_rechaza_una_fecha_que_no_es_iso():
+    import pytest
+
+    from src.core.periodos import rango_mes
+
+    with pytest.raises(ValueError):
+        rango_mes("14/07/2026")

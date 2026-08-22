@@ -35,6 +35,27 @@ def rango_mes_anterior(fecha: str) -> tuple[str, str]:
     return ultimo.replace(day=1).isoformat(), ultimo.isoformat()
 
 
+def rango_mes(fecha: str) -> tuple[str, str]:
+    """Return the whole calendar month containing ``fecha`` as ``(desde, hasta)``.
+
+    ``hasta`` is INCLUSIVE (the real last day), same convention as
+    :func:`rango_mes_anterior`. Month length — February in leap years included
+    — comes from the calendar, never from a lookup table.
+
+    Composes with :func:`periodo_meses_atras` so a report can derive any
+    historical window from the one date its config already carries:
+    ``rango_mes(periodo_meses_atras(fecha_hasta, 12))`` is the same month a
+    year earlier.
+
+    Raises:
+        ValueError: if ``fecha`` is not an ISO date.
+    """
+    d = date.fromisoformat(fecha)
+    primero = d.replace(day=1)
+    siguiente = (primero + timedelta(days=32)).replace(day=1)
+    return primero.isoformat(), (siguiente - timedelta(days=1)).isoformat()
+
+
 def periodo_mes(fecha: str) -> str:
     """Return the first day of ``fecha``'s month — the key of the monthly tables.
 
