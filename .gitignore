@@ -70,7 +70,7 @@ whatsapp-service/session/
 whatsapp-service/session.*/
 
 # Engram local memory database
-.engram/
+#.engram/
 
 # Local tool config
 .gga
