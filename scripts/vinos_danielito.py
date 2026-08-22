@@ -23,14 +23,17 @@ Criterios
   id_sucursal) DENTRO del corte y recien despues se filtra > 0. El total del
   anio es la UNION del anio, NO la suma de los meses: la cobertura no es
   aditiva entre periodos.
-- La ventana no tiene tope superior, asi que el informe siempre llega hasta
-  el ultimo dato cargado en la base.
+- La ventana no tiene tope superior por defecto: el informe llega hasta el
+  ultimo dato cargado en la base. `--hasta` lo cierra, que es lo que hace falta
+  cuando el cuadro va a un deck de un mes ya cerrado: un deck de JULIO con tres
+  dias de AGOSTO se lee como una caida de la venta.
 
 Uso
 ---
     python scripts/vinos_danielito.py                    # periodo = mes actual
     python scripts/vinos_danielito.py --periodo 2026-08
     python scripts/vinos_danielito.py --anios 2025 2026
+    python scripts/vinos_danielito.py --periodo 2026-07 --hasta 2026-07-31
     python scripts/vinos_danielito.py --force            # sobrescribe la salida
 """
 from __future__ import annotations
@@ -75,16 +78,22 @@ LINEA = "D6DCE4"
 COBF = "FFF2CC"
 
 
-def _cargar(dl: DataLoader) -> tuple:
-    """Trae volumen por articulo/mes y las dos vistas de cobertura."""
+def _cargar(dl: DataLoader, hasta: str | None = None) -> tuple:
+    """Trae volumen por articulo/mes y las dos vistas de cobertura.
+
+    `hasta` cierra la ventana por arriba. Va a las TRES consultas de ventas o a
+    ninguna: si solo se topara el volumen, un cliente quedaria contado en un mes
+    cuyos bultos no estan en el mismo cuadro.
+    """
     lista = ",".join(map(str, IDS))
+    tope = f" AND fv.fecha_comprobante <= '{hasta}'" if hasta else ""
 
     raw = dl.execute_query(
         f"""SELECT EXTRACT(YEAR FROM fv.fecha_comprobante)::int anio,
           EXTRACT(MONTH FROM fv.fecha_comprobante)::int nm, fv.id_articulo,
           SUM(fv.cantidades_total) cantidad
           FROM gold.fact_ventas fv WHERE fv.id_articulo IN ({lista})
-          AND fv.fecha_comprobante >= '{DESDE}' GROUP BY 1,2,3"""
+          AND fv.fecha_comprobante >= '{DESDE}'{tope} GROUP BY 1,2,3"""
     )
     desc = dict(
         dl.execute_query(
@@ -104,7 +113,7 @@ def _cargar(dl: DataLoader) -> tuple:
                 EXTRACT(MONTH FROM fv.fecha_comprobante)::int nm,
                 SUM(fv.cantidades_total) b
               FROM gold.fact_ventas fv WHERE fv.id_articulo IN ({lista})
-                AND fv.fecha_comprobante >= '{DESDE}' GROUP BY 1,2,3,4)
+                AND fv.fecha_comprobante >= '{DESDE}'{tope} GROUP BY 1,2,3,4)
             SELECT anio, nm, COUNT(*) clientes FROM v WHERE b>0 GROUP BY 1,2"""
         ).itertuples()
     }
@@ -117,7 +126,7 @@ def _cargar(dl: DataLoader) -> tuple:
                 EXTRACT(YEAR FROM fv.fecha_comprobante)::int anio,
                 SUM(fv.cantidades_total) b
               FROM gold.fact_ventas fv WHERE fv.id_articulo IN ({lista})
-                AND fv.fecha_comprobante >= '{DESDE}' GROUP BY 1,2,3)
+                AND fv.fecha_comprobante >= '{DESDE}'{tope} GROUP BY 1,2,3)
             SELECT anio, COUNT(*) clientes FROM v WHERE b>0 GROUP BY 1"""
         ).itertuples()
     }
@@ -235,6 +244,10 @@ def main() -> int:
         "--anios", nargs="+", type=int, default=None,
         help="anios a mostrar (default: el anterior y el del periodo)",
     )
+    ap.add_argument(
+        "--hasta", default=None,
+        help="ultimo dia a incluir (YYYY-MM-DD); por defecto llega al ultimo dato cargado",
+    )
     ap.add_argument("--force", action="store_true", help="sobrescribir la salida si ya existe")
     ap.add_argument("--sin-png", action="store_true", help="no renderizar la imagen")
     args = ap.parse_args()
@@ -250,7 +263,7 @@ def main() -> int:
         return 1
 
     dl = DataLoader()
-    raw, desc, cob_mes, cob_anio = _cargar(dl)
+    raw, desc, cob_mes, cob_anio = _cargar(dl, hasta=args.hasta)
     construir(raw, desc, cob_mes, cob_anio, anios).save(ruta)
     print(f"archivo: {ruta}")
 
