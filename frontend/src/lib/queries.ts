@@ -92,3 +92,22 @@ export function useActiveRuns() {
     refetchInterval: 3_000,
   });
 }
+
+// ─── Artifacts queries ────────────────────────────────────────────────────────
+
+// Re-exported so consumers keep importing artifact types from one place; the
+// definitions live in api.ts next to the client that returns them.
+export type {
+  ArtifactFileEntry,
+  ArtifactPeriodNode,
+  ArtifactServiceNode,
+  ArtifactTree,
+} from "./api";
+
+export function useArtifactTree(slug?: string, periodo?: string) {
+  return useQuery({
+    queryKey: ["artifacts", "tree", slug ?? null, periodo ?? null],
+    queryFn: () => api.artifacts.tree(slug, periodo),
+    staleTime: 10_000,
+  });
+}

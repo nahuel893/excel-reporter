@@ -22,23 +22,27 @@ async function request<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
-  const init: RequestInit = {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-    },
-  };
+  const init: RequestInit = { method };
   if (body !== undefined) {
+    // Only on requests that actually carry a body: a GET with a Content-Type
+    // is a non-simple request for CORS and buys nothing.
+    init.headers = { "Content-Type": "application/json" };
     init.body = JSON.stringify(body);
   }
 
   const res = await fetch(path, init);
   if (!res.ok) {
-    let detail: unknown;
+    // Read the body exactly once. res.json() consumes it, so a json()-then-
+    // text() fallback throws "Body is unusable" on every non-JSON error —
+    // which is precisely the case the fallback existed for (a proxy's HTML
+    // 502, a plain-text 500). The raw TypeError then reached the UI in place
+    // of the real status.
+    const raw = await res.text().catch(() => "");
+    let detail: unknown = raw;
     try {
-      detail = await res.json();
+      detail = JSON.parse(raw);
     } catch {
-      detail = await res.text();
+      // Not JSON — keep the text as-is.
     }
     throw new ApiError(res.status, detail);
   }
@@ -102,6 +106,41 @@ export interface TriggerRunRequest {
 export interface TriggerRunResponse {
   run_id: string;
   status: string;
+}
+
+export interface ArtifactFileEntry {
+  name: string;
+  path: string;
+  kind: string;
+  size_bytes: number;
+  mtime: string;
+  /** Only present on PNG captures whose source workbook sits beside them. */
+  sheet?: string;
+  /** Only present on PNG captures, e.g. "A1:D10". */
+  range?: string;
+}
+
+export interface ArtifactPeriodNode {
+  periodo: string;
+  /** Folder name outside the YYYY-MM / YYYY-MM-DD convention. */
+  anomalous: boolean;
+  /** The directory could not be listed — distinct from having no files. */
+  unreadable: boolean;
+  principal: ArtifactFileEntry[];
+  imagenes: ArtifactFileEntry[];
+  backups: ArtifactFileEntry[];
+}
+
+export interface ArtifactServiceNode {
+  slug: string;
+  periods: ArtifactPeriodNode[];
+  /** The service directory could not be listed — its periods are unknown. */
+  unreadable: boolean;
+}
+
+export interface ArtifactTree {
+  services: ArtifactServiceNode[];
+  unclassified: ArtifactFileEntry[];
 }
 
 // ─── Config endpoints ────────────────────────────────────────────────────────
@@ -169,5 +208,25 @@ export const api = {
 
     log: (runId: string) =>
       request<string>("GET", `/mgmt/runs/${encodeURIComponent(runId)}/log`),
+  },
+
+  artifacts: {
+    tree: (slug?: string, periodo?: string) => {
+      const qs = new URLSearchParams();
+      if (slug) qs.set("slug", slug);
+      if (periodo) qs.set("periodo", periodo);
+      const query = qs.toString();
+      return request<ArtifactTree>(
+        "GET",
+        `/mgmt/artifacts/tree${query ? `?${query}` : ""}`,
+      );
+    },
+
+    /**
+     * URL of a single artifact. Not a request(): the browser fetches this
+     * directly as an <img> source or a download target.
+     */
+    fileUrl: (path: string) =>
+      `/mgmt/artifacts/file?path=${encodeURIComponent(path)}`,
   },
 };

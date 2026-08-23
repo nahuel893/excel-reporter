@@ -51,12 +51,12 @@ src/
 │   ├── contactos.tsx     # contactos.json editor
 │   ├── runs.tsx          # Runs list (stub — Phase 3)
 │   ├── schedule.tsx      # Schedule (stub — Phase 4)
-│   └── artifacts.tsx     # Artifacts browser (stub — Phase 5)
+│   └── artifacts.tsx     # Artifacts browser (3-level: service → period → files)
 ├── widgets/              # rjsf custom widgets (DateWidget, FilePathWidget, etc.)
 └── test/setup.ts         # Vitest setup
 ```
 
-## Backend API contract (consumed via `/api/*` proxied to `:8000`)
+## Backend API contract (consumed via `/api/*` proxied to `:8010`, override with `VITE_API_TARGET`)
 
 ### Implemented (use freely)
 
@@ -73,10 +73,20 @@ src/
 - `GET /mgmt/runs/{id}/stream` → SSE (replay-then-tail)
 - `GET /mgmt/runs?status=running` → active runs (used by sidebar badge)
 
+- `GET /mgmt/artifacts/tree?slug=&periodo=` → `{services: [{slug, unreadable, periods: [...]}], unclassified: [...]}`
+- `GET /mgmt/artifacts/file?path=...` → the file (400 if the path escapes the artifacts root)
+
+The artifacts routes live in `panel:app` (port 8010), not `api:app` — see the
+"Admin Panel" section of the root AGENTS.md. A period carries both `anomalous`
+(folder name outside the `YYYY-MM` / `YYYY-MM-DD` convention) and `unreadable`
+(the directory could not be listed). Never render `unreadable` as an empty
+period: "no files" and "could not read" mean different things to whoever is
+checking whether a report actually ran.
+
 ### NOT yet implemented (do NOT consume — coordinate with user before assuming)
 
 - `GET/PUT /mgmt/schedule/*` — Phase 4 backend
-- `GET /mgmt/artifacts/*` — Phase 5 backend
+- `GET /mgmt/daily-runs/*` — daily-run instrumentation, not wired yet
 
 ### `x-widget` contract (server emits these in the schema)
 
@@ -99,7 +109,7 @@ src/
   - Run history list with status filter
   - Error UX (toasts on failure)
 - **Phase 4** — Schedule page (cron editor + daily_overrides table per config). Backend NOT ready.
-- **Phase 5** — Artifacts browser. Backend NOT ready.
+- **Phase 5** — Artifacts browser. **Done** — `artifacts.tsx` + `GET /mgmt/artifacts/*`.
 
 ## Engram bootstrap
 
@@ -125,7 +135,7 @@ Always retrieve full content via `mem_get_observation(id)` — search results ar
 
 ```bash
 # Dev (with HMR)
-npm run dev               # → http://localhost:5173 (Vite proxies /mgmt to :8000)
+npm run dev               # → http://localhost:5173 (Vite proxies /mgmt to :8010)
 
 # Build for production
 npm run build             # → dist/  (mounted at /app by FastAPI)
