@@ -190,3 +190,16 @@ class TestWhatsAppClientSendText:
         body = mock_client.post.call_args[1]["json"]
         assert body["group_name"] == "Preventa Salta"
         assert "to" not in body
+
+
+class TestMimetype:
+    """El deck mensual va en .pptx y sin su mimetype el celular lo muestra como
+    archivo generico en vez de PowerPoint."""
+
+    def test_pptx_va_como_powerpoint(self):
+        assert WhatsAppClient._guess_mimetype(Path("deck.pptx")) == (
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        )
+
+    def test_una_extension_desconocida_cae_en_octet_stream(self):
+        assert WhatsAppClient._guess_mimetype(Path("cosa.raro")) == "application/octet-stream"
