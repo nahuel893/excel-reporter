@@ -26,7 +26,12 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 │   │   └── base_processor.py # calcular_dias_habiles, calcular_info_dias, calcular_factor_tendencia
 │   ├── api/                  # API REST (FastAPI)
 │   │   ├── routes/
-│   │   │   └── ventas.py     # Endpoints de ventas
+│   │   │   ├── ventas.py     # Endpoints de ventas
+│   │   │   ├── mgmt_runs.py      # Panel: disparar y seguir corridas
+│   │   │   ├── mgmt_configs.py   # Panel: leer/editar los JSON de config
+│   │   │   └── mgmt_artifacts.py # Panel: navegar data/output/ (solo lectura)
+│   │   ├── db.py             # Engine + tabla runs
+│   │   ├── daily_store.py    # Tablas daily_runs / daily_run_services / run_artifacts
 │   │   └── __init__.py
 │   └── services/
 │       ├── base_service.py   # BaseService (clase abstracta)
@@ -46,7 +51,8 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 │                             # via PLANTILLA_SHEET_CONFIGS registry (ver RF-02)
 ├── tests/
 ├── main.py                   # CLI con subcomandos (soporta --config JSON)
-├── api.py                    # FastAPI application (v2.0.0)
+├── api.py                    # FastAPI application (v2.0.0) — superficie de PRODUCCION
+├── panel.py                  # Entrypoint del admin panel: api.py + routers de administracion
 ├── config.json               # Config de produccion (fechas, genericos, supervisores)
 └── data/output/              # Archivos generados por servicio
     ├── ventas/{YYYY-MM}/     # VentasService (mensual)
@@ -112,8 +118,11 @@ python main.py graficos-cobertura --config configs/graficos_cobertura.json
 # Tests
 pytest -v
 
-# Iniciar API
+# Iniciar API (superficie de produccion)
 uvicorn api:app --reload --port 8000
+
+# Iniciar el admin panel (produccion + routers de administracion)
+uvicorn panel:app --reload --port 8010
 ```
 
 ## Config JSON (config.json)
@@ -157,6 +166,15 @@ Documentacion interactiva en:
 | GET | `/ventas/sucursales` | Lista sucursales disponibles |
 | GET | `/health` | Verifica conectividad BD |
 
+### Endpoints del admin panel
+
+Solo existen bajo `panel:app` (puerto 8010), no bajo `api:app`. Ver "Admin Panel".
+
+| Metodo | Endpoint | Descripcion |
+|--------|----------|-------------|
+| GET | `/mgmt/artifacts/tree` | Arbol servicio -> periodo -> archivos de `data/output/` |
+| GET | `/mgmt/artifacts/file` | Sirve un archivo generado (valida que no salga de la raiz) |
+
 ### Ejemplo de Request
 
 ```bash
@@ -173,6 +191,57 @@ curl -X POST "http://localhost:8000/ventas/reporte" \
     }
   }'
 ```
+
+## Admin Panel
+
+SPA de administracion (React, `frontend/`) servida en `/app`. Permite ver los
+archivos generados, editar los JSON de config y observar las corridas.
+
+### Por que hay dos entrypoints
+
+| Archivo | Que sirve | Quien lo corre |
+|---------|-----------|----------------|
+| `api.py` | Superficie de produccion: `/ventas/*`, `/health`, agente WhatsApp | systemd, el daily |
+| `panel.py` | Todo lo de `api.py` + los routers `/mgmt/*` del panel | a mano, puerto 8010 |
+
+`panel.py` importa la app de `api.py` y le agrega routers; no edita el archivo.
+La separacion existe para que el panel no pueda romper lo que sale todos los
+dias a las 07:00.
+
+**El aislamiento es por PROCESO, no por objeto app.** `panel.py` muta el mismo
+`app` que construye `api.py`. Correr `uvicorn api:app` da un proceso sin estas
+rutas; cualquier cosa que importe `panel` las agrega tambien a `api.app` en ese
+proceso. Alcanza para el objetivo (produccion nunca importa `panel`), pero no
+es un sandbox.
+
+Los routers del panel son de solo lectura (`GET`, sin `DELETE` — RF-17).
+
+Nota historica: `mgmt_runs` y `mgmt_configs` ya estaban montados dentro de
+`api.py` de antes; `panel.py` agrega unicamente lo nuevo.
+
+### Seguridad
+
+Las rutas `/mgmt/*` no tienen autenticacion (un solo usuario, red privada).
+Bindear a una IP de Tailscale o a loopback, **nunca a `0.0.0.0`**:
+`ADMIN_PANEL_ARTIFACTS_ROOT` puede apuntar a cualquier directorio del disco, asi
+que un bind publico lo convierte en lectura anonima de todo ese subarbol.
+
+### Levantarlo
+
+```bash
+uvicorn panel:app --reload --port 8010
+```
+
+El puerto 8000 suele estar ocupado por otro servicio en la maquina de
+desarrollo, por eso el panel usa 8010. El proxy de Vite apunta ahi
+(`VITE_API_TARGET` lo sobreescribe).
+
+### Variables de entorno
+
+| Variable | Default | Para que sirve |
+|----------|---------|----------------|
+| `ADMIN_PANEL_ARTIFACTS_ROOT` | `config.settings.DATA_OUTPUT` | Raiz de `data/output/` que lee la pantalla Archivos. Permite revisar el arbol de produccion desde un worktree sin tocar `config/settings.py`. Solo lectura. |
+| `VITE_API_TARGET` | `http://localhost:8010` | Backend al que apunta el proxy de Vite en `npm run dev`. |
 
 ## Formato del Reporte de Ventas
 
