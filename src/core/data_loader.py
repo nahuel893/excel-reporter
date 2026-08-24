@@ -3070,6 +3070,7 @@ class DataLoader:
         FROM gold.fact_ventas fv
         JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
         JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+                                  AND fv.id_sucursal   = dc.id_sucursal
         WHERE fv.id_sucursal = 1
           AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
           AND da.generico IN ({placeholders})
@@ -3105,6 +3106,7 @@ class DataLoader:
         FROM gold.fact_ventas fv
         JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
         JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+                                  AND fv.id_sucursal   = dc.id_sucursal
         WHERE fv.id_sucursal = 1
           AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
           AND da.generico IN ({placeholders})
@@ -3863,6 +3865,158 @@ class DataLoader:
         ORDER BY 1
         """
         return self.execute_query(query, params)
+    # ──────────────────────────────────────────────────────────────
+    # Acciones Comerciales — aexcel-equivalent gold extraction (RF-01)
+    # ──────────────────────────────────────────────────────────────
+
+    def get_aexcel_equivalent(
+        self, fecha_desde: str, fecha_hasta: str
+    ) -> pd.DataFrame:
+        """Line-level gold extraction backing the acciones-comerciales
+        aexcel-equivalent dataset (RF-01).
+
+        Returns ONE ROW PER fact_ventas LINE (NOT pre-aggregated), joined
+        with dim_cliente/dim_articulo/dim_sucursal and labeled with the
+        aexcel-equivalent column names. The (fecha, cliente, articulo) terna
+        grain-collapse — additive SUMs + a deterministic ACTUAL-value pick
+        for Precio/Bonific — is performed downstream in
+        ``src.services.acciones_comerciales.gold_source`` (Decision 14), NOT
+        here — this method's only job is the composite-key, read-only fetch.
+
+        Composite-key rule (project GOLDEN RULE): dim_cliente is joined on
+        (id_cliente AND id_sucursal) — id_cliente is reused across
+        sucursales, so a single-column join would fan-out matches. This
+        method intentionally does NOT join dim_vendedor: none of the
+        aexcel-equivalent columns require it (design Decision), so no
+        id_fuerza_ventas scoping is needed either.
+
+        bonificacion is converted from DB percent-scale to aexcel
+        fraction-scale (/100.0) directly in SQL — an exact scale
+        conversion, never a rounding operation (RF-23).
+
+        Precio uses abs(precio_unitario_bruto): gold signs credits/returns
+        on the price, whereas the aexcel export keeps the price positive and
+        carries the sign on the quantity. abs() reconciles the two
+        conventions and was verified to match the manual aexcel at 100%
+        (79,885/79,900 ternas, Jul 2026) — Decision 14 empirical adjudication.
+
+        Descripción_12 = da.generico (NOT unidad_negocio): the user chose the
+        genérico grouping for the ventas/FACT_NET side so it stays consistent
+        with the acción side (ACC-GEN, keyed by the wapi Calibre = genérico).
+        This intentionally diverges from the original manual engine (whose
+        Descripción_12 mirrored aexcel's unidad_negocio), e.g. AGUA DANONE ->
+        AGUAS DANONE, PERNOD RICARD 1 -> PERNOD RICARD, FERNET -> FRATELLI B —
+        expected divergences, not diff bugs (Decision 18).
+
+        Read-only SELECT — issues no DDL against gold (RF-25).
+        """
+        return self.execute_query(
+            """
+            SELECT
+                fv.id                                     AS "_id_linea",
+                fv.fecha_comprobante                       AS "Descripción Período",
+                fv.id_cliente                               AS "Cod. Cliente",
+                dc.razon_social                             AS "Descripción",
+                ds.id_sucursal || ' - ' || ds.descripcion   AS "Sucursal",
+                fv.id_articulo                              AS "Código",
+                da.des_articulo                             AS "Descripción_2",
+                da.marca                                    AS "Descripción_3",
+                da.generico                                 AS "Descripción_12",
+                abs(fv.precio_unitario_bruto)               AS "Precio",
+                fv.bonificacion / 100.0                     AS "Bonific",
+                fv.cantidades_total                         AS "Cantidades Totales",
+                fv.facturacion_neta                         AS "Facturacion Neta",
+                fv.descuentos                                AS "Descuentos"
+            FROM gold.fact_ventas fv
+            LEFT JOIN gold.dim_cliente dc
+              ON fv.id_cliente = dc.id_cliente
+             AND fv.id_sucursal = dc.id_sucursal
+            LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+            LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+            WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+              AND fv.anulado = false
+            """,
+            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
+
+    def get_comprobante_precio(
+        self, fecha_desde: str, fecha_hasta: str
+    ) -> pd.DataFrame:
+        """Line-level gold extraction backing the comprobante-keyed
+        diagnostic price lookup (Decision 19 — parallel-run comparison,
+        BASE-control-ONLY; never feeds the authoritative terna-based
+        PRECIO FINAL).
+
+        Returns ONE ROW PER fact_ventas LINE (NOT pre-aggregated), carrying
+        a reconstructed ``Comprobante`` key + article + abs price + cantidad.
+        The (Comprobante, Código) grain-collapse — a deterministic pick,
+        SAME discipline as the terna grain-collapse (Decision 14) — is
+        performed downstream in
+        ``src.services.acciones_comerciales.processor.build_precio_comprobante_lookup``,
+        NOT here — this method's only job is the read-only fetch.
+
+        Comprobante decomposition (verified 2026-07-21 against the real
+        wapi export): wapi ``Comprobante`` e.g. ``"FCVTAA000300850740"`` =
+        ``id_documento`` (5 chars, e.g. ``"FCVTA"``) + ``letra`` (1 char,
+        e.g. ``"A"``) + ``serie`` (4 digits, zero-padded) + ``nro_doc`` (8
+        digits, zero-padded). Prefixes seen: FCVTAA/FCVTAB/DVVTAA/DVVTAB.
+        This decomposition reproduces the wapi Comprobante string exactly.
+
+        Precio uses ``abs(precio_unitario_bruto)`` — same sign convention
+        as ``get_aexcel_equivalent`` (Decision 14): gold signs
+        credits/returns on the price, the wapi/aexcel side keeps price
+        positive.
+
+        Read-only SELECT — issues no DDL against gold (RF-25).
+        """
+        return self.execute_query(
+            """
+            SELECT
+                fv.id_documento || fv.letra || lpad(fv.serie::text, 4, '0')
+                    || lpad(fv.nro_doc::text, 8, '0')   AS "Comprobante",
+                fv.id_articulo                          AS "Código",
+                abs(fv.precio_unitario_bruto)            AS "Precio",
+                fv.cantidades_total                      AS "Cantidades Totales"
+            FROM gold.fact_ventas fv
+            WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+              AND fv.anulado = false
+            """,
+            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
+
+    def get_clientes_sucursal(self) -> pd.DataFrame:
+        """Fresh Cod. Cliente -> Sucursal label map (RF-04) — replaces the
+        engine's stale BG:BH snapshot.
+
+        ``dim_cliente`` is a DIMENSION table (not period-scoped), so this
+        gives live coverage of every client the ERP knows about right now,
+        independent of whether they transacted in the reporting period —
+        exactly the freshness guarantee RF-04 requires. Emits the
+        ``"{id_sucursal} - {DESCRIPCION}"`` label (e.g. ``"1 - CASA CENTRAL"``)
+        to match BOTH the original manual engine's wapi SUCURSAL (the BG:BH
+        snapshot format) and FACT_NET's ``get_aexcel_equivalent`` Sucursal —
+        verified identical text (``dim_cliente.des_sucursal`` ==
+        ``dim_sucursal.descripcion`` for all 14 sucursales). The ZONA lookup
+        (RF-07) matches this label prefix-tolerantly, so a bare-keyed
+        ``configs/acciones_comerciales_zonas.json`` still resolves.
+
+        When ``id_cliente`` repeats across sucursales (same reused-id risk
+        class as ``id_vendedor``/``id_ruta``, project GOLDEN RULE), the
+        LOWEST ``id_sucursal`` wins deterministically — wapi rows carry no
+        sucursal context of their own to disambiguate further.
+
+        Read-only SELECT — issues no DDL against gold (RF-25).
+        """
+        return self.execute_query(
+            """
+            SELECT DISTINCT ON (dc.id_cliente)
+                dc.id_cliente                                  AS "Cod. Cliente",
+                dc.id_sucursal || ' - ' || dc.des_sucursal     AS "Sucursal"
+            FROM gold.dim_cliente dc
+            WHERE dc.anulado = false
+            ORDER BY dc.id_cliente, dc.id_sucursal
+            """
+        )
 
 
 # Instancia por defecto para compatibilidad

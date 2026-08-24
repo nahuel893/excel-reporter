@@ -159,6 +159,26 @@ class GlobalFilters(BaseModel):
     # CuposCoberGen, CuposCober) — preserva lo cargado a mano. Sirve para
     # corridas de recarga cuando los objetivos aún no están en gold.
     skip_cupos: bool = False
+    # acciones-comerciales: directorio con wapi.xlsx + compras.xls (RF-02/RF-03)
+    input_dir: str | None = None
+    # acciones-comerciales: master gate para CUALQUIER escritura en el INFORME
+    # externo (Fase 2). Debe arrancar en False (RF-13) hasta el sign-off
+    # (Decision 7) de S1-S4.
+    escribir_informe: bool = False
+    # acciones-comerciales: ruta al INFORME externo .xlsm/.xlsx (nunca tocado
+    # mientras escribir_informe sea False)
+    informe_path: str | None = None
+    # acciones-comerciales: opt-in al gate de frescura de wapi en run_daily (RF-20)
+    esperar_wapi_fresco: bool = False
+    # acciones-comerciales: umbral de frescura configurable (RF-20, Decision 16)
+    wapi_cobertura_requerida: str | None = None
+    # acciones-comerciales: directorio con el backup manual (backup.xlsx +
+    # known_defects.json) para el diff paralelo Fase-1 (RF-12, S4). None => diff
+    # deshabilitado.
+    backup_dir: str | None = None
+    # acciones-comerciales: ruta al aexcel.xlsx real para validar el pick de
+    # precio por terna contra la fuente (RF-12/Decision 14). None => sin validación.
+    aexcel_path: str | None = None
 
 
 class ReportFilters(BaseModel):
@@ -235,7 +255,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "incentivo-salta", "stock-badie", "stock-valorizado", "cupo-desagregado", "comparativo-salta", "cobertura", "cobertura-cupos", "cobertura-aguas", "cobertura-levite", "quesos", "volumen-cobertura"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "incentivo-salta", "stock-badie", "stock-valorizado", "cupo-desagregado", "comparativo-salta", "cobertura", "cobertura-cupos", "cobertura-aguas", "cobertura-levite", "quesos", "volumen-cobertura", "acciones-comerciales"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

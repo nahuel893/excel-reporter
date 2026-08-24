@@ -270,6 +270,13 @@ def merge_filters(
         "historia_desde": global_f.historia_desde,
         "historia_hasta": global_f.historia_hasta,
         "skip_cupos": global_f.skip_cupos,
+        "input_dir": global_f.input_dir,
+        "escribir_informe": global_f.escribir_informe,
+        "informe_path": global_f.informe_path,
+        "esperar_wapi_fresco": global_f.esperar_wapi_fresco,
+        "wapi_cobertura_requerida": global_f.wapi_cobertura_requerida,
+        "backup_dir": global_f.backup_dir,
+        "aexcel_path": global_f.aexcel_path,
         # Per-client report filters (only meaningful per-report; no global fallback)
         "clientes": None,
         "articulos": None,

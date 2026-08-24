@@ -94,6 +94,7 @@ REPORT_HANDLERS: dict[str, str] = {
     "cobertura-levite": "_run_cobertura_levite_report",
     "quesos": "_run_quesos_report",
     "volumen-cobertura": "_run_volumen_cobertura_report",
+    "acciones-comerciales": "_run_acciones_comerciales_report",
 }
 
 
@@ -1506,6 +1507,49 @@ def _run_subdistribuidores_report(report, merged: dict) -> list[tuple[Path, dict
     ]
 
 
+def _run_acciones_comerciales_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate acciones-comerciales BASE control report (Phase 1, RF-22).
+
+    Returns list of (path, metadata) tuples. Phase-2 (informe write,
+    captures, delivery) stays behind merged['escribir_informe'] (default
+    False, RF-13) — S1's skeleton never reads/writes informe_path.
+    """
+    from src.services.acciones_comerciales import AccionesComercialesConfig, AccionesComercialesService
+
+    input_dir = merged.get("input_dir")
+    if not input_dir:
+        print("Error: acciones-comerciales requiere 'input_dir' en filtros")
+        return []
+
+    config = AccionesComercialesConfig(
+        fecha_desde=merged["fecha_desde"],
+        fecha_hasta=merged["fecha_hasta"],
+        input_dir=input_dir,
+        nombre_archivo=report.nombre,
+        backup_dir=merged.get("backup_dir"),
+        aexcel_path=merged.get("aexcel_path"),
+        escribir_informe=merged.get("escribir_informe", False),
+        informe_path=merged.get("informe_path"),
+        esperar_wapi_fresco=merged.get("esperar_wapi_fresco", False),
+        wapi_cobertura_requerida=merged.get("wapi_cobertura_requerida") or "habil_anterior",
+    )
+
+    service = AccionesComercialesService()
+    result = service.generar_reporte(config)
+
+    print(f"Acciones Comerciales '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    if result.diff_report_paths:
+        print(f"  - Diff paralelo (RF-12): {result.diff_report_paths['xlsx']}")
+
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
 def cmd_stock_suria(args, test_mode: bool = False) -> int:
     """Ejecuta el comando de stock SURIA."""
     if not args.config:
@@ -1962,6 +2006,22 @@ def _run_cupo_desagregado_report(report, merged: dict) -> list[tuple[Path, dict]
     ]
 
 
+def cmd_acciones_comerciales(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando acciones-comerciales."""
+    if not args.config:
+        print("Error: acciones-comerciales requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    else:
+        print("Error: acciones-comerciales solo soporta el nuevo formato de configuracion JSON.")
+        return 1
+
+
 def cmd_cartesiano(args, test_mode: bool = False) -> int:
     """Ejecuta el comando cartesiano."""
     if not args.config:
@@ -2302,6 +2362,19 @@ Ejemplos:
         help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
     )
     reporte_general_badie_parser.set_defaults(func=cmd_reporte_general_badie)
+
+    acciones_comerciales_parser = subparsers.add_parser(
+        "acciones-comerciales",
+        help="BASE control de acciones comerciales (Fase 1: gold + wapi + compras; Fase 2 escritura en INFORME detras de flag)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    acciones_comerciales_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    acciones_comerciales_parser.set_defaults(func=cmd_acciones_comerciales)
 
     subdistribuidores_parser = subparsers.add_parser(
         "subdistribuidores",
