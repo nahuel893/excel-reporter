@@ -29,7 +29,8 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 │   │   │   ├── ventas.py     # Endpoints de ventas
 │   │   │   ├── mgmt_runs.py      # Panel: disparar y seguir corridas
 │   │   │   ├── mgmt_configs.py   # Panel: leer/editar los JSON de config
-│   │   │   └── mgmt_artifacts.py # Panel: navegar data/output/ (solo lectura)
+│   │   │   ├── mgmt_artifacts.py # Panel: navegar data/output/ (solo lectura)
+│   │   │   └── mgmt_schedule.py  # Panel: timer/journal de systemd (solo lectura)
 │   │   ├── db.py             # Engine + tabla runs
 │   │   ├── daily_store.py    # Tablas daily_runs / daily_run_services / run_artifacts
 │   │   └── __init__.py
@@ -174,6 +175,14 @@ Solo existen bajo `panel:app` (puerto 8010), no bajo `api:app`. Ver "Admin Panel
 |--------|----------|-------------|
 | GET | `/mgmt/artifacts/tree` | Arbol servicio -> periodo -> archivos de `data/output/` |
 | GET | `/mgmt/artifacts/file` | Sirve un archivo generado (valida que no salga de la raiz) |
+| GET | `/mgmt/schedule` | Estado del timer de systemd que corre el daily |
+| GET | `/mgmt/schedule/journal` | Entradas del journal de `excel-reporter-daily.service` |
+
+`/mgmt/schedule*` no acepta ningun parametro que elija la unit: `TIMER_UNIT` y
+`SERVICE_UNIT` son constantes de modulo en `mgmt_schedule.py`. Todo comando
+corre como lista argv explicita con `shell=False` y timeout, asi que lo que
+llegue en `?since=` es un argumento literal para `journalctl`, nunca sintaxis
+de shell.
 
 ### Ejemplo de Request
 

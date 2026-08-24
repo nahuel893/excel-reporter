@@ -37,10 +37,12 @@ import os
 
 from api import app
 from src.api.routes.mgmt_artifacts import router as mgmt_artifacts_router
+from src.api.routes.mgmt_schedule import router as mgmt_schedule_router
 
 logger = logging.getLogger(__name__)
 
 app.include_router(mgmt_artifacts_router)
+app.include_router(mgmt_schedule_router)
 
 _external_root = os.environ.get("ADMIN_PANEL_ARTIFACTS_ROOT")
 if _external_root:
