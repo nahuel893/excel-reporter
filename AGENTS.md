@@ -252,6 +252,66 @@ desarrollo, por eso el panel usa 8010. El proxy de Vite apunta ahi
 | `ADMIN_PANEL_ARTIFACTS_ROOT` | `config.settings.DATA_OUTPUT` | Raiz de `data/output/` que lee la pantalla Archivos. Permite revisar el arbol de produccion desde un worktree sin tocar `config/settings.py`. Solo lectura. |
 | `VITE_API_TARGET` | `http://localhost:8010` | Backend al que apunta el proxy de Vite en `npm run dev`. |
 
+### Instrumentacion del daily (`scripts/daily_recorder.py`)
+
+Modulo que registra cada corrida del daily en `data/mgmt.db` (tablas de
+`src/api/daily_store.py`).
+
+> **Todavia NO esta enganchado.** `scripts/run_daily.py` no lo importa: los
+> hooks implican editar el script que systemd corre a las 07:00, y eso es una
+> unidad de trabajo aparte. Hasta que entre, nada de esto se ejecuta fuera de
+> los tests y `run_artifacts` queda vacia (el descubrimiento de archivos vive
+> en el hook `service_done`).
+
+La regla que gobierna todo el diseno: **la
+instrumentacion nunca puede ser la razon de que un informe falle.** El
+try/except del contrato vive en un solo lugar (`RunRecorder.emit()`), y un
+store que no se puede abrir degrada a `NullRecorder` en vez de lanzar. Los call
+sites en `run_daily.py` quedan de una linea y sin manejo de error propio.
+
+Lo unico que **no** se traga es la falla del propio daily: una excepcion dentro
+de `with recording_run(...)` se re-lanza intacta.
+
+Dos ejes que no se colapsan (RF-04):
+
+| Columna | Que responde |
+|---------|--------------|
+| `status` | Que le paso a la GENERACION |
+| `delivery_status` + `delivery_gate` | Que le paso a la ENTREGA, y que compuerta la bloqueo |
+
+Un avance generado bien y frenado despues por el guard de RAM es un exito
+suprimido, no una falla.
+
+**Tres lugares se niegan a adivinar**: un servicio que sigue en `running` al
+cerrar (nunca reporto) cierra la corrida en `partial`/`interrupted` en vez de
+contarlo como exito; un `service_done` sin exit code deja la fila en `running`;
+git que no se pudo leer guarda NULL, no `False`.
+
+#### Retencion de logs
+
+`_prune_logs()` corre al abrir cada corrida. Borra **archivos**, nunca filas: el
+resultado de una corrida sirve por meses, su stdout por una semana.
+
+| Umbral | Valor |
+|--------|-------|
+| Antiguedad | 60 dias |
+| Tamano total | 500 MB (borra del mas viejo al mas nuevo) |
+
+**Los logs del daily van en `data/runs/daily/`, no en `data/runs/`.** Ese
+directorio es de `src/api/runner.py`, que escribe ahi los logs de las corridas
+manuales del panel y guarda la ruta en `runs.log_path`, columna NOT NULL: un
+log borrado por debajo deja un puntero que ningun barrido puede reparar.
+
+Y los nombres **no se pueden distinguir**: `runner` arma su id como
+`{timestamp}-{slug}` donde el slug sale del campo `tipo` de un config JSON,
+editable desde `/mgmt/configs`. Un config con `"tipo": "daily"` produce
+exactamente el mismo formato que este modulo. Por eso la separacion es un
+directorio y no un patron de nombre.
+
+El barrido de punteros colgados verifica existencia del archivo en vez de
+repetir lo que la poda acaba de borrar: un log que se llevo logrotate, tmpfiles
+o una persona deja exactamente el mismo puntero roto y merece el mismo arreglo.
+
 ## Formato del Reporte de Ventas
 
 Dos hojas por archivo: **Ventas Bultos** y **Ventas HTLs**.
