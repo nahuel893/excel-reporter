@@ -184,6 +184,86 @@ export interface ScheduleJournal {
   entries: JournalEntry[];
 }
 
+// ─── Daily runs ──────────────────────────────────────────────────────────────
+
+/**
+ * One run of the daily flow.
+ *
+ * git_dirty is `boolean | null` and the null matters: the recorder stores NULL
+ * when it could not read git at all, which is not the same as a clean tree.
+ */
+export interface DailyRunSummary {
+  id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  exit_code: number | null;
+  triggered_by: string;
+  test_mode: boolean;
+  hoy: string;
+  solo_canal: string | null;
+  git_branch: string | null;
+  git_sha: string | null;
+  git_dirty: boolean | null;
+}
+
+/**
+ * One service inside a run.
+ *
+ * `status` and `delivery_status` are two independent axes: a report can be
+ * generated correctly (`success`) and never leave the building (`suppressed`),
+ * and `delivery_gate` says which gate stopped it.
+ *
+ * A row with `is_synthetic: true` was rebuilt at read time from the service
+ * registry — it never ran, so it has no `id`, no `orden` and no log.
+ */
+export interface DailyRunServiceRow {
+  id: number | null;
+  orden: number | null;
+  servicio: string;
+  fecha_modo: string | null;
+  fecha_desde: string | null;
+  fecha_hasta: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  status: string;
+  exit_code: number | null;
+  skip_reason: string | null;
+  delivery_status: string | null;
+  delivery_gate: string | null;
+  delivery_gate_detail: string | null;
+  error_repr: string | null;
+  error_traceback: string | null;
+  has_log: boolean;
+  is_synthetic: boolean;
+}
+
+export interface DailyRunArtifact {
+  id: number;
+  service_row_id: number;
+  path: string;
+  kind: string | null;
+  size_bytes: number | null;
+  mtime: string | null;
+  sent: boolean;
+}
+
+export interface DailyRunDetail extends DailyRunSummary {
+  overrides_snapshot: Record<string, unknown> | null;
+  host_mem_available_mb: number | null;
+  /** False when the backend could not read the service registry: the list of
+   *  services is then only what ran, not everything that was configured. */
+  skips_reconstructed: boolean;
+  services: DailyRunServiceRow[];
+  artifacts: DailyRunArtifact[];
+}
+
+export interface DailyRunsPage {
+  total: number;
+  items: DailyRunSummary[];
+}
+
 // ─── Config endpoints ────────────────────────────────────────────────────────
 
 export const api = {
@@ -287,5 +367,42 @@ export const api = {
         `/mgmt/schedule/journal${query ? `?${query}` : ""}`,
       );
     },
+  },
+
+  daily: {
+    list: (params?: {
+      limit?: number;
+      offset?: number;
+      status?: string;
+      desde?: string;
+      hasta?: string;
+    }) => {
+      const qs = new URLSearchParams();
+      // Compared against undefined, not truthiness: offset=0 is the first page
+      // and dropping it would paginate from somewhere else.
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+      if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+      if (params?.status) qs.set("status", params.status);
+      if (params?.desde) qs.set("desde", params.desde);
+      if (params?.hasta) qs.set("hasta", params.hasta);
+      const query = qs.toString();
+      return request<DailyRunsPage>(
+        "GET",
+        `/mgmt/daily-runs${query ? `?${query}` : ""}`,
+      );
+    },
+
+    get: (runId: string) =>
+      request<DailyRunDetail>(
+        "GET",
+        `/mgmt/daily-runs/${encodeURIComponent(runId)}`,
+      ),
+
+    /**
+     * URL of one service's log. Not a request(): the browser opens it directly,
+     * and the backend serves it as text/plain.
+     */
+    serviceLogUrl: (runId: string, orden: number) =>
+      `/mgmt/daily-runs/${encodeURIComponent(runId)}/services/${orden}/log`,
   },
 };

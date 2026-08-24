@@ -76,12 +76,33 @@ src/
 - `GET /mgmt/artifacts/tree?slug=&periodo=` → `{services: [{slug, unreadable, periods: [...]}], unclassified: [...]}`
 - `GET /mgmt/artifacts/file?path=...` → the file (400 if the path escapes the artifacts root)
 
-The artifacts routes live in `panel:app` (port 8010), not `api:app` — see the
+The artifacts and daily-runs routes live in `panel:app` (port 8010), not `api:app` — see the
 "Admin Panel" section of the root AGENTS.md. A period carries both `anomalous`
 (folder name outside the `YYYY-MM` / `YYYY-MM-DD` convention) and `unreadable`
 (the directory could not be listed). Never render `unreadable` as an empty
 period: "no files" and "could not read" mean different things to whoever is
 checking whether a report actually ran.
+
+- `GET /mgmt/daily-runs?limit=&offset=&status=&desde=&hasta=` → `{total, items: [DailyRunSummary]}`
+- `GET /mgmt/daily-runs/{id}` → detail: `services` (real rows + rebuilt skips) and `artifacts`
+- `GET /mgmt/daily-runs/{id}/services/{orden}/log` → one service's log (text/plain)
+
+Three things on this payload are easy to flatten and must not be:
+
+- `status` and `delivery_status` are INDEPENDENT axes. A report generated
+  correctly and then held back by the RAM guard is `status: "success"` with
+  `delivery_status: "suppressed"`, and `delivery_gate` names what stopped it.
+  Rendering one badge for both loses the half that says whether to go fix
+  something.
+- `is_synthetic: true` means the row was rebuilt at read time: the service
+  never ran, so it has no `id`, no `orden` and no log. It must not look like a
+  service that succeeded.
+- `skips_reconstructed: false` means the backend could not read the service
+  registry, so the list is only what ran. Say so — never present it as the
+  full set of configured services.
+
+`git_dirty` is `boolean | null` and all three states are distinct: `null` is
+"git was never read", not "the tree is clean".
 
 - `GET /mgmt/schedule` → timer state, unit definition, last-run outcome
 - `GET /mgmt/schedule/journal?since=&until=&limit=` → `{unit, available, error, entries: [...]}`
@@ -109,13 +130,15 @@ render it as "no timer configured". Journal `priority` is syslog severity:
 
 ## Pending phases
 
-- **Phase 3** (next) — Trigger + observability UI:
-  - Dashboard page (4 stat cards: latest run, next schedule, configs activos, artefactos recientes)
-  - RunButton component (with `test_mode` checkbox + confirm dialog when delivery is on)
-  - LogStream component (consumes SSE)
-  - Run detail page (full log, status, exit code)
-  - Run history list with status filter
-  - Error UX (toasts on failure)
+- **Phase 3** — Trigger + observability UI. **Partly done**:
+  - `runs.tsx` (Ejecuciones) reads the daily-run history: paginated table,
+    detail panel with per-service status/delivery/gate/traceback, artifacts,
+    and a log link where a log exists. **Done.**
+  - The newest run is opened automatically — arriving at this screen means
+    asking about this morning's run, not asking to pick one.
+  - Still pending: dashboard stat cards, RunButton with the `test_mode`
+    confirm dialog, and toast error UX. `LiveLogStream` and the manual-trigger
+    flow on `index.tsx` already exist and are untouched by this screen.
 - **Phase 4** — Schedule page. **Done** (read-only view; no cron editor — the timer is edited in systemd, not here).
 - **Phase 5** — Artifacts browser. **Done** — `artifacts.tsx` + `GET /mgmt/artifacts/*`.
 

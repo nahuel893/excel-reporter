@@ -13,11 +13,14 @@ import type { ReactNode } from "react";
 
 // vi.hoisted: vi.mock's factory is lifted above the imports, so a plain const
 // here would not exist yet when the factory runs.
-const { treeMock, scheduleMock, journalMock } = vi.hoisted(() => ({
-  treeMock: vi.fn(),
-  scheduleMock: vi.fn(),
-  journalMock: vi.fn(),
-}));
+const { treeMock, scheduleMock, journalMock, dailyListMock, dailyGetMock } =
+  vi.hoisted(() => ({
+    treeMock: vi.fn(),
+    scheduleMock: vi.fn(),
+    journalMock: vi.fn(),
+    dailyListMock: vi.fn(),
+    dailyGetMock: vi.fn(),
+  }));
 
 vi.mock("../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api")>();
@@ -27,11 +30,18 @@ vi.mock("../api", async (importOriginal) => {
       ...actual.api,
       artifacts: { ...actual.api.artifacts, tree: treeMock },
       schedule: { ...actual.api.schedule, get: scheduleMock, journal: journalMock },
+      daily: { ...actual.api.daily, list: dailyListMock, get: dailyGetMock },
     },
   };
 });
 
-import { useArtifactTree, useSchedule, useScheduleJournal } from "../queries";
+import {
+  useArtifactTree,
+  useDailyRun,
+  useDailyRuns,
+  useSchedule,
+  useScheduleJournal,
+} from "../queries";
 import { ApiError } from "../api";
 import type { ArtifactTree } from "../api";
 
@@ -165,5 +175,81 @@ describe("useScheduleJournal", () => {
     rerender({ limit: 500 });
     await waitFor(() => expect(journalMock).toHaveBeenCalledTimes(2));
     expect(journalMock).toHaveBeenLastCalledWith({ limit: 500 });
+  });
+});
+
+describe("useDailyRuns", () => {
+  beforeEach(() => {
+    dailyListMock.mockReset();
+  });
+
+  it("asks for the first page when given no parameters", async () => {
+    dailyListMock.mockResolvedValue({ total: 0, items: [] });
+
+    const { result } = renderHook(() => useDailyRuns(), { wrapper: makeWrapper() });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(dailyListMock).toHaveBeenCalledWith(undefined);
+  });
+
+  it("passes filters straight through to the client", async () => {
+    dailyListMock.mockResolvedValue({ total: 0, items: [] });
+    const params = { limit: 10, offset: 20, status: "error" };
+
+    const { result } = renderHook(() => useDailyRuns(params), {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(dailyListMock).toHaveBeenCalledWith(params);
+  });
+
+  it("keys the cache by the filters so changing a page refetches", async () => {
+    dailyListMock.mockResolvedValue({ total: 0, items: [] });
+
+    const { result, rerender } = renderHook(
+      ({ offset }: { offset: number }) => useDailyRuns({ offset }),
+      { wrapper: makeWrapper(), initialProps: { offset: 0 } },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    rerender({ offset: 50 });
+    await waitFor(() => expect(dailyListMock).toHaveBeenCalledTimes(2));
+    expect(dailyListMock).toHaveBeenLastCalledWith({ offset: 50 });
+  });
+
+  it("surfaces a failure as an error state rather than empty data", async () => {
+    dailyListMock.mockRejectedValue(new ApiError(500, "boom"));
+
+    const { result } = renderHook(() => useDailyRuns(), { wrapper: makeWrapper() });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.data).toBeUndefined();
+  });
+});
+
+describe("useDailyRun", () => {
+  beforeEach(() => {
+    dailyGetMock.mockReset();
+  });
+
+  it("does not fetch until a run is actually selected", async () => {
+    const { result } = renderHook(() => useDailyRun(undefined), {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.fetchStatus).toBe("idle"));
+    expect(dailyGetMock).not.toHaveBeenCalled();
+  });
+
+  it("fetches the run once one is selected", async () => {
+    dailyGetMock.mockResolvedValue({ id: "20260824-070000-daily" });
+
+    const { result } = renderHook(() => useDailyRun("20260824-070000-daily"), {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(dailyGetMock).toHaveBeenCalledWith("20260824-070000-daily");
   });
 });

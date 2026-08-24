@@ -112,6 +112,43 @@ export function useArtifactTree(slug?: string, periodo?: string) {
   });
 }
 
+// ─── Daily run queries ────────────────────────────────────────────────────────
+
+export type {
+  DailyRunSummary,
+  DailyRunServiceRow,
+  DailyRunArtifact,
+  DailyRunDetail,
+  DailyRunsPage,
+} from "./api";
+
+export function useDailyRuns(params?: {
+  limit?: number;
+  offset?: number;
+  status?: string;
+  desde?: string;
+  hasta?: string;
+}) {
+  return useQuery({
+    queryKey: ["daily-runs", params ?? null],
+    queryFn: () => api.daily.list(params),
+    staleTime: 10_000,
+  });
+}
+
+export function useDailyRun(runId: string | undefined) {
+  return useQuery({
+    queryKey: ["daily-runs", "detail", runId ?? null],
+    queryFn: () => api.daily.get(runId as string),
+    // Nothing is selected on first paint; fetching "undefined" would be a 404
+    // rendered as an error the user never asked for.
+    enabled: Boolean(runId),
+    // A finished run does not change. Only an in-flight one is worth refetching,
+    // and the history poll above surfaces that.
+    staleTime: 60_000,
+  });
+}
+
 // ─── Schedule queries ─────────────────────────────────────────────────────────
 
 export type { ScheduleStatus, ScheduleJournal, JournalEntry } from "./api";
