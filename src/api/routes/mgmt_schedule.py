@@ -145,6 +145,14 @@ def _as_int(value: object) -> Optional[int]:
         return None
 
 
+def _as_bool(value: Optional[str]) -> Optional[bool]:
+    """systemd's yes/no, keeping "not reported" distinct from "no"."""
+    cleaned = _clean(value)
+    if cleaned is None:
+        return None
+    return cleaned.lower() == "yes"
+
+
 def _journal_message(raw: object) -> Optional[str]:
     """Decode a journal MESSAGE, which is a string or an array of bytes.
 
@@ -244,7 +252,9 @@ def get_schedule() -> dict:
         "error": None,
         "active_state": _clean(timer.get("ActiveState")),
         "unit_file_state": _clean(timer.get("UnitFileState")),
-        "persistent": _clean(timer.get("Persistent")) == "yes",
+        # None when the property is absent, not False: reporting "no" for a
+        # value never read is the one lie the rest of this module avoids.
+        "persistent": _as_bool(timer.get("Persistent")),
         "on_calendar": _on_calendar(timer.get("TimersCalendar")),
         "next_elapse": _clean(timer.get("NextElapseUSecRealtime")),
         "last_trigger": _clean(timer.get("LastTriggerUSec")),

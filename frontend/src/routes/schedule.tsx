@@ -313,7 +313,15 @@ export function SchedulePage() {
             <Field label="OnCalendar" value={schedule.on_calendar} testId="on-calendar" />
             <Field
               label="Persistent"
-              value={schedule.persistent ? "Sí" : "No"}
+              // null is "no se pudo leer", not "no" — the two lead to opposite
+              // conclusions about whether a missed run catches up.
+              value={
+                schedule.persistent === null
+                  ? "Desconocido"
+                  : schedule.persistent
+                    ? "Sí"
+                    : "No"
+              }
               testId="persistent"
               mono={false}
             />

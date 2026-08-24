@@ -138,6 +138,29 @@ def test_schedule_reports_the_last_run_outcome(client, run_mock):
     assert body["last_exit_code"] == 0
 
 
+def test_persistent_is_unknown_rather_than_false_when_not_reported(client):
+    """The one field that could lie: an absent Persistent must not read as No.
+
+    Persistent=true is what makes a run missed while the machine was off fire
+    at boot, so "no" and "could not tell" lead to opposite conclusions.
+    """
+    without_persistent = "\n".join(
+        line for line in SHOW_TIMER_OUTPUT.splitlines()
+        if not line.startswith("Persistent=")
+    )
+
+    def no_persistent(argv, **kwargs):
+        if "show" in argv and any(a.endswith(".timer") for a in argv):
+            return _completed(without_persistent)
+        return _fake_run(argv, **kwargs)
+
+    with patch("src.api.routes.mgmt_schedule.subprocess.run", side_effect=no_persistent):
+        body = client.get("/mgmt/schedule").json()
+
+    assert body["available"] is True
+    assert body["persistent"] is None
+
+
 def test_schedule_joins_every_on_calendar_expression(client):
     """A timer may declare several schedules; showing the first only would
     hide half of when the daily actually runs."""
