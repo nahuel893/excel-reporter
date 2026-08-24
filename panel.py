@@ -36,13 +36,44 @@ import logging
 import os
 
 from api import app
+from src.api.daily_store import init_daily_store
 from src.api.routes.mgmt_artifacts import router as mgmt_artifacts_router
+from src.api.routes.mgmt_daily import router as mgmt_daily_router
 from src.api.routes.mgmt_schedule import router as mgmt_schedule_router
 
 logger = logging.getLogger(__name__)
 
 app.include_router(mgmt_artifacts_router)
+app.include_router(mgmt_daily_router)
 app.include_router(mgmt_schedule_router)
+
+
+def _init_daily_store(application) -> None:
+    """Create the daily-run tables on the engine api.py built.
+
+    api.py owns the engine and knows nothing about these tables, so they are
+    created here. create_all is idempotent, and an empty daily-runs screen is
+    the honest answer before the first recorded run — reading a table that was
+    never created would be a 500 instead.
+
+    A missing engine is logged and survived: the panel is an observer, and an
+    observer that refuses to start takes down the thing it was watching.
+    """
+    engine = getattr(application.state, "engine", None)
+    if engine is None:
+        logger.warning(
+            "No engine on app.state; the daily-run tables were not created and "
+            "/mgmt/daily-runs will answer 503."
+        )
+        return
+    init_daily_store(engine)
+
+
+@app.on_event("startup")
+async def _panel_startup() -> None:
+    # Registered after api.py's own startup handler, so app.state.engine is
+    # already set by the time this runs.
+    _init_daily_store(app)
 
 _external_root = os.environ.get("ADMIN_PANEL_ARTIFACTS_ROOT")
 if _external_root:

@@ -30,7 +30,8 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
 │   │   │   ├── mgmt_runs.py      # Panel: disparar y seguir corridas
 │   │   │   ├── mgmt_configs.py   # Panel: leer/editar los JSON de config
 │   │   │   ├── mgmt_artifacts.py # Panel: navegar data/output/ (solo lectura)
-│   │   │   └── mgmt_schedule.py  # Panel: timer/journal de systemd (solo lectura)
+│   │   │   ├── mgmt_schedule.py  # Panel: timer/journal de systemd (solo lectura)
+│   │   │   └── mgmt_daily.py     # Panel: historial de corridas del daily (solo lectura)
 │   │   ├── db.py             # Engine + tabla runs
 │   │   ├── daily_store.py    # Tablas daily_runs / daily_run_services / run_artifacts
 │   │   └── __init__.py
@@ -177,6 +178,23 @@ Solo existen bajo `panel:app` (puerto 8010), no bajo `api:app`. Ver "Admin Panel
 | GET | `/mgmt/artifacts/file` | Sirve un archivo generado (valida que no salga de la raiz) |
 | GET | `/mgmt/schedule` | Estado del timer de systemd que corre el daily |
 | GET | `/mgmt/schedule/journal` | Entradas del journal de `excel-reporter-daily.service` |
+| GET | `/mgmt/daily-runs` | Historial de corridas del daily (paginado, mas nueva primero) |
+| GET | `/mgmt/daily-runs/{id}` | Una corrida: servicios (reales + skips reconstruidos) y artefactos |
+| GET | `/mgmt/daily-runs/{id}/services/{orden}/log` | Log de un servicio, `text/plain` |
+
+**Los skips se reconstruyen en lectura, no se guardan.** Un servicio que el
+daily decidio no correr no escribe fila (decision E5), asi que una respuesta
+armada solo con filas mostraria 12 servicios un dia que habia 18 configurados —
+y los 6 que faltan son los que mas importan. `GET /mgmt/daily-runs/{id}` cruza
+el registro `SERVICIOS` contra el `overrides_snapshot` de la corrida y sintetiza
+esas filas con `is_synthetic: true` y `orden: null` (no hay fila, no hay log que
+direccionar).
+
+Si el registro no se puede importar, la respuesta trae `skips_reconstructed:
+false` y solo las filas reales — nunca una lista corta presentada como completa.
+La `razon` del skip es best-effort: el archivo de overrides no es la unica forma
+de saltear un servicio, asi que ausencia de razon significa "no quedo
+registrada", nunca "sin motivo".
 
 `/mgmt/schedule*` no acepta ningun parametro que elija la unit: `TIMER_UNIT` y
 `SERVICE_UNIT` son constantes de modulo en `mgmt_schedule.py`. Todo comando

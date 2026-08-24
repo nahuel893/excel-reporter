@@ -6,10 +6,14 @@ api.py is left alone, and the isolation is by process rather than by app
 object. The last part is easy to describe wrongly, so it is asserted.
 """
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Every route prefix this file is responsible for.
+_PANEL_PREFIXES = ("/mgmt/artifacts", "/mgmt/schedule", "/mgmt/daily-runs")
 
 
 @pytest.fixture
@@ -32,6 +36,8 @@ def test_panel_mounts_the_admin_routers(panel):
     assert "/mgmt/artifacts/file" in paths
     assert "/mgmt/schedule" in paths
     assert "/mgmt/schedule/journal" in paths
+    assert "/mgmt/daily-runs" in paths
+    assert "/mgmt/daily-runs/{run_id}" in paths
 
 
 def test_panel_keeps_what_api_already_served(panel):
@@ -60,14 +66,18 @@ def test_panel_does_not_remount_routers_api_already_had():
         and node.args
         and isinstance(node.args[0], ast.Name)
     }
-    assert included == {"mgmt_artifacts_router", "mgmt_schedule_router"}
+    assert included == {
+        "mgmt_artifacts_router",
+        "mgmt_schedule_router",
+        "mgmt_daily_router",
+    }
 
 
 def test_panel_mounts_each_admin_route_exactly_once(panel):
     seen = [
         (r.path, method)
         for r in panel.app.routes
-        if getattr(r, "path", "").startswith(("/mgmt/artifacts", "/mgmt/schedule"))
+        if getattr(r, "path", "").startswith(_PANEL_PREFIXES)
         for method in getattr(r, "methods", set())
     ]
     assert len(seen) == len(set(seen)), f"duplicated routes: {seen}"
@@ -83,6 +93,7 @@ def test_api_py_does_not_reference_the_panel_routers():
     source = (REPO_ROOT / "api.py").read_text(encoding="utf-8")
     assert "mgmt_artifacts" not in source
     assert "mgmt_schedule" not in source
+    assert "mgmt_daily" not in source
 
 
 def test_panel_app_is_the_same_object_api_builds(panel):
@@ -101,5 +112,96 @@ def test_panel_exposes_no_write_route_of_its_own(panel):
     """The routers panel.py adds are read-only (RF-17)."""
     for route in panel.app.routes:
         path = getattr(route, "path", "")
-        if path.startswith("/mgmt/artifacts") or path.startswith("/mgmt/schedule"):
+        if path.startswith(_PANEL_PREFIXES):
             assert set(getattr(route, "methods", set())) <= {"GET", "HEAD"}
+
+
+def test_startup_creates_the_daily_store_tables(tmp_path):
+    """Reading a table that was never created is a 500, not an empty history.
+
+    api.py builds the engine and knows nothing about these tables, so the
+    panel creates them itself on startup — create_all is idempotent, and an
+    empty daily-runs screen is the honest answer before the first run.
+    """
+    from sqlalchemy import inspect
+
+    import panel as panel_module
+    from src.api.daily_store import engine_from_url
+
+    engine = engine_from_url(f"sqlite:///{tmp_path}/mgmt.db")
+    app = SimpleNamespace(state=SimpleNamespace(engine=engine))
+
+    panel_module._init_daily_store(app)
+
+    tables = set(inspect(engine).get_table_names())
+    assert {"daily_runs", "daily_run_services", "run_artifacts"} <= tables
+
+
+def test_the_startup_hook_is_actually_registered(panel):
+    """The two tests above call _init_daily_store directly, so a decorator
+    pointed at the wrong app or the wrong event name would leave them green
+    while nothing ran on startup. This is what checks the wiring itself.
+
+    Registration rather than a live startup: api.py's own handler builds the
+    production engine, which refuses to run under pytest by design.
+    """
+    assert panel._panel_startup in panel.app.router.on_startup
+
+
+def test_duplicate_positions_do_not_turn_a_log_request_into_a_500(tmp_path):
+    """orden is not unique in the schema — (run_id, servicio) is.
+
+    The recorder numbers sequentially so this should not happen, but "should
+    not" is not a constraint, and the failure mode would be a 500 on a page
+    whose whole job is telling you what went wrong.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from src.api.daily_store import (
+        DailyRun,
+        DailyRunService,
+        engine_from_url,
+        init_daily_store,
+    )
+    from src.api.routes.mgmt_daily import router, set_log_root
+    from sqlalchemy.orm import Session
+
+    engine = engine_from_url(f"sqlite:///{tmp_path}/mgmt.db")
+    init_daily_store(engine)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    log = logs / "svc.log"
+    log.write_text("contenido\n", encoding="utf-8")
+
+    with Session(engine) as s:
+        s.add(DailyRun(
+            id="r1", started_at="2026-08-24T07:00:00+00:00", status="success",
+            triggered_by="schedule", test_mode=False, hoy="2026-08-24",
+        ))
+        for name in ("uno", "dos"):
+            s.add(DailyRunService(
+                run_id="r1", orden=1, servicio=name, status="success",
+                log_path=str(log),
+            ))
+        s.commit()
+
+    app = FastAPI()
+    app.include_router(router)
+    app.state.engine = engine
+    set_log_root(logs)
+    try:
+        res = TestClient(app).get("/mgmt/daily-runs/r1/services/1/log")
+    finally:
+        set_log_root(None)
+
+    assert res.status_code == 200
+    assert "contenido" in res.text
+
+
+def test_startup_without_an_engine_warns_instead_of_crashing():
+    """api.py owns the engine. If it is not there, the panel must not take
+    the whole process down on the way up."""
+    import panel as panel_module
+
+    panel_module._init_daily_store(SimpleNamespace(state=SimpleNamespace()))
