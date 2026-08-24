@@ -283,7 +283,19 @@ def load_base():
 
     i_fecha, i_total2, i_desc = _idx("Fecha"), _idx("Total2"), _idx("Descuento")
 
+    # Columnas del wapi que van al informe como hoja cruda. Son las que
+    # alimentan algun numero (Fecha/Total2/Descuento) mas las que hacen falta
+    # para ubicar la fila (comprobante, cliente, articulo, accion, sucursal).
+    # Las 32 completas serian 1,8 millones de celdas: el archivo se vuelve
+    # inmanejable y las 20 que sobran no explican ningun numero del informe.
+    _WAPI_COLS = ["Fecha", "Comprobante", "Cod. Cliente", "Razón Social",
+                  "Artículo CMQ", "Descripción", "Marca", "Acción",
+                  "Descripción Acción", "SUCURSAL", "Total2", "Descuento",
+                  "Tipo Descuento"]
+    wapi_idx = [(n, hdr_wapi.index(n)) for n in _WAPI_COLS if n in hdr_wapi]
+
     daily = {}
+    wapi_crudo = []
     for r in ws_wapi.iter_rows(min_row=2, values_only=True):
         if not r or not r[i_fecha]:
             continue
@@ -295,7 +307,13 @@ def load_base():
         d["facturacion"] += _f(r[i_total2])
         d["descuentos"] += _f(r[i_desc])
         d["operaciones"] += 1
+        rec = {}
+        for nombre, i in wapi_idx:
+            v = r[i]
+            rec[nombre] = f if nombre == "Fecha" else v
+        wapi_crudo.append(rec)
     daily = pd.DataFrame(sorted(daily.values(), key=lambda x: x["fecha"]))
+    wapi_crudo = pd.DataFrame(wapi_crudo)
 
     # CLIENTE-FECHA: grano cliente x accion x articulo (lo que pide la hoja Clientes)
     cli = []
@@ -326,7 +344,7 @@ def load_base():
     accgen = pd.DataFrame(accgen)
 
     wb.close()
-    return fact, acc, daily, cli, accgen
+    return fact, acc, daily, cli, accgen, wapi_crudo
 
 
 def load_informe():
@@ -721,8 +739,14 @@ def _resolver_compras(directorio: Path, canonico: Path) -> Path | None:
 
 def _leer_compras(path: Path, signos: dict, sucursal_por_cliente: dict,
                   generico_por_articulo: dict,
-                  desde: str, hasta: str) -> pd.DataFrame:
-    """compras.xls -> DataFrame con generico, sucursal y total con signo.
+                  desde: str, hasta: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """compras.xls -> (modelo, crudo).
+
+    `modelo` trae generico, sucursal y total con signo: es lo que consume el
+    cuadro de tasa. `crudo` trae TODAS las filas del periodo, entren o no, con
+    el motivo por el que cada una quedo afuera. Sin ese segundo DataFrame la
+    unica forma de contestar "por que Compras da esto" es leer este codigo;
+    con el, la respuesta esta en una hoja del propio informe.
 
     Se acota a [desde, hasta] por Fecha Movimiento. El SUMIFS del original NO
     filtra por fecha: confia en que el operador exporto justo el periodo. Si el
@@ -736,6 +760,7 @@ def _leer_compras(path: Path, signos: dict, sucursal_por_cliente: dict,
     sh = bk.sheet_by_index(0)
     d0, d1 = date.fromisoformat(desde), date.fromisoformat(hasta)
     filas = []
+    crudo = []
     fuera_de_rango = 0
     cubre_desde = cubre_hasta = None
     desconocidos: dict[str, float] = {}
@@ -751,45 +776,65 @@ def _leer_compras(path: Path, signos: dict, sucursal_por_cliente: dict,
         cubre_hasta = fecha if cubre_hasta is None else max(cubre_hasta, fecha)
 
         cod = str(sh.cell_value(i, _COL_COD_MOVIMIENTO)).strip()
+        try:
+            bruto = float(sh.cell_value(i, _COL_TOTAL_FACTURADO) or 0)
+        except (TypeError, ValueError):
+            bruto = 0.0
+        productos = str(sh.cell_value(i, _COL_PRODUCTOS))
+        # Fila del crudo: se completa a medida que se resuelve y se cierra con
+        # el motivo. `fila_excel` es 1-based para poder ir al .xls original.
+        reg = {"fila_excel": i + 1, "fecha": fecha.isoformat(), "cod_movimiento": cod,
+               "cliente": None, "sucursal": None, "producto": productos,
+               "articulo": None, "generico": None, "bruto": bruto,
+               "signo": None, "importe": 0.0, "entra": "NO", "motivo": ""}
+
+        def _descartar(motivo: str):
+            reg["motivo"] = motivo
+            crudo.append(reg)
+
         if cod not in signos:
             # #N/A en el VLOOKUP del original, asi que el SUMIFS no lo suma.
             # Se replica, pero se MIDE: un codigo nuevo con plata importante
             # tiene que aparecer en pantalla, no desaparecer sin ruido.
-            try:
-                desconocidos[cod] = desconocidos.get(cod, 0.0) + abs(
-                    float(sh.cell_value(i, _COL_TOTAL_FACTURADO) or 0))
-            except (TypeError, ValueError):
-                desconocidos[cod] = desconocidos.get(cod, 0.0)
+            desconocidos[cod] = desconocidos.get(cod, 0.0) + abs(bruto)
+            _descartar("codigo sin signo en 'extra y tasa' (#N/A en el original)")
             continue
         signo, flag = signos[cod]
+        reg["signo"] = signo
         if flag.strip().lower() != "suma":
+            _descartar(f"'extra y tasa' marca el codigo como '{flag.strip()}', no 'suma'")
             continue                      # el SUMIFS filtra por AJ="suma"
 
-        productos = str(sh.cell_value(i, _COL_PRODUCTOS))
         if "-" not in productos:
+            _descartar("Productos no tiene el formato '<articulo>-<descripcion>'")
             continue
         try:
             articulo = int(float(productos.split("-", 1)[0].strip()))
         except ValueError:
+            _descartar("el codigo de articulo de Productos no es numerico")
             continue
+        reg["articulo"] = articulo
 
         cliente = sh.cell_value(i, _COL_CLIENTE)
         try:
             cliente = int(float(cliente))
         except (TypeError, ValueError):
+            _descartar("Cliente vacio o no numerico")
             continue
+        reg["cliente"] = cliente
 
         gen = generico_por_articulo.get(articulo)
         suc = sucursal_por_cliente.get(cliente)
+        reg["generico"], reg["sucursal"] = gen, suc
         if gen is None or suc is None:
+            falta = "articulo sin generico en gold" if gen is None else "cliente sin sucursal en 'sucu'"
+            _descartar(f"{falta} (#N/A en el original)")
             continue                      # sin match -> el VLOOKUP daba #N/A
 
-        try:
-            importe = float(sh.cell_value(i, _COL_TOTAL_FACTURADO) or 0)
-        except (TypeError, ValueError):
-            importe = 0.0
-
-        filas.append({"generico": gen, "sucursal": suc, "total": signo * importe})
+        importe = signo * bruto
+        reg["importe"], reg["entra"], reg["motivo"] = importe, "SI", "entra al modelo"
+        crudo.append(reg)
+        filas.append({"generico": gen, "sucursal": suc, "total": importe})
 
     if fuera_de_rango:
         print(f"    {path.name}: {fuera_de_rango} filas fuera de {desde}..{hasta}, descartadas")
@@ -808,18 +853,18 @@ def _leer_compras(path: Path, signos: dict, sucursal_por_cliente: dict,
         print(f"    WARN: {path.name} cubre {cubre_desde}..{cubre_hasta} pero el "
               f"periodo es {desde}..{hasta}. Las Compras quedan CORTAS contra los "
               f"Descuentos: la Diferencia subestima. Reexportar el archivo.")
-    return pd.DataFrame(filas)
+    return pd.DataFrame(filas), pd.DataFrame(crudo)
 
 
 def computar_tasa(compras_path: Path, inf: dict, fact: pd.DataFrame,
-                  generico_por_articulo: dict) -> tuple[pd.DataFrame, pd.DataFrame] | None:
+                  generico_por_articulo: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame] | None:
     """Recalcula el modelo de tasa desde los insumos frescos.
 
     Descuentos salen de la BASE (frescos). Compras de compras.xls (fresco).
     Solo la Tasa% viene del .xlsm, porque es un valor negociado, no calculado.
-    Devuelve (modelo_por_zona, apertura_por_sucursal), o None si falta algun
-    insumo — el informe cae al bloque leido del .xlsm, que es preferible a
-    inventar."""
+    Devuelve (modelo_por_zona, apertura_por_sucursal, compras_crudo), o None si
+    falta algun insumo — el informe cae al bloque leido del .xlsm, que es
+    preferible a inventar."""
     signos = inf.get("signos_movimiento")
     suc_por_cliente = inf.get("sucursal_por_cliente_interno")
     tasas = inf.get("tasa_pct")           # {(generico, zona): pct}
@@ -830,10 +875,12 @@ def computar_tasa(compras_path: Path, inf: dict, fact: pd.DataFrame,
         print(f"  WARN: no esta {compras_path.name}; la tasa sale del .xlsm")
         return None
 
-    compras = _leer_compras(compras_path, signos, suc_por_cliente, generico_por_articulo,
-                            PERIODO_DESDE, PERIODO_HASTA)
+    compras, crudo = _leer_compras(compras_path, signos, suc_por_cliente,
+                                   generico_por_articulo, PERIODO_DESDE, PERIODO_HASTA)
     if compras.empty:
         return None
+    if not crudo.empty:
+        crudo["zona"] = crudo["sucursal"].map(zona_por_suc)
 
     # Compras por (generico, zona) — el original agrega por sucursal y despues
     # suma por zona con SUMIF; aca se hace en un paso, mismo resultado.
@@ -916,7 +963,175 @@ def computar_tasa(compras_path: Path, inf: dict, fact: pd.DataFrame,
             "compras": sum(f["compras"] for f in bloque_suc),
         })
 
-    return pd.DataFrame(filas), pd.DataFrame(apertura)
+    return pd.DataFrame(filas), pd.DataFrame(apertura), crudo
+
+
+def _hoja_compras_crudo(wb, inf: dict, layout: dict) -> None:
+    """Hoja con TODAS las filas de compras.xls del periodo, entren o no.
+
+    Es la contraparte de 'Datos' para el otro lado del modelo: el Modelo Tasa
+    saca de aca la columna Compras con un SUMIFS, y la columna Motivo explica
+    fila por fila por que una compra no sumo. Sin esto, los codigos que quedan
+    afuera (255, 604, 615, 616...) son un renglon en la consola que nadie ve.
+    """
+    crudo = inf.get("compras_crudo")
+    ws = wb.create_sheet("Compras (crudo)")
+    ws.sheet_view.showGridLines = False
+    widths(ws, {"A": 3, "B": 9, "C": 11, "D": 30, "E": 11, "F": 30, "G": 18,
+                "H": 15, "I": 10, "J": 40, "K": 16, "L": 7, "M": 16, "N": 8, "O": 46})
+    archivo = inf.get("compras_archivo", "compras.xls")
+    r = title(ws, 2, "Compras — filas crudas",
+              f"Fuente C · {archivo} · período {_label_periodo()} · "
+              "de acá sale la columna Compras del Modelo Tasa")
+    if crudo is None or not len(crudo):
+        ws.cell(row=r, column=2, value="No se pudo leer el export de compras.").font = Font(
+            size=10, italic=True, color=BADIE)
+        return
+
+    ws.cell(row=r, column=2, value=(
+        "Una fila suma al modelo sólo si ¿Entra? = SI. El resto queda con el motivo escrito "
+        "al lado: es exactamente lo que el informe manual descarta como #N/A, pero acá se ve."
+    )).font = Font(size=9, italic=True, color=BADIE)
+    r += 2
+
+    df = crudo.copy()
+    if "zona" not in df.columns:
+        df["zona"] = None
+    df = df.rename(columns={
+        "fila_excel": "Fila .xls", "fecha": "Fecha", "cod_movimiento": "Cód. Movimiento",
+        "cliente": "Cliente", "sucursal": "Sucursal", "zona": "Zona",
+        "generico": "Genérico", "articulo": "Artículo", "producto": "Producto",
+        "bruto": "Total facturado", "signo": "Signo", "importe": "Importe (con signo)",
+        "entra": "¿Entra?", "motivo": "Motivo"})
+    cols = ["Fila .xls", "Fecha", "Cód. Movimiento", "Cliente", "Sucursal", "Zona",
+            "Genérico", "Artículo", "Producto", "Total facturado", "Signo",
+            "Importe (con signo)", "¿Entra?", "Motivo"]
+    df = df[[c for c in cols if c in df.columns]]
+    start = r
+    r = write_df(ws, df, r, {"Total facturado": F_MONEY, "Importe (con signo)": F_MONEY,
+                             "Cliente": F_INT, "Artículo": F_INT, "Fila .xls": F_INT,
+                             "Signo": F_INT},
+                 start_col=2, table_name="tblComprasCrudo", zebra=False,
+                 no_total=("Cliente", "Artículo", "Fila .xls", "Signo"))
+    ws.freeze_panes = ws.cell(row=start + 1, column=2)
+    ws.auto_filter.ref = f"B{start}:O{r-2}"
+    # B=Fila C=Fecha D=Cod E=Cliente F=Sucursal G=Zona H=Generico I=Articulo
+    # J=Producto K=Total facturado L=Signo M=Importe N=¿Entra? O=Motivo
+    layout["compras"] = (start + 1, r - 2)
+
+
+def _hoja_wapi_crudo(wb, wapi: pd.DataFrame) -> None:
+    """Hoja con el wapi tal como llega, recortado a las columnas que se usan.
+
+    Es la fuente de la hoja «Evolución Diaria» y de los Descuentos de la BASE.
+    Van las 13 columnas que explican algun numero del informe; las otras 19 del
+    export no las lee nadie y multiplicarian el peso del archivo.
+    """
+    ws = wb.create_sheet("wapi (crudo)")
+    ws.sheet_view.showGridLines = False
+    widths(ws, {"A": 3, "B": 11, "C": 14, "D": 11, "E": 34, "F": 11, "G": 34,
+                "H": 18, "I": 10, "J": 34, "K": 24, "L": 16, "M": 14, "N": 16})
+    r = title(ws, 2, "wapi — filas crudas",
+              "Fuente A · hoja wapi de la BASE control · SÓLO líneas con acción CCU · "
+              "de acá sale «Evolución Diaria»")
+    if wapi is None or not len(wapi):
+        ws.cell(row=r, column=2, value="La BASE no trajo filas de wapi.").font = Font(
+            size=10, italic=True, color=BADIE)
+        return
+    ws.cell(row=r, column=2, value=(
+        f"{len(wapi):,} filas. Es el archivo que exporta CCU, no la venta completa de BADIE: "
+        "por eso la Facturación de esta hoja no coincide con «Genéricos»."
+    )).font = Font(size=9, italic=True, color=BADIE)
+    r += 2
+    start = r
+    r = write_df(ws, wapi, r, {"Total2": F_MONEY, "Descuento": F_MONEY,
+                               "Cod. Cliente": F_INT, "Artículo CMQ": F_INT},
+                 start_col=2, table_name="tblWapiCrudo", zebra=False,
+                 no_total=("Cod. Cliente", "Artículo CMQ"))
+    ws.freeze_panes = ws.cell(row=start + 1, column=2)
+    ultima = get_column_letter(1 + len(wapi.columns))
+    ws.auto_filter.ref = f"B{start}:{ultima}{r-2}"
+
+
+def _formulas_modelo_tasa(wb, inf: dict, layout: dict) -> None:
+    """Reescribe el cuadro de tasa con formulas que apuntan a los datos crudos.
+
+    Cadena completa: la fila de sucursal es un SUMIFS contra 'Datos' y
+    'Compras (crudo)'; la fila de zona es la SUMA de sus sucursales; el TOTAL
+    del generico es la suma de sus zonas. Es la misma estructura que el .xlsm
+    original (que agrega por sucursal y sube a zona con SUMIF), con la
+    diferencia de que aca las hojas de origen viajan dentro del archivo.
+
+    No se toca ningun valor: cada formula tiene que dar exactamente el numero
+    que ya estaba. Si no da, es un bug de la formula, no un criterio nuevo.
+    """
+    if not layout.get("tasa_rows") or not layout.get("apertura"):
+        return
+    if not layout.get("datos") or not layout.get("compras"):
+        return                              # sin hojas crudas no hay a que apuntar
+
+    ws = wb["Modelo Tasa"]
+    d0, d1 = layout["datos"]
+    c0, c1 = layout["compras"]
+    DAT = f"'Datos'!$B${d0}:$B${d1}"        # Sucursal
+    DAT_GEN = f"'Datos'!$I${d0}:$I${d1}"    # Genérico
+    DAT_DESC = f"'Datos'!$K${d0}:$K${d1}"   # Descuentos
+    CMP = f"'Compras (crudo)'!$F${c0}:$F${c1}"        # Sucursal
+    CMP_GEN = f"'Compras (crudo)'!$H${c0}:$H${c1}"    # Genérico
+    CMP_IMP = f"'Compras (crudo)'!$M${c0}:$M${c1}"    # Importe con signo
+    CMP_ENT = f"'Compras (crudo)'!$N${c0}:$N${c1}"    # ¿Entra?
+
+    # --- apertura por sucursal: el piso de la cadena ---
+    for gen, (ini, fin) in layout["apertura"].items():
+        for rr in range(ini, fin + 1):
+            suc = ws.cell(row=rr, column=2).value
+            if isinstance(suc, str) and suc.startswith("—"):
+                ws.cell(row=rr, column=4, value=f"=SUM(D{ini}:D{rr - 1})")
+                ws.cell(row=rr, column=5, value=f"=SUM(E{ini}:E{rr - 1})")
+                continue
+            ws.cell(row=rr, column=4,
+                    value=f'=SUMIFS({DAT_DESC},{DAT},$B{rr},{DAT_GEN},"{gen}")')
+            ws.cell(row=rr, column=5,
+                    value=f'=SUMIFS({CMP_IMP},{CMP},$B{rr},{CMP_GEN},"{gen}",{CMP_ENT},"SI")')
+
+    # --- cuadro por zona: suma de las sucursales de esa zona ---
+    zona_col = {}                            # (gen, zona) -> rango de filas de apertura
+    for gen, (ini, fin) in layout["apertura"].items():
+        for rr in range(ini, fin + 1):
+            z = ws.cell(row=rr, column=3).value
+            if isinstance(z, str) and z:
+                zona_col.setdefault((gen, z), []).append(rr)
+
+    pendiente_total = []
+    for row, gen, zona, es_total in layout["tasa_rows"]:
+        if es_total:
+            if pendiente_total:
+                p0, p1 = pendiente_total[0], pendiente_total[-1]
+                for col in (4, 5, 7, 8, 9):
+                    letra = get_column_letter(col)
+                    ws.cell(row=row, column=col, value=f"=SUM({letra}{p0}:{letra}{p1})")
+                pendiente_total = []
+            continue
+        pendiente_total.append(row)
+        filas = zona_col.get((gen, zona), [])
+        if filas:
+            refs_d = ",".join(f"D{x}" for x in filas)
+            refs_e = ",".join(f"E{x}" for x in filas)
+            ws.cell(row=row, column=4, value=f"=SUM({refs_d})")
+            ws.cell(row=row, column=5, value=f"=SUM({refs_e})")
+        ws.cell(row=row, column=7, value=f"=E{row}*F{row}")          # Tasa generada
+        ws.cell(row=row, column=8, value=f"=G{row}-D{row}")          # Diferencia
+        ws.cell(row=row, column=9,                                    # Compra necesaria
+                value=f'=IF(F{row}=0,0,H{row}/F{row})')
+        ws.cell(row=row, column=10, value=f'=IF(H{row}>=0,"SI","NO")')
+
+    # El pie del cuadro deja escrito a que hoja apunta cada columna: si alguien
+    # abre el archivo en seis meses, no tiene que reconstruirlo leyendo formulas.
+    fin = max(x[0] for x in layout["tasa_rows"]) + 1
+    ws.cell(row=fin, column=2, value=(
+        "Descuentos → hoja «Datos» (FACT_NET)   ·   Compras → hoja «Compras (crudo)», "
+        "sólo ¿Entra?=SI   ·   Tasa % → informe manual / informada por CCU"
+    )).font = Font(name="Consolas", size=8, color=TEAL)
 
 
 def computar_canal(cli: pd.DataFrame, inf: dict) -> tuple | None:
@@ -999,7 +1214,7 @@ def _label_corte(cortes: dict) -> str:
 def build(out_path: Path):
     IMG_DIR.mkdir(exist_ok=True)
     print("Cargando BASE ...")
-    fact, acc, daily, cli, accgen = load_base()
+    fact, acc, daily, cli, accgen, wapi_crudo = load_base()
 
     # El periodo se DERIVA del dato real de la BASE, no de constantes ni de
     # argumentos: si el rotulo y el contenido pueden desincronizarse, tarde o
@@ -1022,10 +1237,12 @@ def build(out_path: Path):
         if _compras_path is None:
             raise FileNotFoundError(f"no hay ningun export de compras en {COMPRAS_DIR}")
         _res = computar_tasa(_compras_path, inf, fact, generico_por_articulo)
-        _tasa, _apertura = _res if _res is not None else (None, None)
+        _tasa, _apertura, _crudo = _res if _res is not None else (None, None, None)
         if _tasa is not None and len(_tasa):
             inf["tasa"] = _tasa
             inf["tasa_apertura"] = _apertura
+            inf["compras_crudo"] = _crudo
+            inf["compras_archivo"] = _compras_path.name
             inf["tasa_calculada"] = True
             print(f"    tasa RECALCULADA desde {_compras_path.name} + BASE")
         else:
@@ -1162,6 +1379,7 @@ def build(out_path: Path):
 
     # ============ 3. MODELO TASA ============
     ws = wb.create_sheet("Modelo Tasa")
+    layout: dict = {}          # coordenadas para el pase de formulas del final
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 20, "C": 22, "D": 16, "E": 16, "F": 11, "G": 16, "H": 17, "I": 19})
     r = title(ws, 2, "Modelo de tasa — ¿la inversión promocional se paga sola?",
@@ -1183,6 +1401,13 @@ def build(out_path: Path):
     r = write_df(ws, tdf, r, {"Descuentos": F_MONEY, "Compras": F_MONEY, "Tasa %": F_PCT,
                               "Tasa generada": F_MONEY, "Diferencia": F_MONEY0,
                               "Compra necesaria": F_MONEY0}, total_row=False, start_col=2)
+    # Coordenadas del cuadro, para reescribirlo con formulas una vez que existan
+    # las hojas a las que apuntan. Se guarda la fila de cada (generico, zona) y
+    # si es un TOTAL, que se resuelve con SUM del bloque y no con SUMIFS.
+    layout["tasa_rows"] = [
+        (start + 1 + i, x.generico, x.zona, str(x.zona).startswith("—"))
+        for i, (_, x) in enumerate(t.iterrows())
+    ]
     # resaltar filas TOTAL y la columna Diferencia
     for rr in range(start + 1, r):
         z = ws.cell(row=rr, column=3).value
@@ -1239,6 +1464,9 @@ def build(out_path: Path):
             ini = r
             r = write_df(ws, gdf, r, {"Descuentos": F_MONEY, "Compras": F_MONEY0},
                          total_row=False, start_col=2)
+            # Primera y ultima fila de datos del bloque (la ultima es el TOTAL
+            # del generico, que se resuelve con SUM y no con SUMIFS).
+            layout.setdefault("apertura", {})[gen] = (ini + 1, r - 1)
             for rr in range(ini + 1, r):
                 sv = ws.cell(row=rr, column=2).value
                 if isinstance(sv, str) and sv.startswith("—"):
@@ -1784,19 +2012,39 @@ def build(out_path: Path):
     # ============ 13. DATOS ============
     ws = wb.create_sheet("Datos")
     ws.sheet_view.showGridLines = False
-    widths(ws, {"A": 3, "B": 30, "C": 10, "D": 34, "E": 18, "F": 18, "G": 16, "H": 16})
-    r = title(ws, 2, "Datos base", "Fuente A · FACT_NET completo · listo para tabla dinámica")
+    widths(ws, {"A": 3, "B": 30, "C": 18, "D": 14, "E": 20, "F": 10, "G": 34,
+                "H": 18, "I": 18, "J": 16, "K": 16})
+    r = title(ws, 2, "Datos base",
+              "Fuente A · FACT_NET completo · de acá salen los Descuentos del Modelo Tasa")
     fd = fact.rename(columns={"sucursal": "Sucursal", "codigo": "Código", "articulo": "Artículo",
                               "marca": "Marca", "generico": "Genérico",
                               "facturacion": "Facturación", "descuentos": "Descuentos"})
-    fd["Zona"] = fd.Sucursal.map(inf["zona_map"]).fillna("—")
+    # OJO: `zona_map` sale de sucu!D y NO es la zona — es el alias corto de la
+    # sucursal (ORAN, LEDESMA, MAIMARA...). La zona del modelo de tasa es la de
+    # sucu leida en el bloque superior de 'COMPRAS & DESC' (4 zonas). Se muestran
+    # las dos: la zona para poder agrupar, el alias porque es como la nombra el
+    # informe manual.
+    fd["Zona"] = fd.Sucursal.map(inf["zona_por_sucursal"]).fillna("—")
+    fd["Alias"] = fd.Sucursal.map(inf["zona_map"]).fillna("—")
     fd["Supervisor"] = fd.Sucursal.map(inf["sup_map"]).fillna("—")
-    fd = fd[["Sucursal", "Zona", "Supervisor", "Código", "Artículo", "Marca", "Genérico", "Facturación", "Descuentos"]]
+    fd = fd[["Sucursal", "Zona", "Alias", "Supervisor", "Código", "Artículo", "Marca", "Genérico", "Facturación", "Descuentos"]]
     start = r
     r = write_df(ws, fd, r, {"Facturación": F_MONEY, "Descuentos": F_MONEY, "Código": F_INT},
                  start_col=2, table_name="tblDatos", zebra=False, no_total=("Código",))
     ws.freeze_panes = ws.cell(row=start + 1, column=2)
-    ws.auto_filter.ref = f"B{start}:J{r-2}"
+    ws.auto_filter.ref = f"B{start}:K{r-2}"
+    # B=Sucursal C=Zona D=Alias E=Supervisor F=Codigo G=Articulo H=Marca
+    # I=Generico J=Facturacion K=Descuentos. write_df cierra con fila de total,
+    # asi que los datos van hasta r-2.
+    layout["datos"] = (start + 1, r - 2)
+
+    # ============ 14. INSUMOS CRUDOS ============
+    _hoja_compras_crudo(wb, inf, layout)
+    _hoja_wapi_crudo(wb, wapi_crudo)
+
+    # Con las hojas crudas ya escritas, el cuadro de tasa se reescribe como
+    # formulas: cada numero pasa a mostrar de donde sale.
+    _formulas_modelo_tasa(wb, inf, layout)
 
     # tab colors
     for name, col in [("Portada", INK), ("Resumen", BADIE), ("Modelo Tasa", BADIE),
