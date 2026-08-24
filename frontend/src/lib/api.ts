@@ -143,6 +143,47 @@ export interface ArtifactTree {
   unclassified: ArtifactFileEntry[];
 }
 
+/**
+ * State of the systemd user timer that runs the daily flow.
+ *
+ * Every schedule field is nullable on purpose: when `available` is false the
+ * backend could not read systemd, and reporting a next run it never actually
+ * read would be worse than saying nothing.
+ */
+export interface ScheduleStatus {
+  unit: string;
+  service: string;
+  available: boolean;
+  error: string | null;
+  active_state: string | null;
+  unit_file_state: string | null;
+  persistent: boolean | null;
+  on_calendar: string | null;
+  next_elapse: string | null;
+  last_trigger: string | null;
+  last_result: string | null;
+  last_exit_code: number | null;
+  last_finished_at: string | null;
+  unit_definition: string | null;
+  /** The in-process APScheduler job is inert; systemd is the real trigger. */
+  apscheduler_is_placeholder: boolean;
+}
+
+export interface JournalEntry {
+  timestamp: string | null;
+  /** syslog severity: 0 emerg … 7 debug. 3 and below are errors. */
+  priority: number | null;
+  identifier: string | null;
+  message: string | null;
+}
+
+export interface ScheduleJournal {
+  unit: string;
+  available: boolean;
+  error: string | null;
+  entries: JournalEntry[];
+}
+
 // ─── Config endpoints ────────────────────────────────────────────────────────
 
 export const api = {
@@ -228,5 +269,23 @@ export const api = {
      */
     fileUrl: (path: string) =>
       `/mgmt/artifacts/file?path=${encodeURIComponent(path)}`,
+  },
+
+  schedule: {
+    // No unit parameter by design: the backend decides which unit it reports
+    // on, so nothing the panel sends can point it at another service.
+    get: () => request<ScheduleStatus>("GET", "/mgmt/schedule"),
+
+    journal: (params?: { since?: string; until?: string; limit?: number }) => {
+      const qs = new URLSearchParams();
+      if (params?.since) qs.set("since", params.since);
+      if (params?.until) qs.set("until", params.until);
+      if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+      const query = qs.toString();
+      return request<ScheduleJournal>(
+        "GET",
+        `/mgmt/schedule/journal${query ? `?${query}` : ""}`,
+      );
+    },
   },
 };

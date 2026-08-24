@@ -50,7 +50,7 @@ src/
 │   ├── configs.$filename.tsx  # Config edit form
 │   ├── contactos.tsx     # contactos.json editor
 │   ├── runs.tsx          # Runs list (stub — Phase 3)
-│   ├── schedule.tsx      # Schedule (stub — Phase 4)
+│   ├── schedule.tsx      # Timer de systemd + journal (solo lectura)
 │   └── artifacts.tsx     # Artifacts browser (3-level: service → period → files)
 ├── widgets/              # rjsf custom widgets (DateWidget, FilePathWidget, etc.)
 └── test/setup.ts         # Vitest setup
@@ -83,9 +83,17 @@ The artifacts routes live in `panel:app` (port 8010), not `api:app` — see the
 period: "no files" and "could not read" mean different things to whoever is
 checking whether a report actually ran.
 
+- `GET /mgmt/schedule` → timer state, unit definition, last-run outcome
+- `GET /mgmt/schedule/journal?since=&until=&limit=` → `{unit, available, error, entries: [...]}`
+
+Both schedule endpoints are read-only and take no unit parameter — the backend
+fixes which systemd unit it reports on. `available: false` means systemd could
+not be read; it says nothing about whether the daily is scheduled, so never
+render it as "no timer configured". Journal `priority` is syslog severity:
+3 and below are failures.
+
 ### NOT yet implemented (do NOT consume — coordinate with user before assuming)
 
-- `GET/PUT /mgmt/schedule/*` — Phase 4 backend
 - `GET /mgmt/daily-runs/*` — daily-run instrumentation, not wired yet
 
 ### `x-widget` contract (server emits these in the schema)
@@ -108,7 +116,7 @@ checking whether a report actually ran.
   - Run detail page (full log, status, exit code)
   - Run history list with status filter
   - Error UX (toasts on failure)
-- **Phase 4** — Schedule page (cron editor + daily_overrides table per config). Backend NOT ready.
+- **Phase 4** — Schedule page. **Done** (read-only view; no cron editor — the timer is edited in systemd, not here).
 - **Phase 5** — Artifacts browser. **Done** — `artifacts.tsx` + `GET /mgmt/artifacts/*`.
 
 ## Engram bootstrap

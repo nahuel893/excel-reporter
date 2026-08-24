@@ -111,3 +111,29 @@ export function useArtifactTree(slug?: string, periodo?: string) {
     staleTime: 10_000,
   });
 }
+
+// ─── Schedule queries ─────────────────────────────────────────────────────────
+
+export type { ScheduleStatus, ScheduleJournal, JournalEntry } from "./api";
+
+export function useSchedule() {
+  return useQuery({
+    queryKey: ["schedule"],
+    queryFn: () => api.schedule.get(),
+    // The next-run time moves on its own, so a stale reading is misleading in
+    // a way a stale config list is not.
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useScheduleJournal(limit = 200) {
+  return useQuery({
+    queryKey: ["schedule", "journal", limit],
+    queryFn: () => api.schedule.journal({ limit }),
+    staleTime: 30_000,
+    // Same cadence as useSchedule: a live next-run time beside a frozen log
+    // invites reading the log as current when it is not.
+    refetchInterval: 60_000,
+  });
+}

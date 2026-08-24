@@ -13,17 +13,25 @@ import type { ReactNode } from "react";
 
 // vi.hoisted: vi.mock's factory is lifted above the imports, so a plain const
 // here would not exist yet when the factory runs.
-const { treeMock } = vi.hoisted(() => ({ treeMock: vi.fn() }));
+const { treeMock, scheduleMock, journalMock } = vi.hoisted(() => ({
+  treeMock: vi.fn(),
+  scheduleMock: vi.fn(),
+  journalMock: vi.fn(),
+}));
 
 vi.mock("../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api")>();
   return {
     ...actual,
-    api: { ...actual.api, artifacts: { ...actual.api.artifacts, tree: treeMock } },
+    api: {
+      ...actual.api,
+      artifacts: { ...actual.api.artifacts, tree: treeMock },
+      schedule: { ...actual.api.schedule, get: scheduleMock, journal: journalMock },
+    },
   };
 });
 
-import { useArtifactTree } from "../queries";
+import { useArtifactTree, useSchedule, useScheduleJournal } from "../queries";
 import { ApiError } from "../api";
 import type { ArtifactTree } from "../api";
 
@@ -91,5 +99,71 @@ describe("useArtifactTree", () => {
     rerender({ slug: "ventas" });
     await waitFor(() => expect(treeMock).toHaveBeenCalledTimes(2));
     expect(treeMock).toHaveBeenLastCalledWith("ventas", undefined);
+  });
+});
+
+describe("useSchedule", () => {
+  beforeEach(() => {
+    scheduleMock.mockReset();
+  });
+
+  it("calls the client with no arguments at all", async () => {
+    scheduleMock.mockResolvedValue({ unit: "excel-reporter-daily.timer" });
+
+    const { result } = renderHook(() => useSchedule(), { wrapper: makeWrapper() });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(scheduleMock).toHaveBeenCalledWith();
+  });
+
+  it("surfaces a failure as an error state rather than empty data", async () => {
+    scheduleMock.mockRejectedValue(new ApiError(500, "boom"));
+
+    const { result } = renderHook(() => useSchedule(), { wrapper: makeWrapper() });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.data).toBeUndefined();
+  });
+});
+
+describe("useScheduleJournal", () => {
+  beforeEach(() => {
+    journalMock.mockReset();
+  });
+
+  it("passes its limit through to the client", async () => {
+    journalMock.mockResolvedValue({ entries: [] });
+
+    const { result } = renderHook(() => useScheduleJournal(25), {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(journalMock).toHaveBeenCalledWith({ limit: 25 });
+  });
+
+  it("defaults to 200 lines when no limit is given", async () => {
+    journalMock.mockResolvedValue({ entries: [] });
+
+    const { result } = renderHook(() => useScheduleJournal(), {
+      wrapper: makeWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(journalMock).toHaveBeenCalledWith({ limit: 200 });
+  });
+
+  it("keys the cache by limit so changing it refetches", async () => {
+    journalMock.mockResolvedValue({ entries: [] });
+
+    const { result, rerender } = renderHook(
+      ({ limit }: { limit: number }) => useScheduleJournal(limit),
+      { wrapper: makeWrapper(), initialProps: { limit: 50 } },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    rerender({ limit: 500 });
+    await waitFor(() => expect(journalMock).toHaveBeenCalledTimes(2));
+    expect(journalMock).toHaveBeenLastCalledWith({ limit: 500 });
   });
 });

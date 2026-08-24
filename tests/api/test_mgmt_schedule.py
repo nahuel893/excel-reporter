@@ -280,7 +280,9 @@ def test_never_uses_a_shell(client, run_mock):
 
     assert run_mock.call_count > 0
     for call in run_mock.call_args_list:
-        assert call.kwargs.get("shell") is not True
+        # `is not True` would also pass when the key is absent, which asserts
+        # nothing: it must be passed, and passed as False.
+        assert call.kwargs.get("shell") is False
         # argv form, not a command string.
         assert isinstance(call.args[0], list)
 
