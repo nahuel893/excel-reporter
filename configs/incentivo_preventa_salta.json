@@ -1,0 +1,75 @@
+{
+    "tipo": "comparativo-salta",
+    "filtros": {
+        "fecha_desde": "2026-07-01",
+        "fecha_hasta": "2026-07-29",
+        "enviar_email": false,
+        "enviar_whatsapp": false
+    },
+    "reportes": [
+        {
+            "nombre": "Incentivo Preventa SALTA",
+            "asunto_email": "Incentivo preventa SALTA — cobertura por vendedor",
+            "filtros": {
+                "con_detalle_clientes": false,
+                "id_sucursal_vendedor": 1,
+                "bloques_vendedor": [
+                    {
+                        "grupo": "INCENTIVO AGOSTO",
+                        "sabor": "NEGRA",
+                        "calibre": "1000",
+                        "meses": [
+                            "2025-08",
+                            "2026-07"
+                        ],
+                        "cupo": 2500
+                    },
+                    {
+                        "grupo": "INCENTIVO AGOSTO",
+                        "sabor": "BLANCA (rubia)",
+                        "calibre": "1200",
+                        "meses": [
+                            "2025-08",
+                            "2026-07"
+                        ],
+                        "cupo": 3500
+                    },
+                    {
+                        "grupo": "INCENTIVO SEPTIEMBRE",
+                        "sabor": "NEGRA",
+                        "calibre": "1000",
+                        "meses": [
+                            "2025-09",
+                            "2026-07"
+                        ],
+                        "cupo": 2500
+                    },
+                    {
+                        "grupo": "INCENTIVO SEPTIEMBRE",
+                        "sabor": "BLANCA (rubia)",
+                        "calibre": "1000",
+                        "meses": [
+                            "2025-09",
+                            "2026-07"
+                        ],
+                        "cupo": 2500
+                    }
+                ],
+                "excluir_vendedores": [
+                    "RUIZ MARCELO",
+                    "SUB DISTRIBUIDOR",
+                    "VENDEDOR CHOPERAS",
+                    "DIRECTA",
+                    "(sin asignar)"
+                ]
+            },
+            "enviar_a": {
+                "Nahuel Aguirre": {
+                    "via": [
+                        "email_cc"
+                    ]
+                }
+            }
+        }
+    ]
+}

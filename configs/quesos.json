@@ -1,0 +1,33 @@
+{
+    "tipo": "quesos",
+    "filtros": {
+        "fecha_desde": "2026-08-01",
+        "fecha_hasta": "2026-08-12",
+        "fecha_modo": "mes_a_hoy",
+        "enviar_email": false,
+        "enviar_whatsapp": true,
+        "whatsapp_enviar_como": "ambos",
+        "lista_precios_path": "factor_conversion_quesos.xlsx"
+    },
+    "reportes": [
+        {
+            "nombre": "Quesos - volumen y cobertura por mes",
+            "filtros": {
+                "anios_mensual": [2025, 2026]
+            },
+            "capture_images": [
+                {
+                    "hoja": "Quesos",
+                    "rango": "A1:N14",
+                    "renderer": "libreoffice",
+                    "caption": "Quesos LA HUERTA — volumen y cobertura por mes"
+                }
+            ],
+            "enviar_a": {
+                "Gonzalo Farah": {
+                    "via": ["whatsapp"]
+                }
+            }
+        }
+    ]
+}

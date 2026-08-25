@@ -83,7 +83,18 @@ REPORT_HANDLERS: dict[str, str] = {
     "stock-suria-control": "_run_stock_suria_control_report",
     "ventas-marca": "_run_ventas_marca_report",
     "ventas-cober-preventista-marca": "_run_ventas_cober_preventista_marca_report",
+    "incentivo-salta": "_run_incentivo_salta_report",
     "stock-badie": "_run_stock_badie_report",
+    "stock-valorizado": "_run_stock_valorizado_report",
+    "cupo-desagregado": "_run_cupo_desagregado_report",
+    "comparativo-salta": "_run_comparativo_salta_report",
+    "cobertura": "_run_cobertura_report",
+    "cobertura-cupos": "_run_cobertura_cupos_report",
+    "cobertura-aguas": "_run_cobertura_aguas_report",
+    "cobertura-levite": "_run_cobertura_levite_report",
+    "quesos": "_run_quesos_report",
+    "volumen-cobertura": "_run_volumen_cobertura_report",
+    "acciones-comerciales": "_run_acciones_comerciales_report",
 }
 
 
@@ -103,6 +114,29 @@ def _run_report_config(
     except (FileNotFoundError, ValidationError) as exc:
         print(f"Error: config invalida en {config_path}:\n{exc}")
         return 1
+
+    # Ventana relativa: la resolvemos ANTES de ejecutar, con el mismo codigo que
+    # usa el daily. Sin esto, una corrida manual toma las fechas guardadas en el
+    # JSON, que envejecen y sacan el informe con el mes equivocado.
+    if report_config.filtros.fecha_modo:
+        from datetime import date as _date
+
+        from src.core.periodos import meses_abarcados, resolver_ventana
+
+        # El ancho se mide sobre las fechas ESCRITAS, antes de pisarlas.
+        ancho = meses_abarcados(
+            report_config.filtros.fecha_desde, report_config.filtros.fecha_hasta
+        )
+        try:
+            desde, hasta = resolver_ventana(
+                report_config.filtros.fecha_modo, _date.today(), ancho
+            )
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            return 1
+        report_config.filtros.fecha_desde = desde
+        report_config.filtros.fecha_hasta = hasta
+        print(f"Ventana ({report_config.filtros.fecha_modo}): {desde} a {hasta}")
 
     # Load contacts from same dir or explicit path
     if contactos_path is None:
@@ -204,6 +238,13 @@ def _run_reportes(report_config, contactos, test_mode: bool = False, no_delivery
         # run's period (covers both the daily and manual runs — both dispatch
         # through here). Names without tokens pass through untouched.
         report.nombre = _resolver_nombre_periodo(report.nombre, merged.get("fecha_desde", ""))
+        # Same for the email subject: SendEmailStep uses `config.email.asunto`
+        # verbatim, so an unresolved "{MES} {AÑO}" ships literally in the
+        # subject line (affects avance-guemes, cupo-desagregado, stock-badie).
+        if report.asunto_email:
+            report.asunto_email = _resolver_nombre_periodo(
+                report.asunto_email, merged.get("fecha_desde", "")
+            )
 
         print(f"\nGenerando: {report.nombre}")
 
@@ -399,6 +440,7 @@ def _run_stock_badie_report(report, merged: dict) -> list[tuple[Path, dict]]:
         fecha_hasta=merged["fecha_hasta"],
         dias_stock=merged.get("dias_stock", 15),
         genericos=merged.get("genericos"),
+        genericos_excluidos=merged.get("genericos_excluidos"),
         nombre_archivo=nombre_periodo or None,
     )
 
@@ -414,6 +456,74 @@ def _run_stock_badie_report(report, merged: dict) -> list[tuple[Path, dict]]:
         (
             Path(result.archivo_generado),
             {"nombre": nombre_periodo, "fecha": result.fecha_stock.isoformat()},
+        )
+    ]
+
+
+def _run_stock_valorizado_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate stock-valorizado report. Returns list of (path, metadata) tuples.
+
+    Snapshot date comes from `fecha_stock` when present, otherwise the latest
+    date in gold.fact_stock — deliberately NOT from fecha_desde/fecha_hasta,
+    which the daily patches to the running month and do not describe a snapshot.
+    """
+    from src.services.stock_valorizado import (
+        StockValorizadoConfig,
+        StockValorizadoService,
+    )
+
+    lista_precios_path = merged.get("lista_precios_path")
+    if not lista_precios_path:
+        print(
+            "Error: stock-valorizado requiere 'lista_precios_path' en los filtros "
+            "(xlsx exportado del ERP con las columnas 'Articulo' y 'Precio Base')."
+        )
+        raise ValueError("stock-valorizado: falta lista_precios_path")
+
+    kwargs = {}
+    if merged.get("lista_precios_max_dias") is not None:
+        kwargs["lista_precios_max_dias"] = merged["lista_precios_max_dias"]
+
+    config = StockValorizadoConfig(
+        lista_precios_path=lista_precios_path,
+        fecha_stock=merged.get("fecha_stock"),
+        genericos=merged.get("genericos"),
+        genericos_excluidos=merged.get("genericos_excluidos"),
+        nombre_archivo=report.nombre,
+        **kwargs,
+    )
+
+    result = StockValorizadoService().generar_reporte(config)
+
+    print("Stock Valorizado generado exitosamente:")
+    print(f"  - Archivo: {result.archivo_generado.name}")
+    print(f"  - Fecha stock: {result.fecha_stock.isoformat()}")
+    print(f"  - Articulos: {result.n_articulos} en {result.n_sucursales} sucursales")
+    print(f"  - Total bultos: {result.total_bultos:,.0f}")
+    print(f"  - Total valorizado (base):  $ {result.total_valorizado:,.2f}")
+    print(f"  - Total valorizado (final): $ {result.total_valorizado_final:,.2f}")
+    print(
+        f"  - Lista de precios: {result.lista_precios_path.name} "
+        f"(actualizada {result.lista_precios_mtime.strftime('%d-%m-%Y %H:%M')}, "
+        f"hace {result.lista_precios_dias} dias)"
+    )
+
+    # The price list is maintained by hand; nothing upstream notices when that
+    # stops happening. Make the CLI impossible to skim past when it goes stale.
+    if result.lista_precios_vencida:
+        print("")
+        print("=" * 72)
+        print("  ATENCION: LA LISTA DE PRECIOS ESTA DESACTUALIZADA")
+        print(f"  {result.lista_precios_path} tiene {result.lista_precios_dias} dias.")
+        print("  Los precios se cargan A MANO: exportalos del ERP, reemplaza el")
+        print("  archivo y volve a generar el informe antes de usar estos importes.")
+        print("=" * 72)
+        print("")
+
+    return [
+        (
+            Path(result.archivo_generado),
+            {"nombre": report.nombre, "fecha": result.fecha_stock.isoformat()},
         )
     ]
 
@@ -799,16 +909,181 @@ def _run_ventas_marca_report(report, merged: dict) -> list[tuple[Path, dict]]:
         fecha_hasta=merged.get("fecha_hasta"),
         id_sucursal=merged.get("id_sucursal") or 1,
         nombre_archivo=report.nombre,
+        incluir_mes_anterior=bool(merged.get("incluir_mes_anterior")),
     )
 
     result = VentasMarcaService().generar_reporte(config)
     print(f"Venta por Marca '{report.nombre}' generada exitosamente:")
     print(f"  - Archivo: {result.ruta_archivo}")
-    print(f"  - Marcas: {result.marcas} | Total bultos: {result.total_bultos}")
+    print(
+        f"  - Marcas: {result.marcas} | Total bultos: {result.total_bultos} "
+        f"| Cobertura: {result.cobertura_total}"
+    )
+    if result.total_bultos_prev is not None:
+        print(
+            f"  - {result.etiqueta_prev} (mes anterior): "
+            f"Bultos: {result.total_bultos_prev} | Cobertura: {result.cobertura_prev}"
+        )
     return [
         (
             Path(result.ruta_archivo),
             {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
+def _run_quesos_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate quesos report (volumen y cobertura por mes de LA HUERTA)."""
+    from src.services.quesos import QuesosConfig, QuesosService
+
+    config = QuesosConfig(
+        anios=merged.get("anios_mensual") or [2025, 2026],
+        factores_path=merged.get("lista_precios_path") or "factor_conversion_quesos.xlsx",
+        nombre_archivo=report.nombre,
+    )
+    result = QuesosService().generar_reporte(config)
+    print(f"Quesos '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Anios: {result.anios} | Bultos: {result.bultos:,.0f} | Kg: {result.kg:,.2f}")
+    if result.sin_factor:
+        print(f"  - OJO articulos sin factor (bultos si, kilos no): {result.sin_factor}")
+    return [(Path(result.ruta_archivo),
+             {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")})]
+
+
+def _run_volumen_cobertura_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate volumen-cobertura report (volumen y cobertura de un generico).
+
+    El generico viene en `genericos` y tiene que ser UNO solo: el informe abre
+    por marca y cruza sucursal x marca, y mezclar dos genericos en esa matriz
+    da columnas que no se pueden comparar entre si.
+    """
+    from src.services.volumen_cobertura import (
+        VolumenCoberturaConfig,
+        VolumenCoberturaService,
+    )
+
+    genericos = merged.get("genericos") or []
+    if len(genericos) != 1:
+        print(
+            f"Error: volumen-cobertura necesita exactamente UN generico en "
+            f"'genericos'; llegaron {len(genericos)}: {genericos}"
+        )
+        return []
+
+    config = VolumenCoberturaConfig(
+        fecha_desde=merged["fecha_desde"],
+        fecha_hasta=merged["fecha_hasta"],
+        generico=genericos[0],
+        nombre_archivo=report.nombre,
+        sucursales_excluidas=merged.get("sucursales_excluidas") or [],
+        supervisores_sucursales=merged.get("supervisores_sucursales") or {},
+        incluir_directa=bool(merged.get("incluir_directa")),
+        split_por_sucursal=bool(merged.get("split_por_sucursal")),
+    )
+
+    servicio = VolumenCoberturaService()
+    result = servicio.generar_reporte(config)
+    print(f"Volumen y Cobertura '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Generico: {config.generico} | Meses: {', '.join(result.meses)}")
+    print(f"  - Sucursales con movimiento: {result.sucursales}")
+    print(
+        f"  - Acumulado: {result.bultos:,.2f} bultos | {result.hectolitros:,.2f} HL "
+        f"| {result.cobertura:,} clientes"
+    )
+    if result.articulos_sin_factor:
+        print(
+            f"  - ATENCION: {len(result.articulos_sin_factor)} articulos sin factor "
+            f"de hectolitros; la columna HL sale corta"
+        )
+
+    artefactos = [(result.ruta_archivo, {"_tipo": "volumen-cobertura"})]
+
+    if config.split_por_sucursal:
+        # El split va DESPUES del consolidado y con el mismo servicio: comparte
+        # la conexion y el criterio, y si el consolidado fallo no tiene sentido
+        # generar doce archivos con el mismo problema.
+        partes = servicio.generar_split(config)
+        print(f"  - Split por sucursal: {len(partes)} archivos")
+        for parte in partes:
+            print(
+                f"      {parte.ruta_archivo.name}  "
+                f"({parte.bultos:,.2f} bultos | {parte.cobertura:,} clientes)"
+            )
+            artefactos.append((parte.ruta_archivo, {"_tipo": "volumen-cobertura"}))
+
+    return artefactos
+
+
+def _run_cobertura_aguas_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate cobertura-aguas report (cobertura de aguas por sucursal y marca).
+
+    La cantidad de meses NO es un campo aparte: se DERIVA del rango
+    fecha_desde..fecha_hasta que ya trae el config. Un campo suelto habria que
+    mantenerlo sincronizado con las fechas a mano, y se desincroniza solo.
+    """
+    from src.core.periodos import meses_abarcados
+    from src.services.cobertura_aguas import (
+        CoberturaAguasConfig,
+        CoberturaAguasService,
+    )
+
+    fecha_hasta = merged.get("fecha_hasta") or merged["fecha_desde"]
+    config = CoberturaAguasConfig(
+        fecha=fecha_hasta,
+        meses=meses_abarcados(merged["fecha_desde"], fecha_hasta),
+        nombre_archivo=report.nombre,
+    )
+
+    result = CoberturaAguasService().generar_reporte(config)
+    print(f"Cobertura Aguas '{report.nombre}' generada exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Meses: {', '.join(result.meses)} | Sucursales: {result.sucursales}")
+    print(
+        f"  - Cobertura acumulada: {result.cobertura_acumulada:,} "
+        f"de un padron de {result.padron:,} "
+        f"({result.cobertura_acumulada / result.padron:.1%})"
+    )
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
+def _run_cobertura_levite_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate cobertura-levite report (cobertura de Levite abierta por calibre)."""
+    from src.services.cobertura_levite import (
+        CoberturaLeviteConfig,
+        CoberturaLeviteService,
+    )
+
+    fecha_hasta = merged.get("fecha_hasta") or merged.get("fecha_desde")
+    fecha_desde = merged.get("fecha_desde") or (fecha_hasta[:7] + "-01")
+    
+    config = CoberturaLeviteConfig(
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        umbral=float(merged.get("umbral", 0.0)),
+        nombre_archivo=report.nombre,
+        sucursales=merged.get("sucursales_ids"),
+    )
+
+    result = CoberturaLeviteService().generar_reporte(config)
+    print(f"Cobertura Levite por Calibre '{report.nombre}' generada exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Clientes compradores: {result.clientes_compradores:,} | Volumen total: {result.volumen_total:,.2f} bultos")
+    print(
+        f"  - Cobertura sobre padron: {result.clientes_compradores:,} "
+        f"de {result.padron_total:,} "
+        f"({result.clientes_compradores / result.padron_total:.1%})"
+    )
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": fecha_hasta},
         )
     ]
 
@@ -831,18 +1106,56 @@ def _run_ventas_cober_preventista_marca_report(report, merged: dict) -> list[tup
         fecha_hasta=merged.get("fecha_hasta") or merged["fecha_desde"],
         id_sucursal=merged.get("id_sucursal") or 1,
         nombre_archivo=report.nombre,
+        incluir_mes_anterior=bool(merged.get("incluir_mes_anterior")),
+        objetivo_cobertura=merged.get("objetivo_cobertura"),
+        clausula_gatillo=merged.get("clausula_gatillo"),
     )
 
     result = VentasCoberPreventistaMarcaService().generar_reporte(config)
     print(f"Ventas+Cobertura por Preventista '{report.nombre}' generado exitosamente:")
     print(f"  - Archivo: {result.ruta_archivo}")
     print(f"  - Preventistas: {result.preventistas} | Bultos: {result.total_bultos} | Cobertura: {result.cobertura_total}")
+    if result.total_bultos_prev is not None:
+        print(
+            f"  - {result.etiqueta_prev} (mes anterior): "
+            f"Bultos: {result.total_bultos_prev} | Cobertura: {result.cobertura_prev}"
+        )
     return [
         (
             Path(result.ruta_archivo),
             {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
         )
     ]
+
+
+def _run_incentivo_salta_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate the incentivo preventa SALTA report.
+
+    Los bloques y los cupos salen del xlsx de objetivos, no del config: ahi vive
+    el acuerdo con el negocio y se edita sin tocar codigo.
+    """
+    from src.services.incentivo_salta import IncentivoSaltaConfig, IncentivoSaltaService
+
+    objetivos = merged.get("objetivos_path")
+    if not objetivos:
+        print("Error: incentivo-salta requiere 'objetivos_path' en filtros")
+        return []
+
+    config = IncentivoSaltaConfig(
+        fecha_hasta=merged.get("fecha_hasta") or merged["fecha_desde"],
+        objetivos_path=objetivos,
+        id_sucursal=merged.get("id_sucursal") or 1,
+        excluir_vendedores=merged.get("excluir_vendedores") or [],
+        nombre_archivo=report.nombre,
+    )
+
+    result = IncentivoSaltaService().generar_reporte(config)
+    print(f"Incentivo SALTA '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Bloques: {result.bloques} ({len(result.bloques_activos)} con datos) "
+          f"| Preventistas: {result.preventistas}")
+    return [(Path(result.ruta_archivo), {"nombre": report.nombre,
+                                         "fecha": result.fecha_hasta})]
 
 
 def _run_historico_cliente_report(report, merged: dict) -> list[tuple[Path, dict]]:
@@ -870,6 +1183,7 @@ def _run_historico_cliente_report(report, merged: dict) -> list[tuple[Path, dict
         agrupar_por_generico=merged.get("agrupar_por_generico", False),
         marcas_completas=merged.get("marcas_completas", False),
         genericos_universo=merged.get("genericos_universo"),
+        solo_con_cargo=merged.get("solo_con_cargo", False),
         nombre_archivo=report.nombre,
     )
 
@@ -1018,6 +1332,7 @@ def _run_avances_report(report, merged: dict) -> list[tuple[Path, dict]]:
         id_sucursal=merged.get("id_sucursal") or 1,
         id_fuerza_ventas=merged.get("id_fuerza_ventas") or 1,
         nombre_archivo=report.nombre,
+        skip_cupos=merged.get("skip_cupos", False),
     )
 
     service = AvancesService()
@@ -1192,6 +1507,49 @@ def _run_subdistribuidores_report(report, merged: dict) -> list[tuple[Path, dict
     ]
 
 
+def _run_acciones_comerciales_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate acciones-comerciales BASE control report (Phase 1, RF-22).
+
+    Returns list of (path, metadata) tuples. Phase-2 (informe write,
+    captures, delivery) stays behind merged['escribir_informe'] (default
+    False, RF-13) — S1's skeleton never reads/writes informe_path.
+    """
+    from src.services.acciones_comerciales import AccionesComercialesConfig, AccionesComercialesService
+
+    input_dir = merged.get("input_dir")
+    if not input_dir:
+        print("Error: acciones-comerciales requiere 'input_dir' en filtros")
+        return []
+
+    config = AccionesComercialesConfig(
+        fecha_desde=merged["fecha_desde"],
+        fecha_hasta=merged["fecha_hasta"],
+        input_dir=input_dir,
+        nombre_archivo=report.nombre,
+        backup_dir=merged.get("backup_dir"),
+        aexcel_path=merged.get("aexcel_path"),
+        escribir_informe=merged.get("escribir_informe", False),
+        informe_path=merged.get("informe_path"),
+        esperar_wapi_fresco=merged.get("esperar_wapi_fresco", False),
+        wapi_cobertura_requerida=merged.get("wapi_cobertura_requerida") or "habil_anterior",
+    )
+
+    service = AccionesComercialesService()
+    result = service.generar_reporte(config)
+
+    print(f"Acciones Comerciales '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    if result.diff_report_paths:
+        print(f"  - Diff paralelo (RF-12): {result.diff_report_paths['xlsx']}")
+
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
 def cmd_stock_suria(args, test_mode: bool = False) -> int:
     """Ejecuta el comando de stock SURIA."""
     if not args.config:
@@ -1301,6 +1659,366 @@ def cmd_stock_badie(args, test_mode: bool = False) -> int:
         return _run_report_config(config_path, test_mode=test_mode)
     else:
         print("Error: stock-badie solo soporta el nuevo formato de configuracion JSON.")
+        return 1
+
+
+def cmd_stock_valorizado(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando stock-valorizado."""
+    if not args.config:
+        print("Error: stock-valorizado requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    print("Error: stock-valorizado solo soporta el nuevo formato de configuracion JSON.")
+    return 1
+
+
+def cmd_comparativo_salta(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando comparativo-salta."""
+    if not args.config:
+        print("Error: comparativo-salta requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    print("Error: comparativo-salta solo soporta el nuevo formato de configuracion JSON.")
+    return 1
+
+
+def cmd_cobertura(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando cobertura."""
+    if not args.config:
+        print("Error: cobertura requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    print("Error: cobertura solo soporta el nuevo formato de configuracion JSON.")
+    return 1
+
+
+def _run_cobertura_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate cobertura report (historico de cobertura por periodo)."""
+    from src.services.cobertura import CoberturaService, ReporteCoberturaConfig
+
+    kwargs = {}
+    # Se omiten SOLO cuando vienen en None, para que el default del servicio
+    # gane; pasarlos explicitamente en None romperia la derivacion de periodos.
+    # El chequeo es contra None y no por verdad: un `"meses_atras": []` escrito
+    # en el config tiene que llegar al servicio y explotar ahi, no caer al
+    # default en silencio.
+    if merged.get("apertura_cobertura") is not None:
+        kwargs["tipo"] = merged["apertura_cobertura"]
+    if merged.get("meses_atras") is not None:
+        kwargs["meses_atras"] = merged["meses_atras"]
+
+    try:
+        config = ReporteCoberturaConfig(
+            fecha_desde=merged["fecha_desde"],
+            sucursales=merged.get("sucursales"),
+            nombre_archivo=report.nombre,
+            con_slicers=bool(merged.get("con_slicers")),
+            **kwargs,
+        )
+    except ValueError as exc:
+        print(f"Error: config invalida para cobertura: {exc}")
+        return []
+
+    result = CoberturaService().generar_reporte(config)
+    print(f"Cobertura '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Apertura: {result.tipo} | Periodos: {', '.join(result.periodos)}")
+    print(f"  - Registros: {result.registros_raw} crudos -> {result.registros_procesados} filas")
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": merged.get("fecha_hasta", "")},
+        )
+    ]
+
+
+def cmd_cobertura_cupos(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando cobertura-cupos."""
+    if not args.config:
+        print("Error: cobertura-cupos requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    print("Error: cobertura-cupos solo soporta el nuevo formato de configuracion JSON.")
+    return 1
+
+
+def _run_cobertura_cupos_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate cobertura-cupos report (cobertura por generico y marca por zona)."""
+    from src.services.cobertura_cupos import CoberturaCuposConfig, CoberturaCuposService
+
+    config = CoberturaCuposConfig(
+        fecha_desde=merged["fecha_desde"],
+        # None -> los 5 genericos CCU (default del servicio).
+        genericos=merged.get("genericos"),
+        # None -> las tres zonas por defecto (CASA CENTRAL / VALLE SALTA /
+        # GUEMES). Con nombres, una hoja entera por sucursal.
+        sucursales=merged.get("sucursales"),
+        nombre_archivo=report.nombre,
+    )
+
+    result = CoberturaCuposService().generar_reporte(config)
+    print(f"Cobertura y Cupos '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Periodos: {' vs '.join(result.periodos)}")
+    print(f"  - Zonas: {', '.join(result.zonas)} | Filas de marca: {result.filas_marca}")
+    # La metadata `fecha` alimenta el caption de WhatsApp. Va el periodo del
+    # DATO (el mes anterior cerrado), no el de la corrida: con `fecha_hasta` el
+    # caption diria "Agosto 2026" sobre un informe de julio.
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": result.periodo_principal},
+        )
+    ]
+
+
+def cmd_variable_mensual(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando variable-mensual (INCENTIVO HERNAN).
+
+    Actualiza las hojas base del libro in-place: no pasa por el pipeline de
+    delivery ni genera un archivo nuevo. Las hojas de informe (ramal, qbrd, inte,
+    salta, ORIGINAL, suc) quedan intactas.
+    """
+    from src.services.variable_mensual import (
+        VariableMensualConfig,
+        VariableMensualService,
+    )
+
+    genericos = None
+    if args.genericos:
+        genericos = [g.strip() for g in args.genericos.split(",") if g.strip()]
+
+    kwargs = {
+        "archivo": args.archivo,
+        "fecha_desde": args.desde,
+        "fecha_hasta": args.hasta,
+        "salida": args.salida,
+        "backup": not args.sin_backup,
+    }
+    if genericos:
+        kwargs["genericos"] = genericos
+
+    try:
+        config = VariableMensualConfig(**kwargs)
+    except ValueError as exc:
+        print(f"Error de configuracion: {exc}")
+        return 1
+
+    print(f"Variable mensual — {config.fecha_desde} a {config.fecha_hasta}")
+    print(f"Libro: {config.archivo}")
+
+    resultado = VariableMensualService().generar_reporte(config)
+
+    print(f"  AX .................. {resultado.filas_ax:>7,} filas")
+    print(f"  marcas_x_pdv (pivot)  {resultado.filas_pivot:>7,} filas")
+    print(f"  puntos de venta ..... {resultado.puntos_de_venta:>7,}")
+    print(f"  cober_marca ......... {resultado.filas_cober_marca:>7,} filas")
+    print(f"  cober_gen ........... {resultado.filas_cober_gen:>7,} filas")
+    print(f"  villav y villa sur .. {resultado.filas_villa:>7,} filas")
+    print(f"  referencia ma ....... {resultado.filas_referencia:>7,} filas")
+    print(f"Listo: {resultado.ruta_archivo}")
+    return 0
+
+
+def cmd_inteligencia_comercial(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando inteligencia-comercial.
+
+    No pasa por el pipeline de delivery: es un informe pesado (~6 minutos, 35
+    hojas) que se corre a mano cuando se lo necesita, no todos los dias.
+    """
+    from src.services.inteligencia_comercial import (
+        InteligenciaComercialConfig,
+        InteligenciaComercialService,
+    )
+
+    modulos = None
+    if args.modulos:
+        modulos = [m.strip() for m in args.modulos.split(",") if m.strip()]
+
+    try:
+        config = InteligenciaComercialConfig(
+            fecha_hasta=args.hasta,
+            meses_ventana=args.meses,
+            meses_historia=args.historia,
+            nombre_archivo=args.nombre,
+            modulos=modulos,
+        )
+    except ValueError as exc:
+        print(f"Error de configuracion: {exc}")
+        return 1
+
+    print(f"Inteligencia Comercial — corte {config.fecha_hasta}, "
+          f"ventana {config.meses_ventana}m, historia {config.meses_historia}m")
+    print("Esto tarda varios minutos: son cinco familias de analisis sobre 8M de lineas.")
+
+    try:
+        resultado = InteligenciaComercialService().generar_reporte(config)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error generando el reporte: {exc}")
+        return 1
+
+    print(f"\nArchivo:   {resultado.ruta_archivo}")
+    print(f"Hojas:     {resultado.hojas}")
+    print(f"Alertas:   {resultado.alertas}")
+    print(f"Duracion:  {resultado.duracion_segundos:.0f}s")
+    if resultado.analisis_fallidos:
+        # El archivo se entrega igual, pero el usuario tiene que saber que le falta.
+        print(f"ATENCION — analisis que no corrieron: {', '.join(resultado.analisis_fallidos)}")
+        print("El motivo esta en la hoja Metodologia del libro.")
+    return 0
+
+
+def _run_comparativo_salta_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate comparativo-salta report. Returns list of (path, metadata) tuples."""
+    from src.services.comparativo_salta import (
+        ComparativoSaltaConfig,
+        ComparativoSaltaService,
+    )
+
+    fecha_desde = merged.get("fecha_desde")
+    fecha_hasta = merged.get("fecha_hasta")
+    if not fecha_desde or not fecha_hasta:
+        print("Error: comparativo-salta requiere fecha_desde y fecha_hasta")
+        return []
+
+    config = ComparativoSaltaConfig(
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        con_detalle_clientes=merged.get("con_detalle_clientes", True),
+        anios_mensual=merged.get("anios_mensual"),
+        sucursal_comparativa=merged.get("sucursal_comparativa"),
+        meses_vendedor=merged.get("meses_vendedor"),
+        bloques_vendedor=merged.get("bloques_vendedor"),
+        id_sucursal_vendedor=merged.get("id_sucursal_vendedor"),
+        excluir_vendedores=merged.get("excluir_vendedores"),
+        nombre_archivo=report.nombre,
+    )
+
+    service = ComparativoSaltaService()
+    result = service.generar_reporte(config)
+
+    print(f"Comparativo SALTA '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Periodo: {result.fecha_desde} al {result.fecha_hasta}")
+    print(f"  - Cobertura marca: {result.cobertura_total} clientes")
+    print(f"  - Calibres: {', '.join(result.calibres)}")
+    return [(
+        result.ruta_archivo,
+        {
+            "cobertura_total": result.cobertura_total,
+            "calibres": result.calibres,
+            "fecha_desde": result.fecha_desde,
+            "fecha_hasta": result.fecha_hasta,
+        },
+    )]
+
+
+def cmd_cupo_desagregado(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando cupo-desagregado."""
+    if not args.config:
+        print("Error: cupo-desagregado requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    else:
+        print("Error: cupo-desagregado solo soporta el nuevo formato de configuracion JSON.")
+        return 1
+
+
+def _run_cupo_desagregado_report(report, merged: dict) -> list[tuple[Path, dict]]:
+    """Generate cupo-desagregado report. Returns list of (path, metadata) tuples."""
+    from src.services.cupo_desagregado import (
+        CupoDesagregadoConfig,
+        CupoDesagregadoService,
+    )
+
+    fecha_desde = merged.get("fecha_desde")
+    fecha_hasta = merged.get("fecha_hasta")
+    if not fecha_desde or not fecha_hasta:
+        print("Error: cupo-desagregado requiere fecha_desde y fecha_hasta (mes del cupo)")
+        return []
+    if not merged.get("cupos_source_path"):
+        print("Error: cupo-desagregado requiere cupos_source_path en los filtros")
+        return []
+
+    config = CupoDesagregadoConfig(
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        nombre_archivo=report.nombre,
+        cupos_source_path=merged["cupos_source_path"],
+        cupos_hoja=merged.get("cupos_hoja"),
+        historia_desde=merged.get("historia_desde"),
+        historia_hasta=merged.get("historia_hasta"),
+    )
+
+    try:
+        result = CupoDesagregadoService().generar_reporte(config)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error: {exc}")
+        return []
+
+    print(f"Cupo desagregado '{report.nombre}' generado exitosamente:")
+    print(f"  - Archivo: {result.ruta_archivo}")
+    print(f"  - Preventistas: {result.vendedores}")
+    print(f"  - Filas por ruta: {result.filas_ruta}")
+    if result.sin_ruta:
+        print(f"  - Sin ruta asignada: {', '.join(result.sin_ruta)}")
+    if result.sin_historia:
+        print(f"  - Sin historia (reparto parejo): {', '.join(result.sin_historia)}")
+
+    # El reparto que no cierra contra el cupo es un error de datos: no se
+    # entrega un archivo mal abierto, se corta y se avisa.
+    if result.errores_validacion:
+        print("Error: la suma de las rutas no cierra con el cupo del preventista:")
+        for clave, diferencia in result.errores_validacion.items():
+            print(f"    {clave}: diferencia {diferencia}")
+        return []
+
+    return [
+        (
+            Path(result.ruta_archivo),
+            {"nombre": report.nombre, "fecha": fecha_hasta},
+        )
+    ]
+
+
+def cmd_acciones_comerciales(args, test_mode: bool = False) -> int:
+    """Ejecuta el comando acciones-comerciales."""
+    if not args.config:
+        print("Error: acciones-comerciales requiere un archivo --config")
+        return 1
+
+    config_path = Path(args.config)
+    cfg = _cargar_config_json(args.config)
+
+    if _is_new_format(cfg):
+        return _run_report_config(config_path, test_mode=test_mode)
+    else:
+        print("Error: acciones-comerciales solo soporta el nuevo formato de configuracion JSON.")
         return 1
 
 
@@ -1645,6 +2363,19 @@ Ejemplos:
     )
     reporte_general_badie_parser.set_defaults(func=cmd_reporte_general_badie)
 
+    acciones_comerciales_parser = subparsers.add_parser(
+        "acciones-comerciales",
+        help="BASE control de acciones comerciales (Fase 1: gold + wapi + compras; Fase 2 escritura en INFORME detras de flag)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    acciones_comerciales_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    acciones_comerciales_parser.set_defaults(func=cmd_acciones_comerciales)
+
     subdistribuidores_parser = subparsers.add_parser(
         "subdistribuidores",
         help="Reporte de ventas para subdistribuidores (ruta 93)",
@@ -1684,6 +2415,154 @@ Ejemplos:
         help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
     )
     stock_badie_parser.set_defaults(func=cmd_stock_badie)
+
+    # Subcomando: stock-valorizado (bultos + pesos por articulo y sucursal)
+    stock_valorizado_parser = subparsers.add_parser(
+        "stock-valorizado",
+        help="Stock por articulo y sucursal en bultos y pesos (lista de precios del ERP)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    stock_valorizado_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    stock_valorizado_parser.set_defaults(func=cmd_stock_valorizado)
+
+    # Subcomando: cupo-desagregado (abre el cupo del preventista por ruta)
+    cupo_desagregado_parser = subparsers.add_parser(
+        "cupo-desagregado",
+        help="Abre el cupo mensual de cada preventista entre sus rutas",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    cupo_desagregado_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    cupo_desagregado_parser.set_defaults(func=cmd_cupo_desagregado)
+
+    comparativo_salta_parser = subparsers.add_parser(
+        "comparativo-salta",
+        help="Cobertura de la marca SALTA abierta por calibre (1000, 1200, 473...)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    comparativo_salta_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    comparativo_salta_parser.set_defaults(func=cmd_comparativo_salta)
+
+    # Subcomando: cobertura (historico de cobertura, N periodos lado a lado)
+    cobertura_parser = subparsers.add_parser(
+        "cobertura",
+        help="Cobertura de N periodos lado a lado (mes cerrado vs mismo mes del año anterior)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    cobertura_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    cobertura_parser.set_defaults(func=cmd_cobertura)
+
+    # Subcomando: cobertura-cupos (cobertura por generico y marca, para cupos)
+    cobertura_cupos_parser = subparsers.add_parser(
+        "cobertura-cupos",
+        help="Cobertura por generico y marca de los genericos CCU, por zona, con columna de cupo",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    cobertura_cupos_parser.add_argument(
+        "--config",
+        required=True,
+        metavar="config.json",
+        help="Archivo JSON con configuracion del reporte (formato nuevo requerido).",
+    )
+    cobertura_cupos_parser.set_defaults(func=cmd_cobertura_cupos)
+
+    inteligencia_parser = subparsers.add_parser(
+        "inteligencia-comercial",
+        help="Informe analitico integral: RFM, fuga, portafolio, margen, pronostico y logistica.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Corre cinco familias de analisis sobre el esquema gold y las consolida en\n"
+            "un unico libro Excel con portada, KPIs, alertas, graficos y metodologia.\n\n"
+            "Ejemplos:\n"
+            "  python main.py inteligencia-comercial --hasta 2026-07-30\n"
+            "  python main.py inteligencia-comercial --hasta 2026-07-30 --modulos clientes,demanda\n"
+        ),
+    )
+    inteligencia_parser.add_argument(
+        "--hasta",
+        default=date.today().isoformat(),
+        metavar="YYYY-MM-DD",
+        help="Fecha de corte del analisis (inclusive). Por defecto, hoy.",
+    )
+    inteligencia_parser.add_argument(
+        "--meses", type=int, default=12, metavar="N",
+        help="Largo de la ventana principal en meses (default: 12).",
+    )
+    inteligencia_parser.add_argument(
+        "--historia", type=int, default=24, metavar="N",
+        help="Largo de la ventana de historia para estacionalidad y ritmos (default: 24).",
+    )
+    inteligencia_parser.add_argument(
+        "--modulos", default=None, metavar="a,b",
+        help=("Subconjunto de analisis a correr, separados por coma: "
+              "clientes, portafolio, rentabilidad, demanda, logistica. "
+              "Por defecto corre todos."),
+    )
+    inteligencia_parser.add_argument(
+        "--nombre", default=None, metavar="archivo",
+        help="Nombre del xlsx sin extension. Se deriva de la fecha si se omite.",
+    )
+    inteligencia_parser.set_defaults(func=cmd_inteligencia_comercial)
+
+    # variable-mensual: recarga las hojas base del libro INCENTIVO HERNAN
+    variable_mensual_parser = subparsers.add_parser(
+        "variable-mensual",
+        help="Recarga las hojas base (azules) del libro INCENTIVO HERNAN y recalcula marcas_x_pdv.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Actualiza el libro in-place: reescribe AX, cober_marca, cober_gen y\n"
+            "villav y villa sur desde gold, y pega marcas_x_pdv ya calculado.\n"
+            "Las hojas de informe no se tocan.\n\n"
+            "Ejemplo:\n"
+            "  python main.py variable-mensual \\\n"
+            "    --archivo 'data/output/variable_mensual/INCENTIVO HERNAN 2025.xlsm' \\\n"
+            "    --desde 2026-07-01 --hasta 2026-07-31\n"
+        ),
+    )
+    variable_mensual_parser.add_argument(
+        "--archivo", required=True, metavar="RUTA",
+        help="Libro .xlsm a actualizar.",
+    )
+    variable_mensual_parser.add_argument(
+        "--desde", required=True, metavar="YYYY-MM-DD",
+        help="Inicio de la ventana de ventas (inclusive).",
+    )
+    variable_mensual_parser.add_argument(
+        "--hasta", required=True, metavar="YYYY-MM-DD",
+        help="Fin de la ventana de ventas (inclusive). Define el periodo de cobertura.",
+    )
+    variable_mensual_parser.add_argument(
+        "--salida", default=None, metavar="RUTA",
+        help="Escribir en otro archivo en vez de actualizar el original.",
+    )
+    variable_mensual_parser.add_argument(
+        "--genericos", default=None, metavar="A,B",
+        help="Genericos a cargar en AX, separados por coma. Por defecto los cuatro del incentivo.",
+    )
+    variable_mensual_parser.add_argument(
+        "--sin-backup", action="store_true", dest="sin_backup",
+        help="No dejar copia de la version anterior del libro.",
+    )
+    variable_mensual_parser.set_defaults(func=cmd_variable_mensual)
 
     # check-delivery: mostrar estado de envios del dia
     check_parser = subparsers.add_parser(

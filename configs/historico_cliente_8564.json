@@ -1,0 +1,36 @@
+{
+    "tipo": "historico-cliente",
+    "filtros": {
+        "fecha_desde": "2025-08-01",
+        "fecha_hasta": "2026-07-31",
+        "enviar_email": false,
+        "enviar_whatsapp": false,
+        "whatsapp_enviar_como": "imagen"
+    },
+    "reportes": [
+        {
+            "nombre": "Venta por Marca - Cliente 8564 F5",
+            "filtros": {
+                "clientes": [
+                    {"id_cliente": 8564, "id_sucursal": 1}
+                ],
+                "agrupar_por_generico": true,
+                "marcas_completas": true,
+                "genericos_universo": ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"],
+                "solo_con_cargo": true
+            },
+            "capture_images": [
+                {
+                    "hoja": "F5",
+                    "rango": "A1:O60",
+                    "renderer": "libreoffice"
+                }
+            ],
+            "enviar_a": {
+                "Nahuel Aguirre": {
+                    "via": ["whatsapp"]
+                }
+            }
+        }
+    ]
+}

@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import pandas as pd
 from openpyxl.formatting.rule import ColorScaleRule
+from openpyxl.utils import column_index_from_string
 from openpyxl.styles import Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -47,6 +48,9 @@ _SUBTOTAL_FILLS = {
     _TOTAL_SIN_SMK:   "FF0000",  # red
 }
 _SUBTOTAL_FONT_COLOR = "FFFFFF"  # white text on all 3 fills
+# El semaforo (Tend vs Obj) SIEMPRE en negro: el relleno ya dice si esta bien o
+# mal, y sobre los pasteles del ColorScaleRule cualquier otro color se pierde.
+_SEMAFORO_FONT_COLOR = "000000"
 
 # Header fill + font
 _HEADER_FILL_COLOR = "1F4E78"  # dark blue
@@ -386,6 +390,9 @@ def _post_write_subtotals_and_heatmap(
                 start_color=fill_color, end_color=fill_color, fill_type="solid",
             )
             subtotal_font = Font(name=_FONT_NAME, bold=True, color=_SUBTOTAL_FONT_COLOR)
+            subtotal_font_semaforo = Font(
+                name=_FONT_NAME, bold=True, color=_SEMAFORO_FONT_COLOR
+            )
 
             for col_name in sum_cols:
                 col_letter = col_map.get(col_name)
@@ -413,9 +420,14 @@ def _post_write_subtotals_and_heatmap(
                 )
                 ws[f"{tend_col}{subtotal_sheet_row}"].value = formula_tend
 
+            # La columna del semaforo lleva fuente NEGRA, no la blanca del
+            # subtotal: el ColorScaleRule le repinta el relleno con los pasteles
+            # (rojo FF6366 / amarillo FFEB9C / verde C6EFCE) y la blanca queda
+            # invisible encima. Es la fila que mas se mira del informe.
+            tend_col_idx = column_index_from_string(tend_col) if tend_col else None
             for col_idx in range(1, n_cols + 1):
                 cell = ws.cell(row=subtotal_sheet_row, column=col_idx)
-                cell.font = subtotal_font
+                cell.font = subtotal_font_semaforo if col_idx == tend_col_idx else subtotal_font
                 cell.fill = subtotal_fill
                 cell.border = thin_border
 

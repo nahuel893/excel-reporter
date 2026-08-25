@@ -1,0 +1,25 @@
+{
+    "_note": "Cupo Desagregado Por Ruta — abre el cupo mensual de cada preventista entre sus rutas, proporcional a la historia de ventas. NO es un informe del daily: se corre a mano cuando llega el archivo de objetivos del mes. Receta mensual: (1) apuntar cupos_source_path al nuevo 'Objetivo <MES> Badie', (2) mover fecha_desde/fecha_hasta al mes del cupo — la hoja del archivo y la ventana de historia (mes anterior completo) se derivan solas, (3) revisar NOMBRE_OVERRIDES / RUTAS_OVERRIDE / SUCURSAL_IDS en src/services/cupo_desagregado/constants.py si hubo altas o migraciones de preventistas.",
+    "tipo": "cupo-desagregado",
+    "filtros": {
+        "fecha_desde": "2026-07-01",
+        "fecha_hasta": "2026-07-31",
+        "cupos_source_path": "/home/nahuel/projects/work/informes-valeria/Cupo de Venta/Volumen/Objetivo JULIO 2026 Badie - Nahuel-1.xlsx",
+        "cupos_hoja": null,
+        "historia_desde": null,
+        "historia_hasta": null,
+        "enviar_email": false,
+        "enviar_whatsapp": false,
+        "email_adjuntos": [
+            "excel"
+        ]
+    },
+    "reportes": [
+        {
+            "nombre": "CUPO DESAGREGADO POR RUTA - {MES} {AÑO}",
+            "asunto_email": "Cupo desagregado por ruta - {MES} {AÑO}",
+            "cuerpo_email": "Adjunto el cupo del mes abierto por ruta (hojas: Cupo Ruta, Cupo Preventa, Resumen Sucursal).",
+            "filtros": {}
+        }
+    ]
+}

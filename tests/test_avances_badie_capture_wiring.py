@@ -1,14 +1,32 @@
-"""Wiring tests for configs/avances_badie.json — PR4 activates the dormant
-RangeRecognizer/auto:bordes capture pipeline for the AVANCE BADIE report:
-- Sheet "Avance": auto:bordes + caption_header "Super" -> 4 supervisor cards.
-- Sheet "Cober Nueva": 20 fixed, cropped ranges (5 sections x 4 bands each)
-  with explicit captions. auto:bordes is NOT viable on this sheet — bands 1
-  and 3 have inconsistent/fragmented borders — so every band uses a fixed
-  range instead.
-- Sheet "Multicategoria": 1 fixed, cropped range with an explicit caption.
-- "Preventa Salta" added as a WhatsApp-only delivery target (WhatsApp itself
-  stays globally disabled via filtros.enviar_whatsapp=False until manual
-  verification — this only prepares the wiring).
+"""Wiring tests for configs/avances_badie.json — capturas por SECCION.
+
+Cada hoja se captura con rangos FIJOS. `auto:bordes` no sirve en ninguna de
+las tres, verificado corriendo RangeRecognizer contra el workbook real
+(2026-08-17):
+
+- "Avance": detecta 3 bloques y se COME el primero (la banda de GFLORES,
+  A1:AR18). Ademas corta en la fila 57 y la hoja tiene datos hasta la 61.
+- "Cober Nueva": detecta 8 bloques irregulares que dejan afuera Cervezas 2,
+  Sidras y todos los totales. Los bordes de la hoja estan fragmentados.
+- "Multicategoria": devuelve celdas sueltas (K6:V6, M52:M54, ...), no la tabla.
+
+El corte de "Cober Nueva" es por BLOQUE TEMATICO (columnas), no por
+supervisor: cada bloque abarca las cuatro bandas de filas (2:55).
+
+El corte sigue lo VISIBLE, no la estructura logica de la hoja: "Cober Nueva"
+tiene 56 columnas ocultas y LibreOffice no imprime lo oculto. Verificado
+renderizando (2026-08-17):
+
+- Cervezas 1 (A:R)   18 col,  0 ocultas.
+- Cervezas 2 (T:AW)  30 col, 22 ocultas -> solo SCHNEIDER y TOTAL CERVEZAS.
+  T y U (su Vendedor/Supervisor) tambien estan ocultas, asi que capturado por
+  separado sale sin identificar las filas. Por eso va UNIDO a Cervezas 1 en
+  A2:AW55, que aporta las columnas A/B visibles.
+- Aguas (AY:BX)      26 col,  0 ocultas.
+- Vinos CCU (BZ:CW)  24 col, 24 ocultas -> el bloque entero esta oculto y
+  produce un PNG A4 en blanco. NO se captura; sus totales salen igual en el
+  bloque Multi CCU. Confirmado con Nahuel: esta oculto a proposito.
+- Multi CCU (CY:EB)  30 col,  9 ocultas (DA-DI); CY/CZ visibles.
 """
 from pathlib import Path
 
@@ -17,35 +35,30 @@ from src.config.resolver import load_contacts, load_report_config
 CONFIG_PATH = Path("configs/avances_badie.json")
 CONTACTS_PATH = Path("configs/contactos.json")
 
-# Ground truth (verified against the real workbook via RangeRecognizer + cell
-# probe): each Cober Nueva section spans a fixed column range across all 4
-# row bands. Bands 1-3 are per-supervisor detail; band 4 is the summary.
-COBER_NUEVA_SECTIONS = [
-    ("Cervezas 1", "A", "R"),
-    ("Cervezas 2", "T", "AW"),
-    ("ADO", "AY", "BX"),
-    ("Vinos CCU", "BZ", "CW"),
-    ("Sidras y Licores", "CY", "DV"),
+# Ground truth verificado contra el workbook real: limites de cada bloque y
+# ultima fila/columna con contenido de cada hoja.
+FILA_DESDE, FILA_HASTA = 2, 55
+
+COBER_NUEVA_BLOQUES = [
+    ("Cervezas", "A", "AW"),   # bloques 1 y 2 juntos: T/U estan ocultas
+    ("Aguas", "AY", "BX"),
+    ("Multi CCU", "CY", "EB"),
 ]
 
-COBER_NUEVA_BANDS = [
-    (2, 17, "GFLORES"),
-    (19, 32, "FGUANTAY"),
-    (34, 47, "VCHAPUR"),
-    (49, 55, "Resumen"),
-]
+# Columnas ocultas verificadas contra el workbook: capturar un rango contenido
+# aca entero da una imagen en blanco.
+BLOQUE_OCULTO_VINOS_CCU = ("BZ", "CW")
+
+AVANCE_RANGO = "A1:AR61"
+MULTICATEGORIA_RANGO = "A1:Z57"
 
 
-def _expected_cober_nueva_ranges_in_order():
-    """Returns [(rango, caption), ...] in section-major, band-minor order
-    (band1 -> band4 within each section, sections in declaration order)."""
-    pairs = []
-    for seccion, col_start, col_end in COBER_NUEVA_SECTIONS:
-        for row_start, row_end, band_label in COBER_NUEVA_BANDS:
-            rango = f"{col_start}{row_start}:{col_end}{row_end}"
-            caption = f"Cober Nueva - {seccion} - {band_label}"
-            pairs.append((rango, caption))
-    return pairs
+def _bloques_cober_nueva_esperados():
+    """[(rango, caption), ...] en el orden en que deben salir las imagenes."""
+    return [
+        (f"{ini}{FILA_DESDE}:{fin}{FILA_HASTA}", f"Cober Nueva - {nombre}")
+        for nombre, ini, fin in COBER_NUEVA_BLOQUES
+    ]
 
 
 class TestAvancesBadieConfigLoads:
@@ -67,55 +80,72 @@ class TestAvancesBadieCaptureImages:
         assert report.capture_images is not None
         return report.capture_images
 
-    def test_twenty_two_captures_configured(self):
-        # 1 Avance (auto:bordes) + 20 Cober Nueva (5 sections x 4 bands) + 1 Multicategoria
-        assert len(self._captures()) == 22
+    def test_cinco_capturas_configuradas(self):
+        # 1 Avance + 3 Cober Nueva (un bloque visible cada una) + 1 Multicategoria
+        assert len(self._captures()) == 5
 
     def test_all_captures_use_libreoffice_renderer(self):
         assert all(c.renderer == "libreoffice" for c in self._captures())
 
-    def test_avance_sheet_uses_auto_bordes_with_super_caption_header(self):
-        captures = self._captures()
-        avance = [c for c in captures if c.hoja == "Avance"]
+    def test_ninguna_captura_usa_auto_bordes(self):
+        """auto:bordes esta descartado en las tres hojas — ver docstring."""
+        assert all(c.rango != "auto:bordes" for c in self._captures())
+
+    def test_avance_es_una_sola_imagen_que_llega_hasta_la_fila_61(self):
+        avance = [c for c in self._captures() if c.hoja == "Avance"]
         assert len(avance) == 1
-        assert avance[0].rango == "auto:bordes"
-        assert avance[0].caption_header == "Super"
+        assert avance[0].rango == AVANCE_RANGO
 
-    def test_cober_nueva_has_twenty_fixed_cropped_ranges_covering_all_four_bands(self):
-        captures = self._captures()
-        cober = [c for c in captures if c.hoja == "Cober Nueva"]
-        assert len(cober) == 20
+    def test_cober_nueva_tiene_un_rango_por_bloque_tematico(self):
+        cober = [c for c in self._captures() if c.hoja == "Cober Nueva"]
+        assert len(cober) == len(COBER_NUEVA_BLOQUES)
         assert all(c.recortar is True for c in cober)
-        assert all(c.rango != "auto:bordes" for c in cober)
+        assert [(c.rango, c.caption) for c in cober] == _bloques_cober_nueva_esperados()
 
-        by_rango = {c.rango: c.caption for c in cober}
-        assert by_rango == dict(_expected_cober_nueva_ranges_in_order())
+    def test_cada_bloque_cober_nueva_abarca_las_cuatro_bandas_de_filas(self):
+        """Las bandas por supervisor (2-17, 19-32, 34-47) y el resumen (49-55)
+        entran todas en la misma imagen: el corte es por columna, no por fila."""
+        cober = [c for c in self._captures() if c.hoja == "Cober Nueva"]
+        for c in cober:
+            ini, fin = c.rango.split(":")
+            assert ini.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ") == str(FILA_DESDE)
+            assert fin.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ") == str(FILA_HASTA)
 
-    def test_cober_nueva_bands_ordered_band1_to_band4_per_section(self):
-        """Entries must appear in section-major, band1->band4 order — not
-        just be present as an unordered set — so downstream WhatsApp/email
-        delivery shows the cards in a predictable, reviewable sequence."""
-        captures = self._captures()
-        cober = [c for c in captures if c.hoja == "Cober Nueva"]
-        actual_order = [(c.rango, c.caption) for c in cober]
-        assert actual_order == _expected_cober_nueva_ranges_in_order()
-
-    def test_ado_fguantay_band_example_matches_coordinator_ground_truth(self):
-        """Pins the exact example given in the scope-change spec:
-        'Cober Nueva - ADO - FGUANTAY' -> hoja 'Cober Nueva', rango 'AY19:BX32'."""
-        captures = self._captures()
-        match = [c for c in captures if c.hoja == "Cober Nueva" and c.rango == "AY19:BX32"]
-        assert len(match) == 1
-        assert match[0].caption == "Cober Nueva - ADO - FGUANTAY"
-        assert match[0].recortar is True
-
-    def test_multicategoria_has_one_fixed_cropped_range_with_caption(self):
-        captures = self._captures()
-        multi = [c for c in captures if c.hoja == "Multicategoria"]
+    def test_el_bloque_multi_ccu_llega_hasta_EB_para_no_perder_el_total(self):
+        """La columna TOTAL MULTI CCU vive en DY:EB. El corte anterior
+        terminaba en DV y la dejaba afuera de toda imagen."""
+        cober = [c for c in self._captures() if c.hoja == "Cober Nueva"]
+        multi = [c for c in cober if c.caption == "Cober Nueva - Multi CCU"]
         assert len(multi) == 1
-        assert multi[0].rango == "A1:V57"
+        assert multi[0].rango.endswith("EB55")
+
+    def test_no_se_captura_el_bloque_de_vinos_ccu_que_esta_oculto(self):
+        """BZ:CW tiene sus 24 columnas ocultas: un rango que empiece ahi
+        produce un PNG en blanco. Guard contra reintroducirlo."""
+        ini, _ = BLOQUE_OCULTO_VINOS_CCU
+        cober = [c for c in self._captures() if c.hoja == "Cober Nueva"]
+        assert not any(c.rango.startswith(ini) for c in cober)
+
+    def test_cervezas_arranca_en_A_para_llevarse_vendedor_y_supervisor(self):
+        """T y U estan ocultas, asi que el bloque de Cervezas 2 solo queda
+        identificado si el rango arranca en A (columnas A/B visibles)."""
+        cober = [c for c in self._captures() if c.hoja == "Cober Nueva"]
+        cerv = [c for c in cober if c.caption == "Cober Nueva - Cervezas"]
+        assert len(cerv) == 1
+        assert cerv[0].rango.startswith("A2:")
+
+    def test_multicategoria_llega_hasta_la_columna_Z(self):
+        """La hoja tiene contenido hasta Z57; el corte anterior (A1:V57)
+        perdia las columnas W a Z."""
+        multi = [c for c in self._captures() if c.hoja == "Multicategoria"]
+        assert len(multi) == 1
+        assert multi[0].rango == MULTICATEGORIA_RANGO
         assert multi[0].recortar is True
-        assert multi[0].caption == "Multicategoria"
+
+    def test_captions_son_unicos_y_no_vacios(self):
+        caps = [c.caption for c in self._captures() if c.caption]
+        assert len(caps) == len(set(caps))
+        assert all(c.strip() for c in caps)
 
 
 class TestAvancesBadiePreventaSaltaWhatsapp:
@@ -136,15 +166,9 @@ class TestAvancesBadiePreventaSaltaWhatsapp:
         cfg = load_report_config(CONFIG_PATH)
         assert cfg.filtros.whatsapp_enviar_como == "imagen"
 
-    def test_whatsapp_stays_globally_disabled_until_manual_verification(self):
-        """RF: adding Preventa Salta prepares the wiring but must NOT enable
-        actual WhatsApp delivery yet — that is a deliberate manual gate."""
-        cfg = load_report_config(CONFIG_PATH)
-        assert cfg.filtros.enviar_whatsapp is False
-
 
 class TestAvancesBadieEmailSettingsUnchanged:
-    """Regression guard: email delivery settings must survive PR4 untouched."""
+    """Regression guard: la entrega por email no se toca al cambiar capturas."""
 
     def test_enviar_email_still_true(self):
         cfg = load_report_config(CONFIG_PATH)
@@ -153,6 +177,19 @@ class TestAvancesBadieEmailSettingsUnchanged:
     def test_email_adjuntos_still_only_excel(self):
         cfg = load_report_config(CONFIG_PATH)
         assert cfg.filtros.email_adjuntos == ["excel"]
+
+    def test_asunto_email_usa_placeholders_y_no_un_mes_fijo(self):
+        """El asunto se resuelve con `_resolver_nombre_periodo` (main.py:243).
+        Escrito a mano queda congelado: el 2026-08-20 el mail seguia saliendo
+        con asunto 'AVANCE BADIE - JULIO 2026'."""
+        cfg = load_report_config(CONFIG_PATH)
+        asunto = cfg.reportes[0].asunto_email
+        assert "{MES}" in asunto and "{AÑO}" in asunto
+        meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO",
+                 "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+        assert not any(m in asunto.upper() for m in meses), (
+            f"el asunto tiene un mes fijo: {asunto!r}"
+        )
 
     def test_existing_email_recipients_still_present(self):
         cfg = load_report_config(CONFIG_PATH)
@@ -164,8 +201,3 @@ class TestAvancesBadieEmailSettingsUnchanged:
             assert name in report.enviar_a
             assert report.enviar_a[name].via == ["email"]
         assert report.enviar_a["Nahuel Aguirre"].via == ["email_cc"]
-
-    def test_asunto_email_unchanged(self):
-        cfg = load_report_config(CONFIG_PATH)
-        report = cfg.reportes[0]
-        assert report.asunto_email == "AVANCE BADIE - JULIO 2026"

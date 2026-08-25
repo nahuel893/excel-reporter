@@ -65,6 +65,7 @@ Generador automatizado de reportes Excel desde Data Warehouse PostgreSQL (arquit
     ├── ventas-articulo/{YYYY-MM}/
     ├── stock-diario/{YYYY-MM-DD}/  # StockDiarioService (diario)
     ├── graficos-cobertura/{YYYY-MM}/  # sin timestamp (reemplaza ejecucion anterior)
+    ├── cobertura-aguas/{YYYY-MM}/     # CoberturaAguasService (mensual)
     └── avances/              # AvancesService no escribe aqui (actualiza in-place)
 ```
 
@@ -364,6 +365,138 @@ distintos que coexisten.
 Tabla opcional: `gold.cob_sucursal_aguas` — si no existe en el ambiente se
 loguea WARN y las subdivisiones de AGUAS (SABORIZADAS/MINERAL) se omiten.
 Controlable tambien via `con_aguas: false` en el config.
+
+## Avance BADIE
+
+Reporte diario de CASA CENTRAL contra los cupos del mes. Es el mas delicado del
+sistema: **no se genera de cero, se actualiza in-place** sobre un Excel que
+Nahuel mantiene a mano, y los cupos NO salen de la base.
+
+**Documentacion completa: `docs/avance-badie.md`.** Leerlo ANTES de tocar el
+config, las capturas o el flujo diario. Lo minimo que hay que saber:
+
+- `skip_cupos: true` — las hojas `Cupos*` no se reescriben: Nahuel tipea los
+  cupos antes de que entren a `gold.fact_cupos`. Recargar sin ese flag se los
+  pisa. Backup + verificacion cell-by-cell obligatorios al recargar.
+- **5 capturas de rango fijo**, no 25. `auto:bordes` esta descartado en las tres
+  hojas. `Cober Nueva` tiene 56 columnas ocultas y LibreOffice no imprime lo
+  oculto: el corte sigue lo VISIBLE, no la estructura logica de la hoja.
+- El daily lo corre `mes_a_hoy` con dos compuertas: `desde_dia_del_mes` (no
+  entrega los primeros dias del mes, mientras se cargan los objetivos) y el
+  guard de RAM (si falta memoria omite las imagenes pero manda el xlsx igual).
+- Un rango correcto en el config NO garantiza una imagen correcta: renderizar y
+  verificar el PNG antes de dar por buena una captura nueva.
+
+## Cobertura por Calibre y Marca (`cobertura-levite`)
+
+`python main.py --config configs/cobertura_levite.json`
+
+Sale solo todos los dias por mail (Sebastian, Antonio, Gonzalo; Nahuel en copia)
+y por WhatsApp como imagen. Solo CASA CENTRAL.
+
+**El slug sigue siendo `cobertura-levite` pero el informe ya no es de Levite**:
+son dos hojas, una por generico — `Aguas` y `Cervezas` — y cada una lleva el
+MISMO cuadro repetido para tres periodos, de arriba hacia abajo: la ventana del
+config (mes en curso, parcial), el mes anterior completo y el mismo mes del anio
+anterior completo. Los dos historicos se DERIVAN de `fecha_hasta`
+(`rango_mes` + `periodo_meses_atras`), nunca se escriben en el config.
+
+- **Van como meses calendario ENTEROS** contra un mes en curso parcial. Es una
+  decision de Nahuel (2026-08-21): los historicos quedan estables toda la
+  corrida del mes. El encabezado de cada cuadro dice hasta que dia llega
+  (`AGOSTO 2026 (01 al 21)` vs `JULIO 2026 (mes completo)`) para que la
+  diferencia no se lea como una caida del negocio.
+- **CERVEZAS muestra solo las cuatro principales** — SALTA, HEINEKEN, IMPERIAL,
+  MILLER — sin banda de categoria ni subtotal. `SALTA CAUTIVA1` es otra marca y
+  NO entra en la columna SALTA. **`TOTAL CERVEZAS` toma el generico completo**,
+  incluidas las marcas sin columna.
+- **AGUAS mantiene sus tres categorias** (MINERAL, SABORIZADA, ISOTONICA) y su
+  total se queda en las 5 marcas comerciales: `SER` esta en el generico pero
+  fuera del universo del informe.
+- **Las filas siguen a las columnas**: un calibre que solo vendio una marca sin
+  columna (470cc de KUNSTMAN) no genera fila, pero sus clientes cuentan igual en
+  el total del generico.
+- **El calibre sale de `des_articulo`, no de `dim_articulo.calibre`.** El
+  multiplicador va indistinto con `*` o con `X`. El barril (`* 30 LITROS`) queda
+  en `OTRO`: no tiene fila, pero suma al total.
+- **La captura usa `auto:hoja`, no un rango fijo.** El alto de la hoja depende de
+  los calibres que se vendieron en las tres ventanas; un rango escrito a mano
+  recorta filas unos meses y deja franjas vacias otros.
+- Los ejes (columnas y filas) se calculan sobre la UNION de los tres periodos y
+  se fuerzan en los tres cuadros. Sin eso se desalinean y no se pueden comparar.
+
+## Cobertura Aguas
+
+`python main.py --config configs/cobertura_aguas.json`
+
+Cobertura de AGUAS DANONE de los ultimos 2 meses, abierta por **sucursal y
+marca**. Tres hojas: `Resumen` (una fila por sucursal + consolidado por marca —
+es la que se captura como imagen), `Detalle` (sucursal x concepto) y `Criterio`
+(como se conto, para poder auditarlo sin preguntar).
+
+**Las 5 marcas del generico**: VILLA DEL SUR, VILLAVICENCIO, LEVITE, BRIO,
+FULL SPORT. Los grupos son `AGUA MINERAL` (VDS + VV) y `AGUA SABORIZADA`
+(LEVITE + BRIO). **FULL SPORT entra en TOTAL AGUAS pero en ningun grupo**: es
+isotonica, no agua saborizada.
+
+**El acumulado NO se lee de `gold.cob_*`.** Esas tablas son mensuales y la
+cobertura no es aditiva entre periodos, asi que el acumulado de dos meses no
+existe en ninguna y hay que calcularlo desde `fact_ventas`. Para que el calculo
+no invente un criterio propio, `get_ventas_cliente_marca_mes` joinea
+`dim_vendedor` por la clave compuesta y filtra `id_fuerza_ventas = 1`: con ese
+filtro reproduce `cob_sucursal_marca` EXACTO (julio-2026, aguas: 23.748 contra
+23.748, 0 filas de 65 con diferencia). Sin el se cuelan movimientos con
+`id_vendedor = 0`, un vendedor placeholder sin ficha en `dim_vendedor`.
+
+El acumulado **totaliza el neto sobre la ventana completa y recien ahi filtra**;
+no es la union de los conjuntos mensuales. Quien compra 5 en julio y devuelve 5
+en agosto queda cubierto en julio y fuera del acumulado. El corte manda.
+
+**Padron** = `gold.dim_cliente` con `anulado = false`. Es SCD tipo 1: foto de
+HOY, no del mes medido.
+
+Los meses se DERIVAN de `fecha_hasta` (ver `src/core/periodos.py`), nunca se
+escriben en el config.
+
+## Variable Mensual (INCENTIVO HERNAN)
+
+```bash
+python main.py variable-mensual \
+  --archivo 'data/output/variable_mensual/INCENTIVO HERNAN 2025.xlsm' \
+  --desde 2026-07-01 --hasta 2026-07-31
+```
+
+Recarga las hojas base del libro del 4% mensual. **No genera el libro**: las
+hojas de informe (`ramal`, `qbrd`, `inte`, `salta`, `ORIGINAL`, `suc`) son de
+Nahuel y no se tocan. Solo se reescribe lo que esta debajo.
+
+**Documentacion completa: `docs/variable-mensual.md`.** Lo minimo:
+
+- **El color de pestana es el contrato**: las hojas AZULES son datos base y las
+  carga Python (`AX`, `cober_marca`, `cober_gen`, `villav y villa sur`). Las
+  rojas/amarillas son informe y no se tocan.
+- **AX usa 11 columnas de 31.** Las otras 20 se escriben vacias: se conservan los
+  encabezados y la tabla `aexcel` para que ninguna formula se rompa. El `ref` de
+  la tabla se estira a la ultima fila en cada corrida — eso es lo que hace que
+  las formulas AD (zona) y AE (COLON DULCE) lleguen hasta el pie.
+- **`marcas_x_pdv` ya no es tabla dinamica.** A:F, J:L y N:P los calcula Python
+  y se pegan como valores; el bloque R:V (promedios por zona y sucursal) sigue
+  siendo formulas porque es lo que leen ramal/qbrd/inte. `pivotTable1` se elimina
+  del paquete: un pivot y valores pegados no pueden compartir el mismo rango.
+- **El nombre de la lista de precios esta fijado en `constants.py`**:
+  `gold.dim_lista_precio` esta vacia y `dim_cliente.des_lista_precio` esta en
+  blanco para los 28.392 clientes. Si aparece una lista nueva, agregarla ahi.
+- Las zonas son las de `suc!Q:R` (4 zonas), **no** las de `ZONAS_VIRTUALES`: este
+  libro deja la ruta 93 dentro de CASA CENTRAL.
+- **`referencia ma` tambien la carga Python** (5 bloques: cobertura, volumen,
+  cobertura por marca, COLON DULCE y mayorista). Son 13 sucursales fijas SIN
+  casa central ni valle salta: la hoja solo alimenta ramal/qbrd/inte. El volumen
+  va en BULTOS, no en htls. `SUB DISTRIBUIDORES` no cuenta como mayorista.
+  Estaba congelada desde MAYO 2026 y sus bloques venian de momentos distintos.
+- **El servicio repara las formulas `#REF!` que el libro ya traia** (156 de 162):
+  eran SUMIFS a los que un cambio viejo les borro los rangos, y tenian todos los
+  cuadros de mix mayorista de `suc` en blanco. La reparacion es idempotente.
+  Quedan 6 en `inte` que apuntan a una tabla que ya no existe.
 
 ## Zonas Virtuales (CASA CENTRAL / VALLE SALTA)
 

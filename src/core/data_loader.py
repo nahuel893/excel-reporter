@@ -889,6 +889,10 @@ class DataLoader:
 
         Returns:
             DataFrame con columnas [marca, bultos], ordenado por bultos desc.
+
+        Solo volumen. La cobertura NO se calcula desde este fact: sale de
+        `gold.cob_*`, que es la definicion oficial del negocio (ver
+        `get_cobertura_marca_de_generico`).
         """
         query = """
         SELECT
@@ -909,6 +913,546 @@ class DataLoader:
             "id_sucursal": id_sucursal,
         }
         return self.execute_query(query, params)
+
+    def get_cobertura_marca_de_generico(
+        self,
+        generico: str,
+        periodo: str,
+        id_sucursal: int = 1,
+    ) -> pd.DataFrame:
+        """Cobertura oficial por marca, desde `gold.cob_sucursal_marca`.
+
+        La cobertura NO se recalcula desde `fact_ventas`: la definicion del
+        negocio vive en las tablas `cob_*` del ETL y esa es la unica fuente.
+        Recontar clientes a mano da otro numero y ademas empieza a discutir
+        reglas (bonificados, anulados) que el ETL ya resolvio.
+
+        Args:
+            generico: Nombre exacto del generico (ej. 'PERNOD RICARD').
+            periodo: Primer dia del mes 'YYYY-MM-01'. La tabla es MENSUAL: para
+                un mes en curso trae el acumulado hasta la ultima corrida del
+                ETL, no el recorte exacto de un rango de dias.
+            id_sucursal: Sucursal a filtrar (default 1 = CASA CENTRAL).
+
+        Returns:
+            DataFrame con columnas [marca, cobertura].
+        """
+        query = """
+        SELECT
+            csm.marca                  AS marca,
+            csm.clientes_compradores   AS cobertura
+        FROM gold.cob_sucursal_marca csm
+        WHERE csm.periodo = :periodo
+          AND csm.id_sucursal = :id_sucursal
+          AND csm.marca IN (
+              SELECT DISTINCT da.marca
+              FROM gold.dim_articulo da
+              WHERE da.generico = :generico
+          )
+        ORDER BY csm.clientes_compradores DESC, csm.marca
+        """
+        return self.execute_query(
+            query,
+            {"generico": generico, "periodo": periodo, "id_sucursal": id_sucursal},
+        )
+
+    def get_cobertura_generico(
+        self,
+        generico: str,
+        periodo: str,
+        id_sucursal: int = 1,
+    ) -> int:
+        """Cobertura total del generico, desde `gold.cob_sucursal_generico`.
+
+        Se lee la tabla ya agregada en vez de sumar las marcas: la cobertura SI
+        es aditiva entre rutas y preventistas (cada cliente pertenece a una sola
+        ruta), pero NO entre marcas — el mismo cliente compra varias. Sumar las
+        marcas de PERNOD en julio-2026 da 1083 contra los 721 reales.
+
+        Returns:
+            Cantidad de clientes compradores, o 0 si no hay fila para el periodo.
+        """
+        query = """
+        SELECT csg.clientes_compradores AS cobertura
+        FROM gold.cob_sucursal_generico csg
+        WHERE csg.periodo = :periodo
+          AND csg.id_sucursal = :id_sucursal
+          AND csg.generico = :generico
+        """
+        df = self.execute_query(
+            query,
+            {"generico": generico, "periodo": periodo, "id_sucursal": id_sucursal},
+        )
+        if df is None or df.empty:
+            import logging  # local, como el resto de este modulo
+
+            logging.warning(
+                "Sin cobertura en cob_sucursal_generico para %s periodo=%s suc=%s",
+                generico, periodo, id_sucursal,
+            )
+            return 0
+        return int(df["cobertura"].iloc[0])
+
+    @staticmethod
+    def _excluir_rutas_sql(
+        rutas_excluidas: list[tuple[int | None, int]] | None,
+        alias_fv: str = "fv",
+        alias_dc: str = "dc",
+    ) -> tuple[str, dict]:
+        """Fragmento WHERE que saca rutas, con la clave COMPUESTA.
+
+        Cada par es ``(id_sucursal, id_ruta)``; ``id_sucursal = None`` significa
+        "esa ruta en todas las sucursales". El id de ruta se reusa entre
+        sucursales, asi que excluir por el id solo se llevaria puestas rutas
+        homonimas de otras sucursales.
+
+        Las rutas sin ficha (``id_ruta_fv1 IS NULL``) NO se excluyen: no se sabe
+        que son, y descartarlas en silencio achicaria el universo sin aviso.
+        """
+        if not rutas_excluidas:
+            return "", {}
+        condiciones, params = [], {}
+        for i, (id_sucursal, id_ruta) in enumerate(rutas_excluidas):
+            params[f"exr_ruta_{i}"] = id_ruta
+            if id_sucursal is None:
+                condiciones.append(
+                    f"COALESCE({alias_dc}.id_ruta_fv1, -1) = :exr_ruta_{i}"
+                )
+            else:
+                params[f"exr_suc_{i}"] = id_sucursal
+                condiciones.append(
+                    f"({alias_fv}.id_sucursal = :exr_suc_{i}"
+                    f" AND COALESCE({alias_dc}.id_ruta_fv1, -1) = :exr_ruta_{i})"
+                )
+        return "AND NOT (" + " OR ".join(condiciones) + ")", params
+
+    def get_ventas_cliente_marca_mes(
+        self,
+        marcas: list[str],
+        fecha_desde: str,
+        fecha_hasta: str,
+        id_fuerza_ventas: int = 1,
+        rutas_excluidas: list[tuple[int | None, int]] | None = None,
+    ) -> pd.DataFrame:
+        """Neto vendido por (sucursal, marca, cliente, mes) — grano de cliente.
+
+        Este es uno de los casos en que la cobertura SI se calcula desde
+        `fact_ventas` en vez de leerse de `gold.cob_*`: las tablas del ETL son
+        MENSUALES y la cobertura no es aditiva entre periodos, asi que el
+        acumulado de dos meses no existe en ninguna de ellas y hay que contarlo.
+
+        Para que el calculo no invente un criterio propio se filtra por fuerza de
+        ventas: con ese filtro el conteo reproduce `cob_sucursal_marca` EXACTO
+        (julio-2026, aguas: 23.748 contra 23.748, 0 filas de 65 con diferencia).
+        Sin el entran movimientos con `id_vendedor = 0`, un vendedor placeholder
+        sin ficha en `dim_vendedor`.
+
+        Se devuelve el neto SIN filtrar por umbral a proposito: el umbral se
+        aplica despues de totalizar por cliente dentro del corte que se quiera
+        medir, y cada corte (mes, acumulado) totaliza el suyo.
+
+        Se usa `cantidades_total`, que incluye lo bonificado al 100 %: si el
+        producto llego al punto de venta, ese pdv esta cubierto.
+
+        Args:
+            marcas: marcas a traer (exactas, como en `dim_articulo.marca`).
+            fecha_desde: primer dia del rango (inclusive).
+            fecha_hasta: ultimo dia del rango (inclusive).
+            id_fuerza_ventas: fuerza de ventas a considerar (1 = preventa).
+            rutas_excluidas: pares ``(id_sucursal, id_ruta)`` a sacar del
+                universo; ``id_sucursal = None`` aplica a todas. Tiene que ser
+                EL MISMO conjunto que se le pasa a `get_padron_activo`, o el
+                peso sobre padron compara universos distintos.
+
+        Returns:
+            DataFrame [id_sucursal, des_sucursal, marca, id_cliente, mes, cantidad]
+            con `mes` como 'YYYY-MM'.
+        """
+        filtro_rutas, params_rutas = self._excluir_rutas_sql(rutas_excluidas)
+        # LEFT JOIN a dim_cliente: solo aporta la ruta. Con INNER, un cliente sin
+        # ficha desapareceria de la cobertura sin dejar rastro.
+        query = f"""
+        SELECT
+            fv.id_sucursal                                       AS id_sucursal,
+            dv.des_sucursal                                      AS des_sucursal,
+            da.marca                                             AS marca,
+            fv.id_cliente                                        AS id_cliente,
+            to_char(fv.fecha_comprobante, 'YYYY-MM')             AS mes,
+            SUM(fv.cantidades_total)                             AS cantidad
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo da
+          ON fv.id_articulo = da.id_articulo
+        JOIN gold.dim_vendedor dv
+          ON fv.id_vendedor = dv.id_vendedor
+         AND fv.id_sucursal = dv.id_sucursal
+        LEFT JOIN gold.dim_cliente dc
+          ON fv.id_cliente = dc.id_cliente
+         AND fv.id_sucursal = dc.id_sucursal
+        WHERE da.marca = ANY(:marcas)
+          AND fv.anulado = false
+          AND dv.id_fuerza_ventas = :id_fuerza_ventas
+          AND fv.fecha_comprobante >= :fecha_desde
+          AND fv.fecha_comprobante <= :fecha_hasta
+          {filtro_rutas}
+        GROUP BY 1, 2, 3, 4, 5
+        """
+        return self.execute_query(
+            query,
+            {
+                "marcas": list(marcas),
+                "fecha_desde": fecha_desde,
+                "fecha_hasta": fecha_hasta,
+                "id_fuerza_ventas": id_fuerza_ventas,
+                **params_rutas,
+            },
+        )
+
+    def get_ventas_generico_cliente_mes(
+        self,
+        generico: str,
+        fecha_desde: str,
+        fecha_hasta: str,
+        id_fuerza_ventas: int = 1,
+        sucursales_excluidas: list[int] | None = None,
+        rutas_excluidas: list[tuple[int | None, int]] | None = None,
+    ) -> pd.DataFrame:
+        """Neto vendido de un generico por (sucursal, marca, cliente, mes), en
+        bultos Y hectolitros.
+
+        Mismo criterio que `get_ventas_cliente_marca_mes` — del que es hermano —
+        con dos diferencias: filtra por GENERICO en vez de por lista de marcas
+        (asi el informe no tiene que enumerar las 20 marcas de PERNOD RICARD a
+        mano y sobrevive a que el negocio agregue una), y devuelve tambien los
+        hectolitros.
+
+        Los hectolitros se calculan aca y no se leen de una columna: `fact_ventas`
+        no guarda el total, solo la cantidad; el factor vive en
+        `dim_articulo.factor_hectolitros` y es POR ARTICULO. Un articulo sin
+        factor aporta NULL, que en la suma de Postgres se ignora — por eso el
+        servicio tiene que denunciar los articulos sin factor en vez de confiar
+        en que el total cierra.
+
+        El neto se devuelve SIN filtrar por umbral: el umbral se aplica despues
+        de totalizar por cliente DENTRO del corte que se quiera medir. Agrupar
+        despues de filtrar cuenta como cubierto a quien compro y devolvio.
+
+        Args:
+            generico: valor exacto de `dim_articulo.generico`.
+            fecha_desde: primer dia del rango (inclusive).
+            fecha_hasta: ultimo dia del rango (inclusive).
+            id_fuerza_ventas: fuerza de ventas a considerar (1 = preventa).
+            sucursales_excluidas: sucursales fuera del universo (p.ej. CASA
+                CENTRAL, que tiene su propio circuito).
+            rutas_excluidas: pares ``(id_sucursal, id_ruta)``; ``None`` en la
+                sucursal aplica a todas. Tiene que ser EL MISMO conjunto que se
+                le pasa a `get_padron_activo`, o el peso sobre padron compara
+                universos distintos.
+
+        Returns:
+            DataFrame [id_sucursal, des_sucursal, marca, id_cliente, mes,
+            bultos, hectolitros] con `mes` como 'YYYY-MM'.
+        """
+        filtro_rutas, params_rutas = self._excluir_rutas_sql(rutas_excluidas)
+
+        filtro_suc = ""
+        params_suc: dict = {}
+        if sucursales_excluidas:
+            filtro_suc = "AND fv.id_sucursal <> ALL(:sucursales_excluidas)"
+            params_suc["sucursales_excluidas"] = list(sucursales_excluidas)
+
+        # LEFT JOIN a dim_cliente: solo aporta la ruta. Con INNER, un cliente sin
+        # ficha desapareceria de la cobertura sin dejar rastro.
+        query = f"""
+        SELECT
+            fv.id_sucursal                                   AS id_sucursal,
+            dv.des_sucursal                                  AS des_sucursal,
+            da.marca                                         AS marca,
+            fv.id_cliente                                    AS id_cliente,
+            to_char(fv.fecha_comprobante, 'YYYY-MM')         AS mes,
+            SUM(fv.cantidades_total)                         AS bultos,
+            SUM(fv.cantidades_total * da.factor_hectolitros) AS hectolitros
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo da
+          ON fv.id_articulo = da.id_articulo
+        JOIN gold.dim_vendedor dv
+          ON fv.id_vendedor = dv.id_vendedor
+         AND fv.id_sucursal = dv.id_sucursal
+        LEFT JOIN gold.dim_cliente dc
+          ON fv.id_cliente = dc.id_cliente
+         AND fv.id_sucursal = dc.id_sucursal
+        WHERE da.generico = :generico
+          AND fv.anulado = false
+          AND dv.id_fuerza_ventas = :id_fuerza_ventas
+          AND fv.fecha_comprobante >= :fecha_desde
+          AND fv.fecha_comprobante <= :fecha_hasta
+          {filtro_suc}
+          {filtro_rutas}
+        GROUP BY 1, 2, 3, 4, 5
+        """
+        return self.execute_query(
+            query,
+            {
+                "generico": generico,
+                "fecha_desde": fecha_desde,
+                "fecha_hasta": fecha_hasta,
+                "id_fuerza_ventas": id_fuerza_ventas,
+                **params_suc,
+                **params_rutas,
+            },
+        )
+
+    def get_articulos_sin_factor_hl(self, generico: str) -> pd.DataFrame:
+        """Articulos de un generico sin factor de hectolitros cargado.
+
+        Sirve para denunciar el hueco en vez de entregar un total de HL corto:
+        `SUM` ignora los NULL, asi que sin este chequeo la columna cierra igual
+        y nadie se entera de que falta media marca.
+
+        Returns:
+            DataFrame [id_articulo, des_articulo, marca].
+        """
+        query = """
+        SELECT da.id_articulo, da.des_articulo, da.marca
+        FROM gold.dim_articulo da
+        WHERE da.generico = :generico
+          AND (da.factor_hectolitros IS NULL OR da.factor_hectolitros = 0)
+        ORDER BY da.marca, da.id_articulo
+        """
+        return self.execute_query(query, {"generico": generico})
+
+    def get_ventas_articulo_cliente_mes(
+        self,
+        marca: str,
+        fecha_desde: str,
+        fecha_hasta: str,
+    ) -> pd.DataFrame:
+        """Venta de una marca al grano (mes, articulo, cliente).
+
+        El articulo hace falta porque la conversion a kilos tiene un factor
+        POR ARTICULO; agregando antes se pierde con que factor multiplicar.
+        El cliente hace falta para la cobertura, que no se puede rederivar de
+        un agregado.
+
+        Returns:
+            DataFrame [mes, id_articulo, id_cliente, id_sucursal, bultos] con
+            `mes` como 'YYYY-MM'.
+        """
+        query = """
+        SELECT
+            to_char(fv.fecha_comprobante, 'YYYY-MM') AS mes,
+            fv.id_articulo                           AS id_articulo,
+            fv.id_cliente                            AS id_cliente,
+            fv.id_sucursal                           AS id_sucursal,
+            SUM(fv.cantidades_total)                 AS bultos
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo da
+          ON fv.id_articulo = da.id_articulo
+        WHERE da.marca = :marca
+          AND fv.anulado = false
+          AND fv.fecha_comprobante >= :fecha_desde
+          AND fv.fecha_comprobante <= :fecha_hasta
+        GROUP BY 1, 2, 3, 4
+        """
+        return self.execute_query(
+            query,
+            {"marca": marca, "fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
+
+    def get_padron_activo(
+        self,
+        rutas_excluidas: list[tuple[int | None, int]] | None = None,
+    ) -> pd.DataFrame:
+        """Padron de clientes NO anulados, por sucursal.
+
+        `dim_cliente` es SCD tipo 1: guarda el estado ACTUAL, no el que tenia el
+        cliente durante el mes medido. El padron es entonces una foto de hoy, y
+        es la que corresponde para preguntar "sobre mi base activa, cuantos
+        compran aguas".
+
+        Args:
+            rutas_excluidas: mismo conjunto que se le pasa a
+                `get_ventas_cliente_marca_mes`. El denominador tiene que salir
+                del mismo universo que el numerador.
+
+        Returns:
+            DataFrame [id_sucursal, des_sucursal, padron].
+        """
+        filtro_rutas, params_rutas = self._excluir_rutas_sql(
+            rutas_excluidas, alias_fv="dc", alias_dc="dc"
+        )
+        query = f"""
+        SELECT
+            dc.id_sucursal    AS id_sucursal,
+            dc.des_sucursal   AS des_sucursal,
+            COUNT(*)          AS padron
+        FROM gold.dim_cliente dc
+        WHERE dc.anulado = false
+          {filtro_rutas}
+        GROUP BY 1, 2
+        ORDER BY 1
+        """
+        return self.execute_query(query, params_rutas)
+
+    def _filtro_rutas(
+        self,
+        alias: str,
+        rutas_incluidas: list[int] | None,
+        rutas_excluidas: list[int] | None,
+    ) -> tuple[str, dict]:
+        """Filtro SQL de rutas para acotar una sucursal a una zona.
+
+        Siempre se combina con un filtro de `id_sucursal` en el llamador:
+        `id_ruta` NO es unico globalmente, se reusa entre sucursales, y filtrar
+        solo por ruta traeria clientes de otras sucursales.
+
+        Una lista de incluidas VACIA (no None) significa "ninguna ruta": se
+        traduce a un filtro imposible en vez de degradar a "todas", que
+        devolveria la sucursal entera disfrazada de zona.
+        """
+        partes, params = [], {}
+        if rutas_incluidas is not None:
+            if not rutas_incluidas:
+                return "AND FALSE", {}
+            partes.append(f"{alias}.id_ruta = ANY(:rutas_in)")
+            params["rutas_in"] = list(rutas_incluidas)
+        if rutas_excluidas:
+            partes.append(f"NOT ({alias}.id_ruta = ANY(:rutas_out))")
+            params["rutas_out"] = list(rutas_excluidas)
+        return ("AND " + " AND ".join(partes)) if partes else "", params
+
+    def get_mapa_sucursales(self) -> dict[str, int]:
+        """ds_sucursal -> id_sucursal, desde `gold.dim_sucursal`.
+
+        Sirve para traducir los nombres que vienen de un config a la clave
+        numerica que usan los filtros. La descripcion es la que el proyecto usa
+        en los configs; el id es el que viaja en la clave compuesta.
+        """
+        df = self.execute_query(
+            """
+            SELECT ds.id_sucursal, ds.descripcion AS ds_sucursal
+            FROM gold.dim_sucursal ds
+            WHERE ds.descripcion IS NOT NULL
+            """,
+            {},
+        )
+        return {str(f.ds_sucursal).strip(): int(f.id_sucursal)
+                for f in df.itertuples(index=False)}
+
+    def get_marcas_de_generico(self, generico: str) -> pd.DataFrame:
+        """Universo COMPLETO de marcas de un generico, desde el maestro.
+
+        Sale de `gold.dim_articulo`, no de las tablas de cobertura: una marca
+        que no vendio en el periodo igual tiene que figurar en el informe (con
+        0) para poder asignarle cupo. Leerlo de `cob_*` solo devolveria las
+        marcas que ya venden, que es justo lo contrario de lo que se necesita.
+
+        Returns:
+            DataFrame [marca], alfabetico.
+        """
+        query = """
+        SELECT DISTINCT da.marca AS marca
+        FROM gold.dim_articulo da
+        WHERE da.generico = :generico
+          AND da.marca IS NOT NULL
+        ORDER BY 1
+        """
+        return self.execute_query(query, {"generico": generico})
+
+    def get_cobertura_marca_de_generico_zona(
+        self,
+        generico: str,
+        periodo: str,
+        id_sucursal: int,
+        rutas_incluidas: list[int] | None = None,
+        rutas_excluidas: list[int] | None = None,
+        id_fuerza_ventas: int = 1,
+    ) -> pd.DataFrame:
+        """Cobertura por marca de un generico, acotada a una zona de rutas.
+
+        Lee `gold.cob_preventista_marca` en vez de `cob_sucursal_marca` porque
+        esta ultima no tiene `id_ruta` y no permite aislar VALLE SALTA. La suma
+        entre rutas SI es aditiva: cada cliente pertenece a una sola ruta.
+
+        Args:
+            generico: Nombre exacto del generico (ej. 'CERVEZAS').
+            periodo: Primer dia del mes 'YYYY-MM-01'. Las tablas son MENSUALES.
+            id_sucursal: Sucursal real de la zona.
+            rutas_incluidas: Si esta, la zona son SOLO esas rutas.
+            rutas_excluidas: Rutas a sacar de la zona.
+            id_fuerza_ventas: 1 = preventa. Filtrarla evita mezclar el canal
+                Branca (fuerza 4), que vive en la misma tabla.
+
+        Returns:
+            DataFrame [marca, cobertura], de mayor a menor cobertura.
+        """
+        filtro_rutas, params = self._filtro_rutas(
+            "cpm", rutas_incluidas, rutas_excluidas
+        )
+        query = f"""
+        SELECT
+            cpm.marca                          AS marca,
+            SUM(cpm.clientes_compradores)      AS cobertura
+        FROM gold.cob_preventista_marca cpm
+        WHERE cpm.periodo = :periodo
+          AND cpm.id_sucursal = :id_sucursal
+          AND cpm.id_fuerza_ventas = :id_fuerza_ventas
+          AND cpm.marca IN (
+              SELECT DISTINCT da.marca
+              FROM gold.dim_articulo da
+              WHERE da.generico = :generico
+          )
+          {filtro_rutas}
+        GROUP BY cpm.marca
+        ORDER BY 2 DESC, 1
+        """
+        params.update({
+            "generico": generico,
+            "periodo": periodo,
+            "id_sucursal": id_sucursal,
+            "id_fuerza_ventas": id_fuerza_ventas,
+        })
+        return self.execute_query(query, params)
+
+    def get_cobertura_generico_zona(
+        self,
+        generico: str,
+        periodo: str,
+        id_sucursal: int,
+        rutas_incluidas: list[int] | None = None,
+        rutas_excluidas: list[int] | None = None,
+        id_fuerza_ventas: int = 1,
+    ) -> int:
+        """Cobertura TOTAL del generico en una zona — consulta aparte, no una suma.
+
+        Se lee el grano de generico y se suman sus rutas. NO se suman las marcas:
+        el mismo cliente compra varias y quedaria contado una vez por marca.
+        Sumar las marcas de PERNOD en julio-2026 da 1083 contra los 721 reales.
+
+        Returns:
+            Cantidad de clientes compradores, o 0 si no hay filas.
+        """
+        filtro_rutas, params = self._filtro_rutas(
+            "cpg", rutas_incluidas, rutas_excluidas
+        )
+        query = f"""
+        SELECT COALESCE(SUM(cpg.clientes_compradores), 0) AS cobertura
+        FROM gold.cob_preventista_generico cpg
+        WHERE cpg.periodo = :periodo
+          AND cpg.id_sucursal = :id_sucursal
+          AND cpg.id_fuerza_ventas = :id_fuerza_ventas
+          AND cpg.generico = :generico
+          {filtro_rutas}
+        """
+        params.update({
+            "generico": generico,
+            "periodo": periodo,
+            "id_sucursal": id_sucursal,
+            "id_fuerza_ventas": id_fuerza_ventas,
+        })
+        df = self.execute_query(query, params)
+        if df is None or df.empty or pd.isna(df["cobertura"].iloc[0]):
+            return 0
+        return int(df["cobertura"].iloc[0])
 
     def get_ventas_cobertura_por_vendedor(
         self,
@@ -1519,6 +2063,115 @@ class DataLoader:
         ORDER BY ds.descripcion, cupo_cob_generico
         """
         return self.execute_query(query, {"periodo": periodo})
+
+    def get_ventas_cliente_calibre(
+        self, marca: str, fecha_desde: str, fecha_hasta: str
+    ) -> pd.DataFrame:
+        """Ventas de una marca al grano CLIENTE x CALIBRE, para el comparativo.
+
+        Devuelve el grano fino a proposito: la cobertura es un CONTEO DE CLIENTES
+        DISTINTOS y por lo tanto NO es aditiva — el total de la marca no es la
+        suma de sus calibres (un cliente que compra 1000 y 1200 cuenta una sola
+        vez en el total). Contar aca, en SQL, obligaria a una consulta por nivel;
+        devolver el grano cliente deja que el processor cuente cada corte sin
+        volver a la base.
+
+        `id_ruta` sale de `dim_cliente.id_ruta_fv1` con el join por clave
+        compuesta (id_cliente, id_sucursal) — ver la REGLA DE ORO del proyecto.
+
+        Args:
+            marca: Marca exacta de dim_articulo (ej. 'SALTA').
+            fecha_desde: 'YYYY-MM-DD' inclusive.
+            fecha_hasta: 'YYYY-MM-DD' inclusive.
+
+        Returns:
+            DataFrame con columnas: id_cliente, id_sucursal, sucursal, id_ruta,
+            preventista, razon_social, fantasia, calibre, bultos.
+        """
+        query = """
+        SELECT
+            fv.id_cliente,
+            fv.id_sucursal,
+            ds.descripcion                          AS sucursal,
+            dc.id_ruta_fv1                          AS id_ruta,
+            dc.des_personal_fv1                     AS preventista,
+            dc.razon_social,
+            dc.fantasia,
+            COALESCE(da.calibre, 'SIN CALIBRE')     AS calibre,
+            SUM(fv.cantidades_total)                AS bultos
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+        LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+        LEFT JOIN gold.dim_cliente dc
+               ON fv.id_cliente  = dc.id_cliente
+              AND fv.id_sucursal = dc.id_sucursal
+        WHERE da.marca = :marca
+          AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+        GROUP BY
+            fv.id_cliente, fv.id_sucursal, ds.descripcion, dc.id_ruta_fv1,
+            dc.des_personal_fv1, dc.razon_social, dc.fantasia, calibre
+        """
+        return self.execute_query(
+            query,
+            {"marca": marca, "fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
+
+    # Sabor no existe como columna: se deriva de des_articulo. BLANCA, RUBIA,
+    # BCA y BLANCO son la misma cerveza escrita de cuatro formas distintas segun
+    # quien cargo el articulo, asi que se unifican en un solo sabor.
+    _SABOR_SQL = """
+        CASE
+            WHEN da.des_articulo ILIKE '%%NEGR%%'  THEN 'NEGRA'
+            WHEN da.des_articulo ILIKE '%%ROJA%%'  THEN 'ROJA'
+            WHEN da.des_articulo ILIKE '%%BLANC%%'
+              OR da.des_articulo ILIKE '%%RUBIA%%'
+              OR da.des_articulo ILIKE '%%RUB %%'
+              OR da.des_articulo ILIKE '%%BCA%%'   THEN 'BLANCA (rubia)'
+            ELSE 'OTRO'
+        END
+    """
+
+    def get_ventas_cliente_sabor_mes(
+        self, marca: str, fecha_desde: str, fecha_hasta: str
+    ) -> pd.DataFrame:
+        """Ventas de una marca al grano CLIENTE x SABOR x CALIBRE x MES.
+
+        Grano fino a proposito, por la misma razon que
+        :meth:`get_ventas_cliente_calibre`: la cobertura es un conteo de clientes
+        distintos y no se puede sumar entre meses ni entre cortes. El anual NO es
+        la suma de los doce meses — quien compra todos los meses cuenta una vez.
+
+        Returns:
+            DataFrame con columnas: id_cliente, id_sucursal, sucursal, id_ruta,
+            preventista, sabor, calibre, mes ('YYYY-MM'), bultos.
+        """
+        query = f"""
+        SELECT
+            fv.id_cliente,
+            fv.id_sucursal,
+            ds.descripcion                              AS sucursal,
+            dc.id_ruta_fv1                              AS id_ruta,
+            dc.des_personal_fv1                         AS preventista,
+            {self._SABOR_SQL}                           AS sabor,
+            REPLACE(COALESCE(da.calibre, 'S/C'), 'CC', '') AS calibre,
+            TO_CHAR(fv.fecha_comprobante, 'YYYY-MM')    AS mes,
+            SUM(fv.cantidades_total)                    AS bultos
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+        LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+        LEFT JOIN gold.dim_cliente dc
+               ON fv.id_cliente  = dc.id_cliente
+              AND fv.id_sucursal = dc.id_sucursal
+        WHERE da.marca = :marca
+          AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+        GROUP BY
+            fv.id_cliente, fv.id_sucursal, ds.descripcion, dc.id_ruta_fv1,
+            dc.des_personal_fv1, sabor, calibre, mes
+        """
+        return self.execute_query(
+            query,
+            {"marca": marca, "fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
 
     # ── Ventas Articulo Diario ──────────────────────────────────
 
@@ -2159,6 +2812,7 @@ class DataLoader:
         articulos: list[int] | None = None,
         marcas: list[str] | None = None,
         agrupar_por_generico: bool = False,
+        solo_con_cargo: bool = False,
     ) -> pd.DataFrame:
         """Obtiene ventas agrupadas por cliente, row_key y mes para reporte historico.
 
@@ -2172,6 +2826,12 @@ class DataLoader:
             agrupar_por_generico: Cuando es True, row_key es da.marca y NO se filtra por
                     marca/articulo (se traen todas las marcas). Usado por el modo de
                     reporte agrupado por generico con subtotales.
+            solo_con_cargo: Cuando es True suma `cantidades_con_cargo` en vez de
+                    `cantidades_total`, excluyendo las unidades regaladas (lineas con
+                    bonificacion 100%). Verificado sobre toda la fact: siempre se
+                    cumple con_cargo + sin_cargo = total, y bonificacion >= 100
+                    equivale a con_cargo = 0, asi que la columna es equivalente a
+                    filtrar por `COALESCE(bonificacion, 0) < 100`.
 
         Returns:
             DataFrame con columnas: id_cliente, id_sucursal, nombre_cliente,
@@ -2207,15 +2867,23 @@ class DataLoader:
                 extra_filters += f"\n              AND fv.id_articulo IN ({art_ph})"
                 params.update({f"art_{i}": a for i, a in enumerate(articulos)})
 
+        cantidad_expr = (
+            "fv.cantidades_con_cargo" if solo_con_cargo else "fv.cantidades_total"
+        )
+
         query = f"""
         SELECT
             fv.id_cliente,
             fv.id_sucursal,
-            COALESCE(dc.fantasia, dc.razon_social, CAST(fv.id_cliente AS TEXT)) AS nombre_cliente,
+            COALESCE(
+                NULLIF(TRIM(dc.fantasia), ''),
+                NULLIF(TRIM(dc.razon_social), ''),
+                CAST(fv.id_cliente AS TEXT)
+            ) AS nombre_cliente,
             da.generico AS generico,
             {row_key_expr} AS row_key,
             TO_CHAR(fv.fecha_comprobante, 'YYYY-MM') AS mes,
-            SUM(fv.cantidades_total) AS bultos
+            SUM({cantidad_expr}) AS bultos
         FROM gold.fact_ventas fv
         LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
         LEFT JOIN gold.dim_cliente dc ON fv.id_cliente = dc.id_cliente
@@ -2402,6 +3070,7 @@ class DataLoader:
         FROM gold.fact_ventas fv
         JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
         JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+                                  AND fv.id_sucursal   = dc.id_sucursal
         WHERE fv.id_sucursal = 1
           AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
           AND da.generico IN ({placeholders})
@@ -2437,6 +3106,7 @@ class DataLoader:
         FROM gold.fact_ventas fv
         JOIN gold.dim_articulo  da ON fv.id_articulo  = da.id_articulo
         JOIN gold.dim_cliente   dc ON fv.id_cliente   = dc.id_cliente
+                                  AND fv.id_sucursal   = dc.id_sucursal
         WHERE fv.id_sucursal = 1
           AND fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
           AND da.generico IN ({placeholders})
@@ -2745,6 +3415,608 @@ class DataLoader:
         if df.empty or df["ultima_fecha"].iloc[0] is None:
             return None
         return pd.to_datetime(df["ultima_fecha"].iloc[0]).date()
+
+    # ------------------------------------------------------------------
+    # Cupo desagregado por ruta
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _placeholders_sucursales(sucursales: list[int]) -> tuple[str, dict]:
+        """Placeholders nombrados para un IN de sucursales."""
+        nombres = [f":suc_{i}" for i in range(len(sucursales))]
+        params = {f"suc_{i}": s for i, s in enumerate(sucursales)}
+        return ", ".join(nombres), params
+
+    def get_vendedores_dim(self, sucursales: list[int]) -> pd.DataFrame:
+        """Vendedores de las sucursales pedidas.
+
+        Args:
+            sucursales: ids de sucursal a incluir.
+
+        Returns:
+            DataFrame con id_vendedor, des_vendedor, id_sucursal.
+            id_vendedor NO es unico global: la clave es (id_vendedor, id_sucursal).
+        """
+        placeholders, params = self._placeholders_sucursales(sucursales)
+        query = f"""
+        SELECT id_vendedor, des_vendedor, id_sucursal
+        FROM gold.dim_vendedor
+        WHERE id_sucursal IN ({placeholders})
+        ORDER BY id_sucursal, id_vendedor
+        """
+        return self.execute_query(query, params)
+
+    def get_rutas_por_vendedor(self, sucursales: list[int]) -> pd.DataFrame:
+        """Rutas asignadas a cada vendedor, segun los clientes activos.
+
+        La asignacion vive en dim_cliente (id_personal_fv1 -> id_ruta_fv1);
+        se excluyen los clientes anulados y los que no tienen preventista.
+
+        Args:
+            sucursales: ids de sucursal a incluir.
+
+        Returns:
+            DataFrame con id_sucursal, id_ruta, des_ruta, id_vendedor.
+        """
+        placeholders, params = self._placeholders_sucursales(sucursales)
+        query = f"""
+        SELECT id_sucursal,
+               id_ruta_fv1            AS id_ruta,
+               MIN(des_ruta_fv1)      AS des_ruta,
+               id_personal_fv1        AS id_vendedor
+        FROM gold.dim_cliente
+        WHERE id_sucursal IN ({placeholders})
+          AND COALESCE(anulado, false) = false
+          AND id_personal_fv1 IS NOT NULL
+        GROUP BY id_sucursal, id_ruta_fv1, id_personal_fv1
+        ORDER BY id_sucursal, id_ruta_fv1
+        """
+        return self.execute_query(query, params)
+
+    def get_ventas_por_ruta_categoria(
+        self, fecha_desde: str, fecha_hasta: str, sucursales: list[int]
+    ) -> pd.DataFrame:
+        """Ventas por ruta y articulo, para abrir cupos proporcional a la historia.
+
+        Cuenta las ventas de los CLIENTES de cada ruta (sin importar que
+        vendedor las cargo): eso refleja la demanda real de la ruta. El join
+        con dim_cliente usa la clave compuesta (id_cliente, id_sucursal).
+
+        `es_fernet` se resuelve en SQL porque no existe la marca 'FERNET' en
+        dim_articulo (el fernet aparece como FRATELLI BRANCA y VITTONE); la
+        clasificacion en categorias de cupo la hace el processor.
+
+        Args:
+            fecha_desde: Inicio del periodo 'YYYY-MM-DD' (inclusive).
+            fecha_hasta: Fin del periodo 'YYYY-MM-DD' (EXCLUSIVE).
+            sucursales: ids de sucursal a incluir.
+
+        Returns:
+            DataFrame con id_sucursal, id_ruta, generico, marca, es_fernet,
+            cantidad (SUM cantidades_total).
+        """
+        placeholders, params = self._placeholders_sucursales(sucursales)
+        params.update({
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+            # El patron va como bind param para no tener que escapar el % en el SQL.
+            "patron_fernet": "%FERNET%",
+        })
+        query = f"""
+        SELECT fv.id_sucursal,
+               dc.id_ruta_fv1 AS id_ruta,
+               da.generico,
+               da.marca,
+               (UPPER(da.des_articulo) LIKE :patron_fernet) AS es_fernet,
+               SUM(fv.cantidades_total) AS cantidad
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_cliente dc ON dc.id_cliente = fv.id_cliente
+                                AND dc.id_sucursal = fv.id_sucursal
+        JOIN gold.dim_articulo da ON da.id_articulo = fv.id_articulo
+        WHERE fv.fecha_comprobante >= :fecha_desde
+          AND fv.fecha_comprobante < :fecha_hasta
+          AND fv.id_sucursal IN ({placeholders})
+          AND fv.anulado = false
+        GROUP BY fv.id_sucursal, dc.id_ruta_fv1, da.generico, da.marca,
+                 (UPPER(da.des_articulo) LIKE :patron_fernet)
+        """
+        return self.execute_query(query, params)
+
+
+    # ------------------------------------------------------------------ #
+    # Variable mensual (INCENTIVO HERNAN)
+    # ------------------------------------------------------------------ #
+
+    def get_ventas_variable_mensual(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        genericos: list[str],
+        valle_salta_rutas: list[int] | None = None,
+        valle_salta_label: str = "VALLE SALTA",
+        casa_central_id: int = 1,
+    ) -> pd.DataFrame:
+        """Base sales rows for the AX sheet of the variable-mensual workbook.
+
+        One row per (fecha, cliente, sucursal, articulo, lista de precios). The
+        workbook's own export split rows further by unit price, but nothing
+        downstream reads price: every consumer aggregates with SUMIFS or a pivot,
+        so the coarser grain gives identical totals with ~10% fewer rows.
+
+        CASA CENTRAL is split into the virtual VALLE SALTA branch by the client's
+        preventa route, matching the sucursal labels the workbook already used.
+
+        Args:
+            fecha_desde: inclusive start date, ``YYYY-MM-DD``.
+            fecha_hasta: inclusive end date, ``YYYY-MM-DD``.
+            genericos: generics to include.
+            valle_salta_rutas: preventa routes reported as VALLE SALTA.
+            valle_salta_label: label for those routes.
+            casa_central_id: sucursal id that gets split.
+
+        Returns:
+            DataFrame with fecha, id_cliente, sucursal, id_articulo, marca,
+            generico, id_lista_precio, cantidad, cantidad_htls. The price list
+            arrives as an id: ``gold.dim_lista_precio`` is empty and
+            ``dim_cliente.des_lista_precio`` is blank for every client, so the
+            caller maps the id to its name.
+        """
+        rutas = valle_salta_rutas or []
+        params: dict = {
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+            "valle_label": valle_salta_label,
+            "casa_central_id": casa_central_id,
+        }
+        gen_params = []
+        for i, generico in enumerate(genericos):
+            key = f"gen_{i}"
+            params[key] = generico
+            gen_params.append(f":{key}")
+
+        ruta_params = []
+        for i, ruta in enumerate(rutas):
+            key = f"ruta_{i}"
+            params[key] = ruta
+            ruta_params.append(f":{key}")
+
+        # No routes configured -> the CASE can never fire; keep the SQL valid.
+        ruta_clause = f"dc.id_ruta_fv1 IN ({', '.join(ruta_params)})" if ruta_params else "false"
+
+        query = f"""
+        SELECT
+            fv.fecha_comprobante AS fecha,
+            fv.id_cliente,
+            CASE
+                WHEN fv.id_sucursal = :casa_central_id AND {ruta_clause}
+                    THEN :valle_label
+                ELSE fv.id_sucursal || ' - ' || ds.descripcion
+            END AS sucursal,
+            fv.id_articulo,
+            da.marca,
+            da.generico,
+            dc.id_lista_precio,
+            SUM(fv.cantidades_total) AS cantidad,
+            SUM(fv.cantidad_total_htls) AS cantidad_htls
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo da
+          ON fv.id_articulo = da.id_articulo
+        JOIN gold.dim_cliente dc
+          ON fv.id_cliente = dc.id_cliente
+         AND fv.id_sucursal = dc.id_sucursal
+        JOIN gold.dim_sucursal ds
+          ON fv.id_sucursal = ds.id_sucursal
+        WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+          AND fv.anulado = false
+          AND da.generico IN ({', '.join(gen_params)})
+        GROUP BY 1, 2, 3, 4, 5, 6, 7
+        ORDER BY 1, 2, 4
+        """
+        return self.execute_query(query, params)
+
+    def get_cobertura_preventista_variable(
+        self,
+        periodo: str,
+        nivel: str = "marca",
+        id_fuerza_ventas: int = 1,
+        valle_salta_rutas: list[int] | None = None,
+        valle_salta_label: str = "VALLE SALTA",
+        casa_central_id: int = 1,
+        genericos: list[str] | None = None,
+        genericos_excluidos: list[str] | None = None,
+        marcas_excluidas: list[str] | None = None,
+    ) -> pd.DataFrame:
+        """Coverage per preventista and brand (or generic) for the AX workbook.
+
+        Coverage IS additive across routes, so splitting CASA CENTRAL into VALLE
+        SALTA here is just a relabel of rows that were already per route.
+
+        ``nivel="generico"`` filters on ``genericos`` directly. ``nivel="marca"``
+        cannot: a brand can sit under several generics (FRATELLI BRANCA lives in
+        FRATELLI B, BOUTIQUE and MARKETING at once), so filtering brands by
+        generic would drop rows the workbook keeps. It instead drops brands that
+        belong to ``genericos_excluidos`` and nothing else, plus ``marcas_excluidas``.
+
+        Args:
+            periodo: month of the coverage table, ``YYYY-MM-01``.
+            nivel: ``"marca"`` or ``"generico"``.
+            id_fuerza_ventas: 1 = preventa, the force the workbook counts.
+            valle_salta_rutas: preventa routes reported as VALLE SALTA.
+            valle_salta_label: label for those routes.
+            casa_central_id: sucursal id that gets split.
+            genericos: generics to keep when ``nivel="generico"``. None keeps all.
+            genericos_excluidos: brands living exclusively under these generics are
+                dropped when ``nivel="marca"``.
+            marcas_excluidas: brands dropped by name when ``nivel="marca"``.
+
+        Returns:
+            DataFrame with sucursal, vendedor, ruta, concepto, clientes.
+        """
+        if nivel not in ("marca", "generico"):
+            raise ValueError(f"nivel must be 'marca' or 'generico', got {nivel!r}")
+
+        tabla = f"gold.cob_preventista_{nivel}"
+        params: dict = {
+            "periodo": periodo,
+            "id_fuerza_ventas": id_fuerza_ventas,
+            "valle_label": valle_salta_label,
+            "casa_central_id": casa_central_id,
+        }
+        ruta_params = []
+        for i, ruta in enumerate(valle_salta_rutas or []):
+            key = f"ruta_{i}"
+            params[key] = ruta
+            ruta_params.append(f":{key}")
+        ruta_clause = f"cob.id_ruta IN ({', '.join(ruta_params)})" if ruta_params else "false"
+
+        filtros = ""
+        if nivel == "generico" and genericos:
+            keys = []
+            for i, generico in enumerate(genericos):
+                key = f"gen_{i}"
+                params[key] = generico
+                keys.append(f":{key}")
+            filtros += f"\n          AND cob.generico IN ({', '.join(keys)})"
+        if nivel == "marca":
+            if genericos_excluidos:
+                keys = []
+                for i, generico in enumerate(genericos_excluidos):
+                    key = f"genx_{i}"
+                    params[key] = generico
+                    keys.append(f":{key}")
+                filtros += f"""
+          AND cob.marca NOT IN (
+              SELECT da.marca FROM gold.dim_articulo da
+              WHERE da.marca IS NOT NULL
+              GROUP BY da.marca
+              HAVING bool_and(da.generico IN ({', '.join(keys)}))
+          )"""
+            if marcas_excluidas:
+                keys = []
+                for i, marca in enumerate(marcas_excluidas):
+                    key = f"marcax_{i}"
+                    params[key] = marca
+                    keys.append(f":{key}")
+                filtros += f"\n          AND cob.marca NOT IN ({', '.join(keys)})"
+
+        query = f"""
+        SELECT
+            CASE
+                WHEN cob.id_sucursal = :casa_central_id AND {ruta_clause}
+                    THEN :valle_label
+                ELSE cob.id_sucursal || ' - ' || ds.descripcion
+            END AS sucursal,
+            dv.des_vendedor AS vendedor,
+            cob.id_ruta AS ruta,
+            cob.{nivel} AS concepto,
+            cob.clientes_compradores AS clientes
+        FROM {tabla} cob
+        JOIN gold.dim_sucursal ds
+          ON cob.id_sucursal = ds.id_sucursal
+        LEFT JOIN gold.dim_vendedor dv
+          ON cob.id_vendedor = dv.id_vendedor
+         AND cob.id_sucursal = dv.id_sucursal
+        WHERE cob.periodo = :periodo
+          AND cob.id_fuerza_ventas = :id_fuerza_ventas{filtros}
+        ORDER BY cob.id_sucursal, dv.des_vendedor, cob.id_ruta, cob.{nivel}
+        """
+        return self.execute_query(query, params)
+
+    def get_cobertura_marcas_union(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        marcas: list[str],
+        id_fuerza_ventas: int = 1,
+        valle_salta_rutas: list[int] | None = None,
+        valle_salta_label: str = "VALLE SALTA",
+        casa_central_id: int = 1,
+    ) -> pd.DataFrame:
+        """Coverage of a set of brands treated as ONE concept, per preventista.
+
+        Coverage is not additive across brands: a client who buys both brands must
+        count once, not twice, so this cannot be summed out of
+        ``cob_preventista_marca`` and is totalled from fact_ventas instead. The
+        cut is applied first, the net is totalled per (cliente, sucursal) inside
+        the cut, and only then filtered by ``> 0``.
+
+        The route comes from dim_cliente, never from the fact: the fact's vendor is
+        whoever invoiced, not the preventista who owns the objective.
+
+        Args:
+            fecha_desde: inclusive start date, ``YYYY-MM-DD``.
+            fecha_hasta: inclusive end date, ``YYYY-MM-DD``.
+            marcas: brands whose client sets are unioned.
+            id_fuerza_ventas: 1 = preventa (uses ``id_ruta_fv1``).
+            valle_salta_rutas: preventa routes reported as VALLE SALTA.
+            valle_salta_label: label for those routes.
+            casa_central_id: sucursal id that gets split.
+
+        Returns:
+            DataFrame with sucursal, vendedor, ruta, clientes.
+        """
+        ruta_col = "id_ruta_fv1" if id_fuerza_ventas == 1 else "id_ruta_fv4"
+        personal_col = "des_personal_fv1" if id_fuerza_ventas == 1 else "des_personal_fv4"
+
+        params: dict = {
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
+            "valle_label": valle_salta_label,
+            "casa_central_id": casa_central_id,
+        }
+        marca_params = []
+        for i, marca in enumerate(marcas):
+            key = f"marca_{i}"
+            params[key] = marca
+            marca_params.append(f":{key}")
+
+        ruta_params = []
+        for i, ruta in enumerate(valle_salta_rutas or []):
+            key = f"ruta_{i}"
+            params[key] = ruta
+            ruta_params.append(f":{key}")
+        # The CTE already exposes the route as ``ruta``, so the outer CASE reads it
+        # from there rather than re-joining dim_cliente.
+        ruta_clause = f"nc.ruta IN ({', '.join(ruta_params)})" if ruta_params else "false"
+
+        query = f"""
+        WITH neto_cliente AS (
+            SELECT
+                fv.id_cliente,
+                fv.id_sucursal,
+                dc.{ruta_col} AS ruta,
+                dc.{personal_col} AS vendedor,
+                SUM(fv.cantidades_total) AS neto
+            FROM gold.fact_ventas fv
+            JOIN gold.dim_articulo da
+              ON fv.id_articulo = da.id_articulo
+            JOIN gold.dim_cliente dc
+              ON fv.id_cliente = dc.id_cliente
+             AND fv.id_sucursal = dc.id_sucursal
+            WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+              AND fv.anulado = false
+              AND da.marca IN ({', '.join(marca_params)})
+            GROUP BY 1, 2, 3, 4
+        )
+        SELECT
+            CASE
+                WHEN nc.id_sucursal = :casa_central_id AND {ruta_clause}
+                    THEN :valle_label
+                ELSE nc.id_sucursal || ' - ' || ds.descripcion
+            END AS sucursal,
+            nc.vendedor,
+            nc.ruta,
+            COUNT(*) AS clientes
+        FROM neto_cliente nc
+        JOIN gold.dim_sucursal ds
+          ON nc.id_sucursal = ds.id_sucursal
+        WHERE nc.neto > 0
+        GROUP BY 1, 2, 3
+        ORDER BY 1, 2, 3
+        """
+        return self.execute_query(query, params)
+
+
+    def get_cobertura_articulos(
+        self,
+        fecha_desde: str,
+        fecha_hasta: str,
+        articulos: list[int],
+    ) -> pd.DataFrame:
+        """Clients with positive net purchases of a given article set, per branch.
+
+        Used for the COLON DULCE block, whose article list lives in the workbook
+        (``art_colon_dulce``) because nothing in gold identifies those products.
+
+        The cut is applied first, the net is totalled per (cliente, sucursal)
+        inside it, and only then filtered by ``> 0`` — grouping after filtering
+        would count a client who bought and returned the same volume.
+
+        Args:
+            fecha_desde: inclusive start date, ``YYYY-MM-DD``.
+            fecha_hasta: inclusive end date, ``YYYY-MM-DD``.
+            articulos: article ids to treat as one concept.
+
+        Returns:
+            DataFrame with id_sucursal and clientes. Empty if ``articulos`` is.
+        """
+        if not articulos:
+            return pd.DataFrame(columns=["id_sucursal", "clientes"])
+
+        params: dict = {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta}
+        keys = []
+        for i, articulo in enumerate(sorted(set(articulos))):
+            key = f"art_{i}"
+            params[key] = int(articulo)
+            keys.append(f":{key}")
+
+        query = f"""
+        WITH neto_cliente AS (
+            SELECT fv.id_cliente, fv.id_sucursal, SUM(fv.cantidades_total) AS neto
+            FROM gold.fact_ventas fv
+            WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+              AND fv.anulado = false
+              AND fv.id_articulo IN ({', '.join(keys)})
+            GROUP BY 1, 2
+        )
+        SELECT id_sucursal, COUNT(*) AS clientes
+        FROM neto_cliente
+        WHERE neto > 0
+        GROUP BY 1
+        ORDER BY 1
+        """
+        return self.execute_query(query, params)
+    # ──────────────────────────────────────────────────────────────
+    # Acciones Comerciales — aexcel-equivalent gold extraction (RF-01)
+    # ──────────────────────────────────────────────────────────────
+
+    def get_aexcel_equivalent(
+        self, fecha_desde: str, fecha_hasta: str
+    ) -> pd.DataFrame:
+        """Line-level gold extraction backing the acciones-comerciales
+        aexcel-equivalent dataset (RF-01).
+
+        Returns ONE ROW PER fact_ventas LINE (NOT pre-aggregated), joined
+        with dim_cliente/dim_articulo/dim_sucursal and labeled with the
+        aexcel-equivalent column names. The (fecha, cliente, articulo) terna
+        grain-collapse — additive SUMs + a deterministic ACTUAL-value pick
+        for Precio/Bonific — is performed downstream in
+        ``src.services.acciones_comerciales.gold_source`` (Decision 14), NOT
+        here — this method's only job is the composite-key, read-only fetch.
+
+        Composite-key rule (project GOLDEN RULE): dim_cliente is joined on
+        (id_cliente AND id_sucursal) — id_cliente is reused across
+        sucursales, so a single-column join would fan-out matches. This
+        method intentionally does NOT join dim_vendedor: none of the
+        aexcel-equivalent columns require it (design Decision), so no
+        id_fuerza_ventas scoping is needed either.
+
+        bonificacion is converted from DB percent-scale to aexcel
+        fraction-scale (/100.0) directly in SQL — an exact scale
+        conversion, never a rounding operation (RF-23).
+
+        Precio uses abs(precio_unitario_bruto): gold signs credits/returns
+        on the price, whereas the aexcel export keeps the price positive and
+        carries the sign on the quantity. abs() reconciles the two
+        conventions and was verified to match the manual aexcel at 100%
+        (79,885/79,900 ternas, Jul 2026) — Decision 14 empirical adjudication.
+
+        Descripción_12 = da.generico (NOT unidad_negocio): the user chose the
+        genérico grouping for the ventas/FACT_NET side so it stays consistent
+        with the acción side (ACC-GEN, keyed by the wapi Calibre = genérico).
+        This intentionally diverges from the original manual engine (whose
+        Descripción_12 mirrored aexcel's unidad_negocio), e.g. AGUA DANONE ->
+        AGUAS DANONE, PERNOD RICARD 1 -> PERNOD RICARD, FERNET -> FRATELLI B —
+        expected divergences, not diff bugs (Decision 18).
+
+        Read-only SELECT — issues no DDL against gold (RF-25).
+        """
+        return self.execute_query(
+            """
+            SELECT
+                fv.id                                     AS "_id_linea",
+                fv.fecha_comprobante                       AS "Descripción Período",
+                fv.id_cliente                               AS "Cod. Cliente",
+                dc.razon_social                             AS "Descripción",
+                ds.id_sucursal || ' - ' || ds.descripcion   AS "Sucursal",
+                fv.id_articulo                              AS "Código",
+                da.des_articulo                             AS "Descripción_2",
+                da.marca                                    AS "Descripción_3",
+                da.generico                                 AS "Descripción_12",
+                abs(fv.precio_unitario_bruto)               AS "Precio",
+                fv.bonificacion / 100.0                     AS "Bonific",
+                fv.cantidades_total                         AS "Cantidades Totales",
+                fv.facturacion_neta                         AS "Facturacion Neta",
+                fv.descuentos                                AS "Descuentos"
+            FROM gold.fact_ventas fv
+            LEFT JOIN gold.dim_cliente dc
+              ON fv.id_cliente = dc.id_cliente
+             AND fv.id_sucursal = dc.id_sucursal
+            LEFT JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+            LEFT JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+            WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+              AND fv.anulado = false
+            """,
+            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
+
+    def get_comprobante_precio(
+        self, fecha_desde: str, fecha_hasta: str
+    ) -> pd.DataFrame:
+        """Line-level gold extraction backing the comprobante-keyed
+        diagnostic price lookup (Decision 19 — parallel-run comparison,
+        BASE-control-ONLY; never feeds the authoritative terna-based
+        PRECIO FINAL).
+
+        Returns ONE ROW PER fact_ventas LINE (NOT pre-aggregated), carrying
+        a reconstructed ``Comprobante`` key + article + abs price + cantidad.
+        The (Comprobante, Código) grain-collapse — a deterministic pick,
+        SAME discipline as the terna grain-collapse (Decision 14) — is
+        performed downstream in
+        ``src.services.acciones_comerciales.processor.build_precio_comprobante_lookup``,
+        NOT here — this method's only job is the read-only fetch.
+
+        Comprobante decomposition (verified 2026-07-21 against the real
+        wapi export): wapi ``Comprobante`` e.g. ``"FCVTAA000300850740"`` =
+        ``id_documento`` (5 chars, e.g. ``"FCVTA"``) + ``letra`` (1 char,
+        e.g. ``"A"``) + ``serie`` (4 digits, zero-padded) + ``nro_doc`` (8
+        digits, zero-padded). Prefixes seen: FCVTAA/FCVTAB/DVVTAA/DVVTAB.
+        This decomposition reproduces the wapi Comprobante string exactly.
+
+        Precio uses ``abs(precio_unitario_bruto)`` — same sign convention
+        as ``get_aexcel_equivalent`` (Decision 14): gold signs
+        credits/returns on the price, the wapi/aexcel side keeps price
+        positive.
+
+        Read-only SELECT — issues no DDL against gold (RF-25).
+        """
+        return self.execute_query(
+            """
+            SELECT
+                fv.id_documento || fv.letra || lpad(fv.serie::text, 4, '0')
+                    || lpad(fv.nro_doc::text, 8, '0')   AS "Comprobante",
+                fv.id_articulo                          AS "Código",
+                abs(fv.precio_unitario_bruto)            AS "Precio",
+                fv.cantidades_total                      AS "Cantidades Totales"
+            FROM gold.fact_ventas fv
+            WHERE fv.fecha_comprobante BETWEEN :fecha_desde AND :fecha_hasta
+              AND fv.anulado = false
+            """,
+            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta},
+        )
+
+    def get_clientes_sucursal(self) -> pd.DataFrame:
+        """Fresh Cod. Cliente -> Sucursal label map (RF-04) — replaces the
+        engine's stale BG:BH snapshot.
+
+        ``dim_cliente`` is a DIMENSION table (not period-scoped), so this
+        gives live coverage of every client the ERP knows about right now,
+        independent of whether they transacted in the reporting period —
+        exactly the freshness guarantee RF-04 requires. Emits the
+        ``"{id_sucursal} - {DESCRIPCION}"`` label (e.g. ``"1 - CASA CENTRAL"``)
+        to match BOTH the original manual engine's wapi SUCURSAL (the BG:BH
+        snapshot format) and FACT_NET's ``get_aexcel_equivalent`` Sucursal —
+        verified identical text (``dim_cliente.des_sucursal`` ==
+        ``dim_sucursal.descripcion`` for all 14 sucursales). The ZONA lookup
+        (RF-07) matches this label prefix-tolerantly, so a bare-keyed
+        ``configs/acciones_comerciales_zonas.json`` still resolves.
+
+        When ``id_cliente`` repeats across sucursales (same reused-id risk
+        class as ``id_vendedor``/``id_ruta``, project GOLDEN RULE), the
+        LOWEST ``id_sucursal`` wins deterministically — wapi rows carry no
+        sucursal context of their own to disambiguate further.
+
+        Read-only SELECT — issues no DDL against gold (RF-25).
+        """
+        return self.execute_query(
+            """
+            SELECT DISTINCT ON (dc.id_cliente)
+                dc.id_cliente                                  AS "Cod. Cliente",
+                dc.id_sucursal || ' - ' || dc.des_sucursal     AS "Sucursal"
+            FROM gold.dim_cliente dc
+            WHERE dc.anulado = false
+            ORDER BY dc.id_cliente, dc.id_sucursal
+            """
+        )
 
 
 # Instancia por defecto para compatibilidad

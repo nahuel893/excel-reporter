@@ -1,0 +1,43 @@
+{
+    "_note": "Stock Valorizado — bultos y pesos por articulo y sucursal. El precio sale de un xlsx exportado a mano del ERP (no hay precio en gold): reemplazar data/input/lista_precios.xlsx cuando cambien los precios. La fecha del snapshot NO se deriva de fecha_desde/fecha_hasta (el daily las parchea al mes en curso y no describen un snapshot): sin 'fecha_stock' se usa la ultima disponible en gold.fact_stock. Los precios NO se actualizan solos: si el archivo supera 'lista_precios_max_dias' dias, el informe sale con un banner rojo en las dos hojas, el detalle en la hoja Control y un aviso en la CLI. Entrega apagada por defecto; prender enviar_email/enviar_whatsapp y completar enviar_a cuando se defina la distribucion.",
+    "tipo": "stock-valorizado",
+    "filtros": {
+        "fecha_desde": "2026-08-01",
+        "fecha_hasta": "2026-09-01",
+        "lista_precios_path": "data/input/lista_precios.xlsx",
+        "fecha_stock": null,
+        "_lista_precios_max_dias_nota": "Dias despues de los cuales la lista de precios se marca VENCIDA. Los precios cambian seguido y se cargan a mano.",
+        "lista_precios_max_dias": 30,
+        "_genericos_excluidos_nota": "Genericos que NO son articulos de venta: quedan fuera del informe y se listan en la hoja Control con sus bultos. Es la unica exclusion; el resto (precio 0, stock negativo, filas en cero, articulos sin generico) se conserva tal cual.",
+        "genericos_excluidos": [
+            "ENVASES CCU",
+            "ENVASES GASEOSAS",
+            "ENVASES PALAU",
+            "EQUIPOS DE FRIO",
+            "MARKETING",
+            "MARKETING BRANCA",
+            "DISPENSER"
+        ],
+        "enviar_email": false,
+        "enviar_whatsapp": false,
+        "whatsapp_enviar_como": "archivo",
+        "email_adjuntos": [
+            "excel"
+        ]
+    },
+    "reportes": [
+        {
+            "nombre": "Stock Valorizado",
+            "asunto_email": "Stock Valorizado - {MES} {AÑO}",
+            "cuerpo_email": "Adjunto el stock por articulo y sucursal, en bultos y valorizado a Precio Base.",
+            "filtros": {},
+            "enviar_a": {
+                "Nahuel Aguirre": {
+                    "via": [
+                        "email"
+                    ]
+                }
+            }
+        }
+    ]
+}

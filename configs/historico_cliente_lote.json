@@ -1,0 +1,70 @@
+{
+    "tipo": "historico-cliente",
+    "filtros": {
+        "fecha_desde": "2025-08-01",
+        "fecha_hasta": "2026-07-31",
+        "enviar_email": false,
+        "enviar_whatsapp": true,
+        "whatsapp_enviar_como": "imagen"
+    },
+    "reportes": [
+        {
+            "nombre": "Historico Ventas Clientes",
+            "filtros": {
+                "clientes": [
+                    {
+                        "id_cliente": 207903,
+                        "id_sucursal": 1
+                    },
+                    {
+                        "id_cliente": 201160,
+                        "id_sucursal": 1
+                    },
+                    {
+                        "id_cliente": 207652,
+                        "id_sucursal": 1
+                    }
+                ],
+                "agrupar_por_generico": true,
+                "marcas_completas": true,
+                "genericos_universo": [
+                    "CERVEZAS",
+                    "AGUAS DANONE",
+                    "VINOS CCU",
+                    "SIDRAS Y LICORES"
+                ],
+                "solo_con_cargo": false
+            },
+            "capture_images": [
+                {
+                    "hoja": "JORGITO",
+                    "rango": "A1:O48",
+                    "renderer": "libreoffice",
+                    "recortar": true,
+                    "caption": "JORGITO (207903) — histórico 08/2025 a 07/2026"
+                },
+                {
+                    "hoja": "GONZALEZ ELBA CONCEPCION",
+                    "rango": "A1:O56",
+                    "renderer": "libreoffice",
+                    "recortar": true,
+                    "caption": "GONZALEZ ELBA CONCEPCION (201160) — histórico 08/2025 a 07/2026"
+                },
+                {
+                    "hoja": "PLAZA PAMELA VANESA - CHICHO",
+                    "rango": "A1:O45",
+                    "renderer": "libreoffice",
+                    "recortar": true,
+                    "caption": "PLAZA PAMELA VANESA - CHICHO (207652) — histórico 08/2025 a 07/2026"
+                }
+            ],
+            "enviar_a": {
+                "Nahuel Aguirre": {
+                    "via": [
+                        "whatsapp"
+                    ]
+                }
+            }
+        }
+    ]
+}

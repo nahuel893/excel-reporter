@@ -1,0 +1,30 @@
+{
+    "tipo": "cobertura-cupos",
+    "filtros": {
+        "fecha_desde": "2026-08-01",
+        "fecha_hasta": "2026-08-31",
+        "con_slicers": false,
+        "enviar_email": false,
+        "enviar_whatsapp": false
+    },
+    "reportes": [
+        {
+            "nombre": "Cobertura y Cupos CCU - Interior",
+            "filtros": {
+                "sucursales": [
+                    "SUCURSAL CAFAYATE",
+                    "SUCURSAL JOAQUIN V GONZALEZ",
+                    "SUCURSAL METAN",
+                    "SUCURSAL ORAN",
+                    "SUCURSAL TARTAGAL",
+                    "SUCURSAL PERICO",
+                    "SUCURSAL LIBERTADOR",
+                    "SUCURSAL MAIMARA",
+                    "SUCURSAL HUMAHUACA",
+                    "SUCURSAL LA QUIACA",
+                    "SUCURSAL SAN PEDRO"
+                ]
+            }
+        }
+    ]
+}

@@ -1,0 +1,59 @@
+{
+    "tipo": "volumen-cobertura",
+    "filtros": {
+        "fecha_desde": "2026-06-01",
+        "fecha_hasta": "2026-08-14",
+        "genericos": [
+            "PERNOD RICARD"
+        ],
+        "sucursales_excluidas": [
+            1
+        ],
+        "incluir_directa": true,
+        "split_por_sucursal": true,
+        "_supervisores_nota": "Tomado de configs/ventas.json. Walter Vilte NO va: tiene las 14 sucursales y es el supraconjunto de los otros, asi que su bloque duplicaria todo — su total ES el TOTAL GENERAL. Antonio Cabrerizo tampoco: solo tiene CASA CENTRAL, que este informe excluye. Garcia + Yapura particionan exacto el interior.",
+        "supervisores_sucursales": {
+            "Adrian Garcia": [
+                "SUCURSAL CAFAYATE",
+                "SUCURSAL JOAQUIN V GONZALEZ",
+                "SUCURSAL METAN",
+                "SUCURSAL GUEMES"
+            ],
+            "Hernan Yapura": [
+                "SUCURSAL ABRA PAMPA",
+                "SUCURSAL SAN PEDRO",
+                "SUCURSAL LA QUIACA",
+                "SUCURSAL HUMAHUACA",
+                "SUCURSAL ORAN",
+                "SUCURSAL TARTAGAL",
+                "SUCURSAL MAIMARA",
+                "SUCURSAL LIBERTADOR",
+                "SUCURSAL PERICO"
+            ]
+        },
+        "enviar_email": false,
+        "enviar_whatsapp": false,
+        "whatsapp_enviar_como": "ambos",
+        "_envio_nota": "enviar_whatsapp en false A PROPOSITO: con split_por_sucursal el pipeline corre una vez por ARCHIVO, asi que una corrida manda 13 mensajes (el consolidado + 12 sucursales). Para mandar algo puntual, usar el pipeline sobre el archivo ya generado en vez de prender este flag."
+    },
+    "reportes": [
+        {
+            "nombre": "PERNOD RICARD - Volumen y Cobertura Sucursales",
+            "capture_images": [
+                {
+                    "hoja": "Resumen",
+                    "rango": "A1:L24",
+                    "renderer": "libreoffice",
+                    "caption": "PERNOD RICARD — volumen y cobertura por supervisor y sucursal"
+                }
+            ],
+            "enviar_a": {
+                "Nahuel Aguirre": {
+                    "via": [
+                        "whatsapp"
+                    ]
+                }
+            }
+        }
+    ]
+}

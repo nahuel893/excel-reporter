@@ -18,6 +18,8 @@ Add a new service:
         - "hoy"         : fecha_desde = fecha_hasta = today (single-day snapshots)
         - "mes_a_hoy"   : fecha_desde = first day of month, fecha_hasta = today
         - "solo_hasta"  : keep fecha_desde as-is, only patch fecha_hasta = today
+        - "ventana_movil": N-month window ENDING today; N comes from the config's
+                          own fecha_desde..fecha_hasta, so the width is preserved
 
 Daily overrides (configs/daily_overrides.json):
     Optional file. Per-service flags to skip execution and/or delivery.
@@ -27,6 +29,7 @@ Daily overrides (configs/daily_overrides.json):
             "<servicio>": {
                 "ejecutar": true | false,   // default: true
                 "enviar":   true | false,   // default: true
+                "desde_dia_del_mes": 8,     // optional day-of-month gate
                 "razon":    "string"        // optional log note
             }
         }
@@ -34,6 +37,9 @@ Daily overrides (configs/daily_overrides.json):
     `ejecutar=false` → skip the service entirely.
     `ejecutar=true, enviar=false` → generate the file but suppress delivery
     (clears `enviar_a` in the patched config).
+    `desde_dia_del_mes=N` → skip the service until day N of the month, then run
+    normally with no manual intervention (see `_resolver_flags`). Used to hold the
+    avances/champions while the month's objetivos are still being loaded.
 """
 from __future__ import annotations
 
@@ -51,8 +57,16 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from main import _run_reportes, _resolve_test_mode  # noqa: E402
-from config.settings import FERIADOS  # noqa: E402
+from config.settings import FERIADOS  # noqa: E402,F401  (lo usa periodos)
 from src.config.resolver import load_contacts, load_report_config  # noqa: E402
+from src.core.periodos import (  # noqa: E402
+    es_dia_habil,
+    meses_abarcados,
+    rango_ventana_movil,
+    es_primer_dia_habil_del_mes,
+    rango_mes_a_hoy,
+    rango_mes_completo,
+)
 
 
 def _refresh_mv_resumen_mensual() -> None:
@@ -96,86 +110,97 @@ def _refresh_mv_resumen_mensual() -> None:
         print(f"  ⚠️  gold.mv_resumen_mensual refresh failed (non-fatal): {exc!r}")
 
 
+def _refresh_mv_stock_quiebre() -> None:
+    """Refresh gold.mv_stock_quiebre so the Superset "Stock BADIE" dashboard has
+    current data.
+
+    Mirrors _refresh_mv_resumen_mensual(): called once at the start of every
+    daily run, right after the resumen-mensual refresh. CONCURRENTLY means the
+    dashboard is never locked during the refresh (requires the unique index
+    uix_mv_stock_quiebre_pk created by scripts/sql/v_stock_quiebre.sql).
+
+    Errors are logged and silenced — a stale MV is acceptable; crashing the
+    entire daily run for a dashboard refresh is not.
+    """
+    try:
+        import os
+        from sqlalchemy import create_engine, text
+        from dotenv import load_dotenv
+
+        env_path = ROOT / ".env"
+        if env_path.exists():
+            load_dotenv(str(env_path), override=False)
+
+        host = os.getenv("DB_HOST", "localhost")
+        port = os.getenv("DB_PORT", "5432")
+        db = os.getenv("DB_NAME")
+        user = os.getenv("DB_USER")
+        password = os.getenv("DB_PASSWORD")
+
+        if not all([db, user, password]):
+            print("  ⚠️  MV refresh skipped — DB credentials not set in environment")
+            return
+
+        url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}"
+        engine = create_engine(url, connect_args={"connect_timeout": 30})
+        with engine.connect() as conn:
+            conn.execute(text(
+                "REFRESH MATERIALIZED VIEW CONCURRENTLY gold.mv_stock_quiebre"
+            ))
+            conn.commit()
+        print("  ✅  gold.mv_stock_quiebre refreshed")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ⚠️  gold.mv_stock_quiebre refresh failed (non-fatal): {exc!r}")
+
+
 CONFIGS_DIR = ROOT / "configs"
 CONTACTOS_PATH = CONFIGS_DIR / "contactos.json"
 OVERRIDES_PATH = CONFIGS_DIR / "daily_overrides.json"
 
-FechaModo = Literal["hoy", "mes_a_hoy", "mes_completo", "solo_hasta"]
+FechaModo = Literal["hoy", "mes_a_hoy", "mes_completo", "solo_hasta", "ventana_movil"]
 
 # RAM guard for image-rendering reports (e.g. avance-badie's LibreOffice capture).
-# The render needs ~2.5 GB RAM; below this floor we skip images rather than risk
-# an OOM-killed render silently dropping the WhatsApp send.
-RAM_MIN_MB_IMAGENES = 3000
+# Below this floor we skip images rather than risk an OOM-killed render silently
+# dropping the WhatsApp send.
+#
+# Mediciones del render real de avance-badie (5 capturas, ver docs/avance-badie.md):
+#   2026-08-19  3918 MB disponibles  -> 5/5 en 567 s
+#   2026-08-19  1108 MB disponibles  -> 5/5 en 736 s (se apoya en swap, no muere)
+#   2026-08-21  1503 MB disponibles  -> 5/5 en ~596 s, ~119 s por imagen
+# El render NO muere con poca memoria: se vuelve mas lento. El piso protege
+# contra un OOM-kill, no contra la lentitud, asi que ponerlo alto no compra
+# seguridad — solo bloquea envios que iban a funcionar.
+#
+# Historial de pisos, cada uno demasiado alto para el costo real del render:
+#   3000 MB  medido en julio con 25 imagenes; al pasar a 5 quedo viejo y el
+#            2026-08-19 salto con 2497 MB disponibles.
+#   1500 MB  el 2026-08-21 salto con 1482 MB — 18 MB — y tres horas despues el
+#            mismo render completo las 5 con 1503 MB.
+# 1000 queda por debajo del minimo probado (1108 MB) sin llegar a cero.
+RAM_MIN_MB_IMAGENES = 1000
 _MEMINFO_PATH = Path("/proc/meminfo")
 
 
+# La logica de ventanas vive en src/core/periodos.py para que `main.py --config`
+# la comparta. Estos wrappers conservan los nombres internos del daily y le
+# pasan SU `FERIADOS`: los tests parchean el del modulo, y con un alias directo
+# ese parche no llegaba a la funcion.
+
+
 def _is_business_day(value: date) -> bool:
-    """Return True when the date is not Sunday nor configured holiday."""
-    feriados = {datetime.strptime(raw, "%Y-%m-%d").date() for raw in FERIADOS}
-    return value.weekday() != 6 and value not in feriados
+    return es_dia_habil(value, FERIADOS)
 
 
 def _is_first_business_day_of_month(value: date) -> bool:
-    """Return True if the given date is the first business day of its month.
-
-    Note: the project's `_is_business_day` treats Saturday as a business
-    day (only Sundays + FERIADOS are excluded). So Aug 1 (Saturday) IS the
-    first business day of August — the function returns True. The
-    `mes_a_hoy`/`mes_completo` resolution then runs on the NEXT business
-    day (e.g. Monday Aug 3) when the daily actually fires, picking the
-    closed-previous-month window.
-    """
-    if not _is_business_day(value):
-        return False
-
-    cursor = value.replace(day=1)
-    while cursor < value:
-        if _is_business_day(cursor):
-            return False
-        cursor += timedelta(days=1)
-    return True
+    return es_primer_dia_habil_del_mes(value, FERIADOS)
 
 
 def _resolve_mes_a_hoy_range(hoy: date) -> tuple[str, str]:
-    """Resolve the date range for monthly daily reports.
-
-    Rule: on the first business day of a month, send the previous month closed.
-    Otherwise, keep the current month-to-date behavior.
-
-    NOTE: returns INCLUSIVE `fecha_hasta` (last day of the period). Report
-    consumers that use a half-open SQL bound (e.g. `fecha_comprobante <
-    :fecha_hasta`) MUST add one day to `fecha_hasta` (or use `mes_completo`,
-    which returns the already-exclusive bound).
-    """
-    if _is_first_business_day_of_month(hoy):
-        ultimo_dia_mes_anterior = hoy.replace(day=1) - timedelta(days=1)
-        primer_dia_mes_anterior = ultimo_dia_mes_anterior.replace(day=1)
-        return primer_dia_mes_anterior.isoformat(), ultimo_dia_mes_anterior.isoformat()
-
-    return hoy.replace(day=1).isoformat(), hoy.isoformat()
+    return rango_mes_a_hoy(hoy, FERIADOS)
 
 
 def _resolve_mes_completo_range(hoy: date) -> tuple[str, str]:
-    """Resolve the date range for monthly reports that use a half-open SQL
-    bound on `fecha_hasta` (e.g. `get_venta_mes`, which uses `<`).
-
-    Unlike `mes_a_hoy`, this returns fecha_hasta = FIRST day of the FOLLOWING
-    month (or tomorrow, when today is in the current month) — the exclusive
-    upper bound — so the period truly INCLUDES the last day of the reported
-    month (or today).
-    """
-    if _is_first_business_day_of_month(hoy):
-        # Closed previous month: [1st prev, 1st of current) — exclusive
-        # upper bound = 1st of current month.
-        primer_dia_mes_anterior = hoy.replace(day=1) - timedelta(days=1)
-        primer_dia_mes_anterior = primer_dia_mes_anterior.replace(day=1)
-        return (
-            primer_dia_mes_anterior.isoformat(),
-            hoy.replace(day=1).isoformat(),
-        )
-    # Current month to-date: [1st of this month, tomorrow) — exclusive
-    # upper bound = tomorrow (so today IS included).
-    return hoy.replace(day=1).isoformat(), (hoy + timedelta(days=1)).isoformat()
+    return rango_mes_completo(hoy, FERIADOS)
 
 
 @dataclass(frozen=True)
@@ -205,6 +230,14 @@ class Servicio:
             # day of the period. Required for get_venta_mes and any other
             # consumer that treats fecha_hasta as exclusive.
             fecha_desde, fecha_hasta = _resolve_mes_completo_range(hoy)
+            filtros["fecha_desde"] = fecha_desde
+            filtros["fecha_hasta"] = fecha_hasta
+        elif self.fecha_modo == "ventana_movil":
+            # Ventana de N meses que TERMINA hoy. El ancho sale de las fechas
+            # escritas en el config, que quedan documentando cuantos meses mide
+            # el informe. Con mes_a_hoy se achicaria a uno solo.
+            ancho = meses_abarcados(filtros["fecha_desde"], filtros["fecha_hasta"])
+            fecha_desde, fecha_hasta = rango_ventana_movil(hoy, ancho)
             filtros["fecha_desde"] = fecha_desde
             filtros["fecha_hasta"] = fecha_hasta
         elif self.fecha_modo == "solo_hasta":
@@ -265,6 +298,18 @@ SERVICIOS: list[Servicio] = [
         fecha_modo="mes_a_hoy",
     ),
     Servicio(
+        nombre="incentivo-salta",
+        config_path=CONFIGS_DIR / "incentivo_salta.json",
+        # `hoy`: el servicio solo necesita la fecha de corte. Los meses de cada
+        # bloque salen del xlsx de objetivos, no de la ventana del daily.
+        fecha_modo="hoy",
+    ),
+    Servicio(
+        nombre="comparativo-salta",
+        config_path=CONFIGS_DIR / "comparativo_salta.json",
+        fecha_modo="mes_a_hoy",
+    ),
+    Servicio(
         nombre="resumen-mensual",
         config_path=CONFIGS_DIR / "resumen_mensual.json",
         fecha_modo="mes_a_hoy",
@@ -307,6 +352,18 @@ SERVICIOS: list[Servicio] = [
         config_path=CONFIGS_DIR / "stock_badie.json",
         fecha_modo="mes_completo",  # half-open SQL upper bound (see _resolve_mes_completo_range)
     ),
+    Servicio(
+        nombre="cobertura-levite",
+        config_path=CONFIGS_DIR / "cobertura_levite.json",
+        fecha_modo="mes_a_hoy",
+    ),
+    Servicio(
+        nombre="cobertura-aguas",
+        config_path=CONFIGS_DIR / "cobertura_aguas.json",
+        # ventana_movil y no mes_a_hoy: el informe abre una columna por mes y
+        # deriva cuantas del rango, asi que mes_a_hoy lo dejaria en un solo mes.
+        fecha_modo="ventana_movil",
+    ),
 ]
 
 
@@ -319,6 +376,37 @@ def _load_overrides() -> dict[str, dict]:
     except json.JSONDecodeError as exc:
         print(f"⚠️  daily_overrides.json invalido ({exc}) — se ignora")
         return {}
+
+
+def _resolver_flags(ov: dict, hoy: date) -> tuple[bool, bool, str]:
+    """Resolve (ejecutar, enviar, razon) for one service from its override + today.
+
+    On top of the static `ejecutar`/`enviar` flags, `desde_dia_del_mes: N` gates
+    the service on the day of month: before day N it is skipped entirely, and from
+    day N on it runs normally with no manual intervention.
+
+    Why: the avances and champions-league read the month's objetivos from gold.
+    During the first days of the month those cupos are still being loaded, so the
+    reports would go out with wrong or empty targets.
+
+    An explicit `ejecutar: false` wins over the gate — a report turned off on
+    purpose stays off. An invalid `desde_dia_del_mes` is ignored with a warning
+    (fail-open): a typo must never silently kill a report forever.
+    """
+    ejecutar = ov.get("ejecutar", True)
+    enviar = ov.get("enviar", True)
+    razon = ov.get("razon", "")
+
+    desde = ov.get("desde_dia_del_mes")
+    if desde is not None:
+        if isinstance(desde, bool) or not isinstance(desde, int) or not 1 <= desde <= 31:
+            print(f"  ⚠️  desde_dia_del_mes invalido ({desde!r}) — se ignora")
+        elif ejecutar and hoy.day < desde:
+            ejecutar = False
+            espera = f"dia {hoy.day} < {desde}: margen para cargar los objetivos del mes"
+            razon = f"{espera} — {razon}" if razon else espera
+
+    return ejecutar, enviar, razon
 
 
 def _strip_delivery(patched: dict) -> dict:
@@ -449,6 +537,20 @@ def _report_renderiza_imagenes(patched: dict) -> bool:
     return False
 
 
+def _sacar_capturas(patched: dict) -> dict:
+    """Saca `capture_images` de cada reporte, sin tocar los canales.
+
+    Es lo que apaga el render: sin capturas, CaptureImageStep se saltea y
+    `rutas_imagenes` queda vacio. `whatsapp_enviar_como` queda en "imagen", asi
+    que SendWhatsAppStep no manda nada — que es lo correcto cuando lo que el
+    grupo espera son imagenes. El mail sigue saliendo con el xlsx.
+    """
+    for reporte in patched.get("reportes", []):
+        reporte.pop("capture_images", None)
+        reporte.pop("capture_image", None)
+    return patched
+
+
 def _ram_guard_omite_imagenes(patched: dict, avail_mb: int | None) -> bool:
     """True when the RAM guard must suppress image delivery for this report.
 
@@ -481,9 +583,9 @@ def _alertar_ram_baja(nombre: str, avail_mb: int | None) -> None:
             print("  ⚠️  alerta RAM baja: 'Nahuel Aguirre' sin telefono en contactos — no se envía")
             return
         msg = (
-            f"⚠️ {nombre}: RAM baja ({avail_mb} MB) a las 07:00 — se envió el xlsx por "
-            f"email pero se OMITIERON las imágenes del grupo. Cerrá el VM y regenerá si "
-            f"querés las imágenes."
+            f"⚠️ {nombre}: RAM baja ({avail_mb} MB) a las 07:00 — se OMITIERON las "
+            f"imágenes. El mail salió igual con el xlsx, pero *al grupo de WhatsApp "
+            f"no le llegó nada*: hay que liberar memoria y mandarlas a mano."
         )
         WhatsAppClient(WHATSAPP_SERVICE_URL).send_text(target=telefono, text=msg)
     except Exception as exc:  # noqa: BLE001
@@ -514,18 +616,25 @@ def _ejecutar_servicio(
 
     # RAM guard: image-rendering reports (LibreOffice capture, ~2.5 GB) can get
     # OOM-killed if a VM is eating RAM at 07:00, silently dropping the WhatsApp
-    # send. If RAM is short, disable enviar_whatsapp — resolve_delivery then
-    # builds no WhatsApp config, so CaptureImageStep's `_images_consumed` gate
-    # returns False (email adjuntos default to ["excel"], not image) → no
-    # render, no OOM, but the email xlsx still goes out. Nahuel gets alerted.
+    # send. Si falta RAM se saltea el render y NO se toca el config: con
+    # enviar_como="imagen" y sin imagenes, SendWhatsAppStep no manda nada. El
+    # mail sale igual con el xlsx y Nahuel recibe la alerta.
+    #
+    # El guard NO cambia el payload. Lo hizo dos veces y las dos salieron mal:
+    #   2026-08-19  ponia enviar_whatsapp=False y el que solo tiene WhatsApp se
+    #               quedaba sin NADA en silencio (Preventa Salta, Nogales).
+    #   2026-08-21  degradaba a enviar_como="archivo" y le mando al grupo de
+    #               preventistas el xlsx de 8,4 MB, que en el celular no sirve.
+    # Mandar OTRA COSA es peor que no mandar: parece el informe y no lo es. Si
+    # las imagenes no salieron, el que las espera tiene que enterarse.
     if enviar and _report_renderiza_imagenes(patched):
         avail = _mem_available_mb()
         if _ram_guard_omite_imagenes(patched, avail):
             print(
                 f"  🧠 {svc.nombre}: RAM insuficiente ({avail} MB < {RAM_MIN_MB_IMAGENES} MB) — "
-                f"se envía xlsx por email, se OMITEN las imágenes"
+                f"se OMITEN las imágenes; el mail sale igual, el grupo no recibe nada"
             )
-            patched.setdefault("filtros", {})["enviar_whatsapp"] = False
+            patched = _sacar_capturas(patched)
             _alertar_ram_baja(svc.nombre, avail)
 
     if not enviar:
@@ -586,13 +695,13 @@ def main() -> int:
         print("\n--- Refreshing gold.mv_resumen_mensual ---")
         _refresh_mv_resumen_mensual()
 
+        print("\n--- Refreshing gold.mv_stock_quiebre ---")
+        _refresh_mv_stock_quiebre()
+
     if args.dry_run:
         print("\n=== DRY RUN (no se ejecuta nada) ===")
         for svc in servicios:
-            ov = overrides.get(svc.nombre, {})
-            ejecutar = ov.get("ejecutar", True)
-            enviar = ov.get("enviar", True)
-            razon = ov.get("razon", "")
+            ejecutar, enviar, razon = _resolver_flags(overrides.get(svc.nombre, {}), hoy)
             raw = json.loads(svc.config_path.read_text(encoding="utf-8"))
             patched = svc.patch(raw, hoy)
             f = patched["filtros"]
@@ -603,10 +712,7 @@ def main() -> int:
 
     errores: list[str] = []
     for svc in servicios:
-        ov = overrides.get(svc.nombre, {})
-        ejecutar = ov.get("ejecutar", True)
-        enviar = ov.get("enviar", True)
-        razon = ov.get("razon", "")
+        ejecutar, enviar, razon = _resolver_flags(overrides.get(svc.nombre, {}), hoy)
 
         print(f"\n{'=' * 60}")
         if not ejecutar:

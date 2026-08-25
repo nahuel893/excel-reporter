@@ -364,6 +364,11 @@ class AvancesConfig:
     id_fuerza_ventas: int = 1
     nombre_archivo: str | None = None  # output filename (no extension)
     output_dir: Path | None = None  # override; if None, derived from fecha_desde
+    # avances: si True, NO regenera las hojas de cupos (CuposVolumen,
+    # CuposCoberGen, CuposCober). Sirve para preservar cupos cargados a mano
+    # en el Excel que aún no están en gold.fact_cupos*. Default False mantiene
+    # el comportamiento histórico.
+    skip_cupos: bool = False
 
     @property
     def periodo(self) -> str:
@@ -543,6 +548,16 @@ class AvancesService(BaseService):
         registros = {}
 
         for sc in PLANTILLA_SHEET_CONFIGS[config.tipo_plantilla]:
+            # skip_cupos: preservar hojas de cupos que el operador cargo a mano.
+            # Se matchea por prefijo "Cupos" — cubre CuposVolumen, CuposCoberGen
+            # y CuposCober en SHEET_CONFIGS_BADIE/SHEET_CONFIGS_GUEMES.
+            if config.skip_cupos and sc.sheet_name.startswith("Cupos"):
+                logger.info(
+                    "Sheet '%s' skipped (config.skip_cupos=True): preservando contenido previo",
+                    sc.sheet_name,
+                )
+                continue
+
             if sc.sheet_name not in wb.sheetnames:
                 logger.info("Sheet '%s' not found, creating", sc.sheet_name)
                 ws = wb.create_sheet(sc.sheet_name)

@@ -70,7 +70,7 @@ whatsapp-service/session/
 whatsapp-service/session.*/
 
 # Engram local memory database
-.engram/
+#.engram/
 
 # Local tool config
 .gga
@@ -84,6 +84,22 @@ configs/tmp*.json
 /test_*.md
 /get_cols.py
 /reporte_cobertura_marca.py
+
+# Root-level ad-hoc report output (commercial data: sales, stock, client lists).
+# These land here when a report is run without an output path. `git add -A` must
+# never sweep them into the history. Versioned inputs are whitelisted below.
+/*.xlsx
+/*.png
+/*.bak.xlsx
+!/factor_conversion_quesos.xlsx
+
+# CodeGraph index — regenerable, ~30 MB
+.codegraph/
+
+# dashboards/ — build output. dashboard.html comes out of build_dashboard.py and
+# the dated zips out of package.sh; the sources next to them are versioned.
+dashboards/**/dashboard.html
+dashboards/**/*.zip
 
 # Logs
 *.log

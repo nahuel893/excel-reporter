@@ -1,0 +1,10 @@
+{
+  "_note": "Business-owned sucursal -> supervisor mapping for the acciones-comerciales ZONA column (RF-07). ZONA holds a SUPERVISOR name, not a geographic zone (legacy field-name quirk kept for contract stability). SUCURSAL now carries the '{id} - DESC' prefix (matching the original engine and FACT_NET); the ZONA lookup is prefix-tolerant, so keys here may be bare ('CASA CENTRAL') OR prefixed ('1 - CASA CENTRAL') and both resolve. PLACEHOLDER VALUES pending confirmation from Nahuel against the engine 'suc' sheet / informe 'Hoja1' equivalent; verify before Phase-2 sign-off.",
+  "sucursal_supervisor": {
+    "CASA CENTRAL": "Antonio Cabrerizo",
+    "SUCURSAL CAFAYATE": "Adrian Garcia",
+    "SUCURSAL METAN": "Adrian Garcia",
+    "SUCURSAL ABRA PAMPA": "Walter Vilte",
+    "SUCURSAL PERICO": "Hernan Yapura"
+  }
+}

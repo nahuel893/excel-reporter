@@ -137,6 +137,10 @@ class WhatsAppClient:
             ".jpg": "image/jpeg",
             ".jpeg": "image/jpeg",
             ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".pptx": (
+                "application/vnd.openxmlformats-officedocument"
+                ".presentationml.presentation"
+            ),
             ".pdf": "application/pdf",
         }.get(suffix, "application/octet-stream")
 

@@ -1,0 +1,24 @@
+{
+    "tipo": "comparativo-salta",
+    "filtros": {
+        "fecha_desde": "2026-07-01",
+        "fecha_hasta": "2026-07-29",
+        "enviar_email": true,
+        "enviar_whatsapp": false,
+        "email_adjuntos": ["excel"]
+    },
+    "reportes": [
+        {
+            "nombre": "Comparativo Cobertura SALTA",
+            "asunto_email": "Comparativo Cobertura SALTA por calibre",
+            "filtros": {
+                "con_detalle_clientes": true
+            },
+            "enviar_a": {
+                "Gonzalo Farah": {"via": ["email"]},
+                "Sebastian Dellamea": {"via": ["email"]},
+                "Nahuel Aguirre": {"via": ["email_cc"]}
+            }
+        }
+    ]
+}

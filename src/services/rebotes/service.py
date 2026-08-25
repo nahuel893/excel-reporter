@@ -34,9 +34,12 @@ CCU_GENERICOS = ["CERVEZAS", "AGUAS DANONE", "VINOS CCU", "SIDRAS Y LICORES"]
 ROJO = "FF6366"
 AMARILLO = "FFEB9C"
 VERDE = "C6EFCE"
-ROJO_FONT = "9C0006"
-AMARILLO_FONT = "9C5700"
-VERDE_FONT = "006100"
+# Fuente NEGRA en todo el semaforo, a pedido de Nahuel (2026-08-18). El
+# relleno ya dice si esta bien o mal; la fuente tenida encima solo bajaba el
+# contraste y se leia peor, sobre todo en las capturas que van por WhatsApp.
+ROJO_FONT = "000000"
+AMARILLO_FONT = "000000"
+VERDE_FONT = "000000"
 
 
 @dataclass

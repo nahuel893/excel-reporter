@@ -3,6 +3,8 @@
     "filtros": {
         "fecha_desde": "2026-06-01",
         "fecha_hasta": "2026-06-30",
+        "fecha_modo": "mes_a_hoy",
+        "_ventana_nota": "mes_a_hoy: las fechas de arriba solo documentan el formato. En cada corrida se recalculan al mes en curso. El daily ya lo hacia; una corrida MANUAL con este config salia con junio.",
         "genericos": [
             "CERVEZAS",
             "AGUAS DANONE",
@@ -20,9 +22,9 @@
                 "QUARA"
             ]
         },
-        "detalle_movimientos_path": "/home/nahuel/VM shared/archivos_diarios/2026-06/detalle_movimientos.xlsx",
-        "detalle_movimientos_ma_path": "/home/nahuel/VM shared/archivos_diarios/2026-06/detalle_movimientos_ma.xlsx",
-        "detalle_movimientos_mmaa_path": "/home/nahuel/VM shared/archivos_diarios/2026-06/detalle_movimientos_mmaa.xlsx",
+        "detalle_movimientos_path": "/home/nahuel/VM shared/archivos_diarios/2026-08/detalle_movimientos.xlsx",
+        "detalle_movimientos_ma_path": "/home/nahuel/VM shared/archivos_diarios/2026-08/detalle_movimientos_ma.xlsx",
+        "detalle_movimientos_mmaa_path": "/home/nahuel/VM shared/archivos_diarios/2026-08/detalle_movimientos_mmaa.xlsx",
         "categorias_deposito_path": "configs/categorias_deposito.json",
         "whatsapp_caption_imagenes": false,
         "enviar_email": false,
@@ -30,7 +32,7 @@
     },
     "reportes": [
         {
-            "nombre": "Resumen Mensual Junio",
+            "nombre": "Resumen Mensual {MES} {AÑO}",
             "capture_images": [
                 {
                     "hoja": "CERVEZAS",

@@ -12,11 +12,13 @@
     "reportes": [
         {
             "nombre": "Venta por Marca PERNOD RICARD",
-            "filtros": {},
+            "filtros": {
+                "incluir_mes_anterior": true
+            },
             "capture_images": [
                 {
                     "hoja": "Venta x Marca",
-                    "rango": "A1:B32",
+                    "rango": "A1:E30",
                     "renderer": "libreoffice"
                 }
             ],

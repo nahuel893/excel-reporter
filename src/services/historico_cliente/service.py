@@ -31,6 +31,9 @@ class HistoricoClienteConfig:
     # did not buy — highlights coverage gaps.
     marcas_completas: bool = False
     genericos_universo: list[str] | None = None
+    # When True, only billed units are counted (cantidades_con_cargo): 100%-discount
+    # lines (gifts) are excluded from every month and from the totals.
+    solo_con_cargo: bool = False
     nombre_archivo: str | None = None
 
 
@@ -42,8 +45,11 @@ class HistoricoClienteResult:
     registros_procesados: int
 
 
+# Los bultos se MUESTRAN enteros, pero el valor guardado conserva sus
+# decimales: el formato es de presentacion y nunca se redondea en Python.
+# Redondear haria que el xlsx dejara de coincidir con la base.
 _STYLE = SheetStyle(
-    numeric_format="#,##0.##",
+    numeric_format="#,##0",
     column_formats={},
     as_table=True,
     table_style="TableStyleMedium9",
@@ -52,20 +58,64 @@ _STYLE = SheetStyle(
 # Grouped mode uses a plain (non-table) sheet so subtotal/grand-total rows can be
 # interleaved. Header styling is applied by ExcelWriter; subtotal/grand rows are
 # post-styled below.
+#
+# auto_width is off on purpose: it pads every month column to the header width
+# plus slack, which on a 12-month sheet wastes most of the horizontal space in
+# the WhatsApp capture. `_apply_compact_layout` sets every width explicitly.
 _GROUPED_STYLE = SheetStyle(
-    numeric_format="#,##0.##",
+    numeric_format="#,##0",
     column_formats={},
     as_table=False,
+    auto_width=False,
 )
 
-# Fill colors for interleaved summary rows (readable in a LibreOffice capture).
-_SUBTOTAL_FILL = "D6E0F0"   # light blue — per-generico subtotal
-_GRAND_FILL = "FFE08A"      # amber — grand total
-_ZERO_FILL = "F2F2F2"       # light gray — marca sin venta (hueco de compra)
-_ZERO_FONT = "9E9E9E"       # gray font for zero rows
+# The grouped sheet is consumed as an image on a phone, not as a spreadsheet:
+# bigger type, and columns cut down to what their content actually needs.
+_FONT_SIZE = 14
+_FONT_SIZE_TITULO = 18
+_FONT_SIZE_SUBTITULO = 10
+
+# Arial and not the openpyxl default: LibreOffice on the render host maps Arial
+# to Liberation Sans, which is metric-identical, while Excel on Windows uses
+# real Arial — so a width computed here holds in both. Calibri instead falls
+# back to Noto Sans here, whose metrics do NOT match, which is what made the
+# first pass at these widths clip.
+_FONT_NAME = "Arial"
+
+# Excel width units track the workbook's 11pt Calibri normal style, so a string
+# set at _FONT_SIZE in Arial needs this many units per character.
+_CHAR_W = (_FONT_SIZE / 11) * 1.10
+
+# Floors: a column never gets narrower than this even with tiny content.
+_WIDTH_GENERICO_MIN = 16
+_WIDTH_MARCA_MIN = 20
+_WIDTH_MES_MIN = 8
+_WIDTH_TOTAL_MIN = 10
+
+# Corporate blue palette. The grand total is the darkest block on the sheet and
+# the only one with reversed (white-on-navy) type, so it reads as the endpoint.
+_HEADER_FILL = "1F3864"     # navy — column header
+_HEADER_FONT = "FFFFFF"
+_SUBTOTAL_FILL = "D9E2F3"   # light blue — per-generico subtotal
+_SUBTOTAL_FONT = "1F3864"
+_GRAND_FILL = "1F3864"      # navy — grand total
+_GRAND_FONT = "FFFFFF"
+_TOTAL_COL_FILL = "EDF2FA"  # faint blue wash down the Total column
+_TOTAL_ANIO_FILL = "DCE6F5"  # year subtotal columns — a shade above the months
+_BANDA_FILL = "F7F9FC"      # zebra banding on alternating data rows
+_ZERO_FILL = "F4F6FA"       # marca sin venta (hueco de compra)
+_ZERO_FONT = "A3B0C4"
+_TITULO_FONT = "1F3864"
+_SUBTITULO_FONT = "7F7F7F"
+_BORDE_COLOR = "B4C6E7"     # light blue grid
+_BORDE_FUERTE = "1F3864"    # navy rule under the header / above the grand total
+
 _GENERICO_COL = "Genérico"
 _MARCA_COL = "Marca"
 _TOTAL_COL = "Total"
+
+# Rows inserted above the table: title, subtitle, spacer.
+_FILAS_TITULO = 3
 
 
 class HistoricoClienteService(BaseService):
@@ -92,6 +142,7 @@ class HistoricoClienteService(BaseService):
             articulos=config.articulos,
             marcas=config.marcas,
             agrupar_por_generico=config.agrupar_por_generico,
+            solo_con_cargo=config.solo_con_cargo,
         )
 
         # 2b. Optional: full marca universe (for the "marcas completas" mode)
@@ -146,8 +197,27 @@ class HistoricoClienteService(BaseService):
                     df_cli, meses, universe_df
                 )
                 writer.add_sheet(sheet_df, sheet_name=sheet_name, style=_GROUPED_STYLE)
+                ws = writer.workbook[sheet_name]
+                # Layout first: it rewrites every font, so the summary-row
+                # styling below must run after or it would be overwritten.
+                _apply_corporate_layout(
+                    ws,
+                    list(sheet_df.columns),
+                    titulo=f"{nombre_cliente} — histórico de compras por marca",
+                    subtitulo=(
+                        f"Bultos por mes · {config.fecha_desde} a {config.fecha_hasta} · "
+                        f"cliente {id_cli} · sucursal {id_suc}"
+                        # The basis has to travel with the image: gifts can be a
+                        # double-digit share of a month, so a reader who only
+                        # sees the capture must know which total this is.
+                        + (" · SOLO unidades CON CARGO (excluye bonificación 100%, sin cargo)"
+                           if config.solo_con_cargo else "")
+                        + (" · marcas en gris: sin compra en el período"
+                           if config.marcas_completas else "")
+                    ),
+                )
                 _style_summary_rows(
-                    writer.workbook[sheet_name], subtotal_rows, grand_row, zero_rows,
+                    ws, subtotal_rows, grand_row, zero_rows,
                     n_cols=len(sheet_df.columns),
                 )
                 total_registros += len(sheet_df)
@@ -249,7 +319,206 @@ def _build_grouped_frame(
     )
 
     frame = pd.DataFrame(records, columns=[_GENERICO_COL, _MARCA_COL, *meses, _TOTAL_COL])
+    frame = _agregar_totales_anuales(frame, meses)
+    # Twelve month columns drive the sheet width, so they carry the short label.
+    # Only this grouped view is relabelled; the marca/articulo sheets keep the
+    # full YYYY-MM, which is unambiguous and sorts lexicographically.
+    frame = frame.rename(columns={m: _mes_label(m) for m in meses})
     return frame, subtotal_rows, grand_row, zero_rows
+
+
+def totales_anuales_de(meses: list[str]) -> list[str]:
+    """Year-total column labels for ``meses``; empty inside a single year.
+
+    Within one calendar year the grand ``Total`` already IS the year total, so
+    a second identical column would be noise.
+    """
+    anios = sorted({m[:4] for m in meses})
+    return [f"{_TOTAL_COL} {a}" for a in anios] if len(anios) > 1 else []
+
+
+def _agregar_totales_anuales(frame: pd.DataFrame, meses: list[str]) -> pd.DataFrame:
+    """Insert one total column per year, right after that year's last month.
+
+    Placed inline rather than parked at the far right: a year reads as a block,
+    and pairing a trailing column with its months means crossing 30+ columns.
+    """
+    etiquetas = totales_anuales_de(meses)
+    if not etiquetas:
+        return frame
+
+    orden: list[str] = [_GENERICO_COL, _MARCA_COL]
+    for anio in sorted({m[:4] for m in meses}):
+        del_anio = [m for m in meses if m.startswith(anio)]
+        etiqueta = f"{_TOTAL_COL} {anio}"
+        frame[etiqueta] = frame[del_anio].sum(axis=1)
+        orden.extend([*del_anio, etiqueta])
+    orden.append(_TOTAL_COL)
+    return frame[orden]
+
+
+def _mes_label(mes: str) -> str:
+    """'2026-01' -> '01/26'. Two characters shorter, same information."""
+    anio, mm = mes.split("-")
+    return f"{mm}/{anio[2:]}"
+
+
+def _apply_corporate_layout(
+    ws, columnas: list[str], titulo: str, subtitulo: str
+) -> None:
+    """Turn the raw grid into the corporate blue sheet.
+
+    Inserts the title band, repaints the header, draws the grid, bands the data
+    rows and sizes every column to its own content. Runs BEFORE
+    ``_style_summary_rows``, which then overrides the subtotal/grand rows.
+    """
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    n_cols = len(columnas)
+    ws.insert_rows(1, _FILAS_TITULO)
+    fila_hdr = _FILAS_TITULO + 1
+
+    # ── Title band ────────────────────────────────────────────────────────
+    ws.cell(row=1, column=1, value=titulo).font = Font(
+        name=_FONT_NAME, size=_FONT_SIZE_TITULO, bold=True, color=_TITULO_FONT
+    )
+    ws.cell(row=2, column=1, value=subtitulo).font = Font(
+        name=_FONT_NAME, size=_FONT_SIZE_SUBTITULO, italic=True, color=_SUBTITULO_FONT
+    )
+    for fila in (1, 2, 3):
+        for col in range(1, n_cols + 1):
+            celda = ws.cell(row=fila, column=col)
+            if celda.font.name != _FONT_NAME:
+                celda.font = Font(name=_FONT_NAME, size=_FONT_SIZE)
+
+    # ── Grid ──────────────────────────────────────────────────────────────
+    fino = Side(style="thin", color=_BORDE_COLOR)
+    grueso = Side(style="medium", color=_BORDE_FUERTE)
+    borde = Border(left=fino, right=fino, top=fino, bottom=fino)
+
+    idx_total = columnas.index(_TOTAL_COL) + 1 if _TOTAL_COL in columnas else None
+    # Year-total columns sit inline among the months, so they need their own
+    # tint or they read as just another month.
+    idx_anio = {
+        i for i, c in enumerate(columnas, start=1)
+        if isinstance(c, str) and c.startswith(f"{_TOTAL_COL} ") and c != _TOTAL_COL
+    }
+    banda = PatternFill(start_color=_BANDA_FILL, end_color=_BANDA_FILL, fill_type="solid")
+    wash = PatternFill(start_color=_TOTAL_COL_FILL, end_color=_TOTAL_COL_FILL, fill_type="solid")
+    wash_anio = PatternFill(
+        start_color=_TOTAL_ANIO_FILL, end_color=_TOTAL_ANIO_FILL, fill_type="solid"
+    )
+
+    for fila in range(fila_hdr, ws.max_row + 1):
+        es_header = fila == fila_hdr
+        # Zebra on data rows only; summary rows get repainted right after.
+        raya = (not es_header) and ((fila - fila_hdr) % 2 == 0)
+        for col in range(1, n_cols + 1):
+            celda = ws.cell(row=fila, column=col)
+            celda.border = borde
+            if es_header:
+                celda.fill = PatternFill(
+                    start_color=_HEADER_FILL, end_color=_HEADER_FILL, fill_type="solid"
+                )
+                celda.font = Font(
+                    name=_FONT_NAME, size=_FONT_SIZE, bold=True, color=_HEADER_FONT
+                )
+                celda.alignment = Alignment(horizontal="center", vertical="center")
+            else:
+                celda.font = Font(name=_FONT_NAME, size=_FONT_SIZE)
+                if col == idx_total:
+                    celda.fill = wash
+                elif col in idx_anio:
+                    celda.fill = wash_anio
+                elif raya:
+                    celda.fill = banda
+                if col > 2:
+                    celda.alignment = Alignment(horizontal="center")
+
+    # Navy rule closing the header.
+    for col in range(1, n_cols + 1):
+        c = ws.cell(row=fila_hdr, column=col)
+        c.border = Border(left=fino, right=fino, top=fino, bottom=grueso)
+
+    # ── Widths ────────────────────────────────────────────────────────────
+    pisos = {
+        _GENERICO_COL: _WIDTH_GENERICO_MIN,
+        _MARCA_COL: _WIDTH_MARCA_MIN,
+        _TOTAL_COL: _WIDTH_TOTAL_MIN,
+    }
+    for idx, nombre in enumerate(columnas, start=1):
+        piso = pisos.get(nombre, _WIDTH_MES_MIN)
+        ws.column_dimensions[get_column_letter(idx)].width = max(
+            piso, _width_for_column(ws, idx, desde=fila_hdr)
+        )
+
+
+def rango_captura(ws) -> str:
+    """A1 range covering the whole used area of ``ws``.
+
+    Public on purpose: every caller that captures this sheet as an image must
+    derive the range instead of hardcoding it. A stale hardcoded range crops
+    the image — typically eating the TOTAL GENERAL row — while the xlsx stays
+    correct and nothing raises, so the loss is invisible until someone reads
+    the number off the picture.
+    """
+    from openpyxl.utils import get_column_letter
+
+    return f"A1:{get_column_letter(ws.max_column)}{ws.max_row}"
+
+
+def columnas_desbordadas(ws) -> list[str]:
+    """Column letters whose width cannot fit their own widest value.
+
+    LibreOffice renders a number that does not fit as ``###``, so the figure
+    vanishes from the capture. Call this before sending the image.
+    """
+    from openpyxl.utils import get_column_letter
+
+    fuera: list[str] = []
+    for idx in range(1, ws.max_column + 1):
+        letra = get_column_letter(idx)
+        dim = ws.column_dimensions.get(letra)
+        ancho = getattr(dim, "width", None)
+        if not ancho:
+            continue
+        necesita = max(
+            (len(_formato_visible(ws.cell(row=r, column=idx).value))
+             for r in range(_FILAS_TITULO + 1, ws.max_row + 1)),
+            default=0,
+        ) * _CHAR_W
+        if ancho < necesita:
+            fuera.append(letra)
+    return fuera
+
+
+def _width_for_column(ws, idx: int, desde: int = 1) -> float:
+    """Width needed by the widest value in column ``idx`` at ``_FONT_SIZE``.
+
+    A fixed width is not safe here: LibreOffice renders an overflowing number
+    as ``###`` in the capture, so a month that happens to reach three digits
+    would drop out of the image while the xlsx still read fine.
+    """
+    mas_largo = max(
+        (len(_formato_visible(ws.cell(row=r, column=idx).value))
+         for r in range(desde, ws.max_row + 1)),
+        default=0,
+    )
+    return mas_largo * _CHAR_W + 1.5  # slack for the bold summary rows
+
+
+def _formato_visible(value) -> str:
+    """Render a cell value the way the '#,##0' number format shows it.
+
+    Only for measuring column width — it must mirror what the sheet DISPLAYS,
+    not what it stores. The stored value keeps every decimal.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f"{value:,.0f}"
+    return str(value)
 
 
 def _style_summary_rows(
@@ -257,22 +526,40 @@ def _style_summary_rows(
 ) -> None:
     """Fill the subtotal, grand-total and zero-sale rows of the grouped sheet.
 
-    Row indices are 0-based within the data rows; the worksheet header occupies
-    row 1, so data row ``i`` maps to worksheet row ``i + 2``.
+    Row indices are 0-based within the data rows. The title band occupies the
+    first ``_FILAS_TITULO`` rows and the column header the next one, so data row
+    ``i`` maps to worksheet row ``i + _FILAS_TITULO + 2``.
     """
-    from openpyxl.styles import Font, PatternFill
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-    def _paint(data_idx: int, color: str, *, bold: bool = True, font_color: str | None = None) -> None:
-        excel_row = data_idx + 2
+    fino = Side(style="thin", color=_BORDE_COLOR)
+    grueso = Side(style="medium", color=_BORDE_FUERTE)
+
+    def _paint(
+        data_idx: int, color: str, *, bold: bool = True,
+        font_color: str | None = None, regla_arriba: bool = False,
+    ) -> None:
+        excel_row = data_idx + _FILAS_TITULO + 2
         fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
+        borde = Border(
+            left=fino, right=fino, bottom=fino,
+            top=grueso if regla_arriba else fino,
+        )
         for col in range(1, n_cols + 1):
             cell = ws.cell(row=excel_row, column=col)
             cell.fill = fill
-            cell.font = Font(bold=bold, color=font_color)
+            # name/size are respecified: rebuilding the Font would otherwise drop
+            # back to the 11pt Calibri default set before the layout pass.
+            cell.font = Font(
+                name=_FONT_NAME, size=_FONT_SIZE, bold=bold, color=font_color
+            )
+            cell.border = borde
+            if col > 2:
+                cell.alignment = Alignment(horizontal="center")
 
     # Zero-sale rows first (subtotal/grand override if they ever collided).
     for idx in zero_rows:
         _paint(idx, _ZERO_FILL, bold=False, font_color=_ZERO_FONT)
     for idx in subtotal_rows:
-        _paint(idx, _SUBTOTAL_FILL)
-    _paint(grand_row, _GRAND_FILL)
+        _paint(idx, _SUBTOTAL_FILL, font_color=_SUBTOTAL_FONT)
+    _paint(grand_row, _GRAND_FILL, font_color=_GRAND_FONT, regla_arriba=True)

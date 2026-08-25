@@ -60,6 +60,16 @@ class GlobalFilters(BaseModel):
 
     fecha_desde: str
     fecha_hasta: str
+    # Ventana RELATIVA. Cuando esta puesto, main.py recalcula fecha_desde y
+    # fecha_hasta desde la fecha de hoy e IGNORA las de arriba, que pasan a ser
+    # solo documentacion del formato.
+    #
+    # Existe porque las fechas guardadas envejecen: el daily las patchea en cada
+    # corrida, pero una corrida manual usaba lo que quedo escrito. Asi salio el
+    # informe de FULL SPORT con junio-julio cuando tenia que ser julio-agosto.
+    # Es el mismo modo que declara scripts/run_daily.py, resuelto por el mismo
+    # codigo (src/core/periodos.resolver_ventana).
+    fecha_modo: Literal["mes_a_hoy", "mes_completo", "hoy", "ventana_movil"] | None = None
     genericos: list[str] | None = None
     categorias: dict[str, Any] | None = None
     con_slicers: bool = True
@@ -97,6 +107,78 @@ class GlobalFilters(BaseModel):
     todos_los_articulos: bool = False
     # stock-badie: dias de stock objetivo (alcance en dias = stock / venta_dia).
     dias_stock: int = 15
+    # stock-badie / stock-valorizado: genericos que NO forman parte del informe
+    # (envases, marketing, equipos de frio, dispensers — no son articulos de venta).
+    genericos_excluidos: list[str] | None = None
+    # volumen-cobertura: sucursales que quedan FUERA del informe, por id.
+    # CASA CENTRAL (1) suele excluirse porque tiene su propio circuito y su
+    # volumen tapa al del interior.
+    sucursales_excluidas: list[int] | None = None
+    # cobertura-levite: sucursales INCLUIDAS, por id. None = todas. Filtra
+    # ventas Y padron con el mismo criterio.
+    sucursales_ids: list[int] | None = None
+    # volumen-cobertura: {supervisor: [sucursales]} para agrupar el informe en
+    # bloques con subtotal. Tiene que ser una PARTICION de las sucursales del
+    # informe: el mapa de configs/ventas.json NO lo es (Walter Vilte tiene las
+    # 14 y es el supraconjunto de los otros), y con un mapa asi los subtotales
+    # suman dos veces la misma sucursal. El servicio lo verifica y rompe.
+    supervisores_sucursales: dict[str, list[str]] | None = None
+    # volumen-cobertura: si True, la ruta DIRECTA (100) entra en el informe.
+    # DIRECTA son entregas sin visita de preventista. Con False el informe mide
+    # "que hizo la fuerza de venta"; con True mide "cuanto salio de la sucursal"
+    # y ademas concilia exacto con gold.cob_* (que no la excluye).
+    # El flag mueve ventas Y padron a la vez: son el numerador y el denominador
+    # del % s/ padron y tienen que salir del mismo universo.
+    incluir_directa: bool = False
+    # volumen-cobertura: si True, ademas del consolidado genera UN ARCHIVO POR
+    # SUCURSAL, para mandarle a cada una lo suyo. La base se consulta una sola
+    # vez y se reparte en memoria.
+    split_por_sucursal: bool = False
+    # stock-valorizado: xlsx exportado del ERP con la lista de precios de
+    # referencia (columnas "Articulo" y "Precio Base"). No hay precio en gold,
+    # asi que sin este archivo no hay valorizacion.
+    lista_precios_path: str | None = None
+    # stock-valorizado: fecha del snapshot de stock. None -> ultima disponible
+    # en gold.fact_stock (NO se deriva de fecha_desde/fecha_hasta, que el daily
+    # parchea al mes en curso y no describen un snapshot).
+    fecha_stock: str | None = None
+    # stock-valorizado: antiguedad en dias a partir de la cual la lista de
+    # precios se marca como VENCIDA (banner rojo en las hojas + aviso en la CLI).
+    # Los precios se exportan a mano del ERP: sin esto, una lista de hace cuatro
+    # meses produce un informe que parece tan valido como uno fresco.
+    lista_precios_max_dias: int | None = None
+    # cupo-desagregado: archivo "Objetivo <MES> Badie" con los cupos por preventista.
+    cupos_source_path: str | None = None
+    # cupo-desagregado: hoja del archivo fuente. None -> nombre del mes de fecha_desde.
+    cupos_hoja: str | None = None
+    # cupo-desagregado: ventana de historia [desde, hasta) para abrir los cupos
+    # por ruta. None -> mes anterior completo al periodo del cupo.
+    historia_desde: str | None = None
+    historia_hasta: str | None = None
+    # avances: si True, NO regenera las hojas de cupos (CuposVolumen,
+    # CuposCoberGen, CuposCober) — preserva lo cargado a mano. Sirve para
+    # corridas de recarga cuando los objetivos aún no están en gold.
+    skip_cupos: bool = False
+    # acciones-comerciales: directorio con wapi.xlsx + compras.xls (RF-02/RF-03)
+    input_dir: str | None = None
+    # acciones-comerciales: master gate para CUALQUIER escritura en el INFORME
+    # externo (Fase 2). Debe arrancar en False (RF-13) hasta el sign-off
+    # (Decision 7) de S1-S4.
+    escribir_informe: bool = False
+    # acciones-comerciales: ruta al INFORME externo .xlsm/.xlsx (nunca tocado
+    # mientras escribir_informe sea False)
+    informe_path: str | None = None
+    # acciones-comerciales: opt-in al gate de frescura de wapi en run_daily (RF-20)
+    esperar_wapi_fresco: bool = False
+    # acciones-comerciales: umbral de frescura configurable (RF-20, Decision 16)
+    wapi_cobertura_requerida: str | None = None
+    # acciones-comerciales: directorio con el backup manual (backup.xlsx +
+    # known_defects.json) para el diff paralelo Fase-1 (RF-12, S4). None => diff
+    # deshabilitado.
+    backup_dir: str | None = None
+    # acciones-comerciales: ruta al aexcel.xlsx real para validar el pick de
+    # precio por terna contra la fuente (RF-12/Decision 14). None => sin validación.
+    aexcel_path: str | None = None
 
 
 class ReportFilters(BaseModel):
@@ -118,7 +200,38 @@ class ReportFilters(BaseModel):
     agrupar_por_generico: bool | None = None  # historico-cliente: all marcas grouped by generico
     marcas_completas: bool | None = None      # historico-cliente: fill full marca universe (0 if not bought)
     genericos_universo: list[str] | None = None  # genericos whose full marca set defines the universe
+    solo_con_cargo: bool | None = None         # historico-cliente: exclude 100%-discount (gift) units
+    con_detalle_clientes: bool | None = None   # comparativo-salta: include the per-client volume sheet
+    anios_mensual: list[int] | None = None     # comparativo-salta: años de la hoja mensual
+    sucursal_comparativa: str | None = None    # comparativo-salta: sucursal apilada año contra año
+    meses_vendedor: list[str] | None = None    # comparativo-salta: meses de la hoja por preventista
+    # comparativo-salta: bloques de columnas armados a mano. Cada uno:
+    # {"grupo": str, "sabor": str, "calibre": str, "meses": [str], "cupo": float|None}
+    bloques_vendedor: list[dict] | None = None
+    id_sucursal_vendedor: int | None = None    # comparativo-salta: sucursal de la hoja por preventista
+    excluir_vendedores: list[str] | None = None  # comparativo-salta: preventistas dados de baja
     con_lista_precio: bool | None = None      # descuentos: si False, no genera la hoja "lista_precio"
+    # ventas-marca / ventas-cober-preventista-marca: agrega una columna con el mes
+    # anterior completo, DERIVADO de fecha_desde (nunca escrito en el config).
+    incluir_mes_anterior: bool | None = None
+    # ventas-cober-preventista-marca: columna Objetivo = % de la cobertura de otra
+    # marca. {"marca","pct_anterior","pct_actual","base_actual"} — ver el servicio.
+    objetivo_cobertura: dict | None = None
+    # ventas-cober-preventista-marca: piso de VOLUMEN al pie del bloque de preventistas.
+    clausula_gatillo: float | None = None
+    # incentivo-salta: xlsx con los bloques y los cupos fijos por preventista.
+    objetivos_path: str | None = None
+    # cobertura: apertura del informe (que columnas forman el index del pivot).
+    apertura_cobertura: Literal[
+        "preventista_generico", "preventista_marca", "sucursal_marca"
+    ] | None = None
+    # cobertura: offsets en meses respecto del mes de fecha_desde, uno por columna
+    # de periodo. Default [13, 1] = mismo mes del año anterior contra el mes
+    # cerrado. NUNCA se escriben periodos literales: el daily patchea fechas pero
+    # no el resto del JSON, y un mes a mano se desincroniza al cambiar de mes.
+    meses_atras: list[int] | None = None
+    # avances: override per-report de skip_cupos (default: heredar del global).
+    skip_cupos: bool | None = None
 
 
 class ReportEntry(BaseModel):
@@ -142,7 +255,7 @@ class ReportEntry(BaseModel):
 class ReportConfig(BaseModel):
     """Top-level structure of a report config file (e.g. ventas.json)."""
 
-    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "stock-badie"]
+    tipo: Literal["ventas", "resumen-mensual", "champions-league", "historico-fratelli", "stock-diario", "cartesiano", "avances", "graficos-cobertura", "ventas-articulo", "historico-cliente", "reporte-general-badie", "reporte-rebotes", "reporte-incentivo-cobertura", "reporte-descuentos", "subdistribuidores", "stock-suria", "stock-suria-control", "ventas-marca", "ventas-cober-preventista-marca", "incentivo-salta", "stock-badie", "stock-valorizado", "cupo-desagregado", "comparativo-salta", "cobertura", "cobertura-cupos", "cobertura-aguas", "cobertura-levite", "quesos", "volumen-cobertura", "acciones-comerciales"]
     filtros: GlobalFilters
     reportes: list[ReportEntry]
 

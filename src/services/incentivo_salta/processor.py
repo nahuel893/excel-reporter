@@ -1,0 +1,85 @@
+"""Logica pura del incentivo preventa SALTA.
+
+La cobertura usa el criterio `> 0`, igual que el resto del proyecto: cuenta el
+cliente con neto POSITIVO en el corte.
+
+Hasta el 2026-08-19 este informe usaba umbral 0.5 bultos —media caja— para
+dejar afuera al pdv de compromiso que se lleva una o dos botellas de un pack de
+doce. El negocio cambio ese criterio: ahora cualquier compra neta positiva
+cuenta. El umbral quedo parametrizable por si vuelve a moverse.
+"""
+import calendar
+from datetime import date
+
+import pandas as pd
+
+# Cambiado de 0.5 a 0.0 el 2026-08-19 a pedido de Nahuel. Va con el `>` de
+# abajo, NO con `>=`: con `>= 0` entraria el cliente cuyo neto da exactamente
+# cero —compro y devolvio todo— que es justo lo que la cobertura no debe contar.
+UMBRAL_BULTOS = 0.0
+
+_CLIENTE_KEY = ["id_cliente", "id_sucursal"]
+
+
+def ventana_del_mes(mes: str, hasta: str | None = None) -> tuple[str, str]:
+    """Rango [desde, hasta] del mes 'YYYY-MM', recortado por `hasta` si aplica.
+
+    Un mes cerrado devuelve el mes entero; el mes en curso se corta en `hasta`
+    para no pedirle a la base dias que todavia no existen.
+    """
+    anio, m = (int(x) for x in mes.split("-"))
+    desde = date(anio, m, 1)
+    fin = date(anio, m, calendar.monthrange(anio, m)[1])
+    if hasta:
+        tope = date.fromisoformat(hasta)
+        fin = min(fin, tope)
+    return desde.isoformat(), fin.isoformat()
+
+
+def mes_ya_empezo(mes: str, hoy: str) -> bool:
+    """True si el mes del bloque ya arranco a la fecha `hoy`.
+
+    Un bloque cuyo mes todavia no llego se deja EN BLANCO, no en cero: un cero
+    se lee como "no vendio nada" y pintaria el semaforo en rojo antes de tiempo.
+    """
+    return mes <= hoy[:7]
+
+
+def contar_cobertura(
+    df: pd.DataFrame, sabor: str, calibre: str, umbral: float = UMBRAL_BULTOS
+) -> dict[str, int]:
+    """Clientes distintos por preventista que llegan al umbral en ese corte.
+
+    Se totaliza por cliente DENTRO del corte (sabor + calibre) y recien despues
+    se filtra. Agrupar antes de filtrar es lo que hace que un cliente cuya
+    devolucion cancela la compra quede afuera, y que uno que llego al umbral en
+    varias compras chicas quede adentro.
+
+    El filtro es ESTRICTO (`>`): el neto tiene que superar el umbral, no
+    igualarlo. Con umbral 0 eso es exactamente "neto positivo".
+    """
+    if df.empty:
+        return {}
+    d = df[(df["sabor"] == sabor) & (df["calibre"] == calibre)]
+    if d.empty:
+        return {}
+    neto = d.groupby(_CLIENTE_KEY + ["preventista"], as_index=False)["bultos"].sum()
+    return neto[neto["bultos"] > umbral].groupby("preventista").size().to_dict()
+
+
+def cobertura_total(
+    df: pd.DataFrame, sabor: str, calibre: str, umbral: float = UMBRAL_BULTOS
+) -> int:
+    """Clientes distintos del corte, sin abrir por preventista.
+
+    Se cuenta desde el grano y no sumando los preventistas. En la practica dan
+    igual porque cada cliente pertenece a una sola ruta, pero contar desde el
+    grano no depende de que eso siga siendo cierto.
+    """
+    if df.empty:
+        return 0
+    d = df[(df["sabor"] == sabor) & (df["calibre"] == calibre)]
+    if d.empty:
+        return 0
+    neto = d.groupby(_CLIENTE_KEY, as_index=False)["bultos"].sum()
+    return int((neto["bultos"] > umbral).sum())

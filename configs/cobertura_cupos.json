@@ -1,0 +1,19 @@
+{
+    "tipo": "cobertura-cupos",
+    "filtros": {
+        "fecha_desde": "2026-08-01",
+        "fecha_hasta": "2026-08-31",
+        "con_slicers": false,
+        "enviar_email": false,
+        "enviar_whatsapp": true,
+        "whatsapp_enviar_como": "archivo"
+    },
+    "reportes": [
+        {
+            "nombre": "Cobertura y Cupos CCU",
+            "enviar_a": {
+                "Gonzalo Farah": {"via": ["whatsapp"]}
+            }
+        }
+    ]
+}

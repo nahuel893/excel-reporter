@@ -1,0 +1,48 @@
+{
+    "tipo": "incentivo-salta",
+    "filtros": {
+        "fecha_desde": "2026-08-01",
+        "fecha_hasta": "2026-08-04",
+        "id_sucursal": 1,
+        "enviar_email": false,
+        "enviar_whatsapp": true,
+        "whatsapp_enviar_como": "imagen",
+        "whatsapp_caption_imagenes": false,
+        "_caption_nota": "Las imagenes van SIN texto. Se declara ACA y no en el default de GlobalFilters porque el default ya se volvio a true una vez (5d729b5, avance-badie, que si quiere caption en sus bloques). Declarado en el config, no lo pisa el cambio de otro informe.",
+        "fecha_modo": "hoy"
+    },
+    "reportes": [
+        {
+            "nombre": "Incentivo Preventa SALTA",
+            "filtros": {
+                "objetivos_path": "configs/objetivos_incentivo_salta.xlsx",
+                "excluir_vendedores": [
+                    "RUIZ MARCELO",
+                    "SUB DISTRIBUIDOR",
+                    "VENDEDOR CHOPERAS",
+                    "DIRECTA",
+                    "(sin asignar)"
+                ]
+            },
+            "capture_images": [
+                {
+                    "hoja": "Incentivo Preventa",
+                    "rango": "A1:M40",
+                    "renderer": "libreoffice"
+                }
+            ],
+            "enviar_a": {
+                "Preventa Salta": {
+                    "via": [
+                        "whatsapp"
+                    ]
+                },
+                "Gonzalo Farah": {
+                    "via": [
+                        "whatsapp"
+                    ]
+                }
+            }
+        }
+    ]
+}
