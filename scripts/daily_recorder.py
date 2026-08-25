@@ -23,21 +23,24 @@ A report that was built correctly and then held back by the RAM guard is a
 success that was suppressed. Collapsing that into one column loses the half
 that tells you whether to go fix something.
 
-NOT WIRED UP YET. `scripts/run_daily.py` does not import this module: adding
-the hooks means editing the script systemd runs at 07:00, which is its own
-work unit. Until that lands, nothing here executes outside the test suite, and
-run_artifacts (RF-05) stays empty — artifact discovery belongs to the
-service_done hook.
+Wired into scripts/run_daily.py as six one-line hooks (design decision E1 — a
+ContextVar handle, so no existing function signature had to change):
 
-Intended use from run_daily.py (design decision E1 — a ContextVar handle, so
-no existing function signature has to change):
-
-    with recording_run(hoy=hoy, test_mode=test_mode, solo_canal=...) as rec:
+    with recording_run(hoy=..., test_mode=..., solo_canal=...):
         emit("run_meta", overrides=overrides)
         ...
-        emit("service_start", service=svc.nombre, fecha_modo=svc.fecha_modo)
-        emit("gate", service=svc.nombre, delivery_gate="ram_guard_whatsapp")
-        emit("service_done", service=svc.nombre, exit_code=code, enviar=enviar)
+        emit("service_skipped", service=..., skip_reason=razon)
+        emit("service_start", service=..., fecha_modo=..., fecha_desde=...)
+        emit("gate", service=..., delivery_gate="ram_guard_imagenes")
+        emit("service_done", service=..., exit_code=code, enviar=enviar)
+        emit("service_exception", service=..., error_traceback=...)
+
+None of those call sites carries a try/except. That is the point of E2, and a
+test parses run_daily.py to keep it true.
+
+test_mode and solo_canal are NOT repeated by the hooks: recording_run() was
+already told them, and reading them from the per-event fields once made a whole
+test-mode run record delivery_status='sent' while nothing left the building.
 """
 from __future__ import annotations
 
@@ -57,8 +60,10 @@ from sqlalchemy.orm import Session
 from src.api.daily_store import (
     DailyRun,
     DailyRunService,
+    RunArtifact,
     init_daily_store,
 )
+from src.core.output_paths import service_output_dir
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +73,13 @@ ROOT = Path(__file__).resolve().parent.parent
 _GIT_TIMEOUT_SECONDS = 5
 
 # Retention for the daily's own logs (RF-07).
+#
+# NO PRODUCER YET. Nothing writes files into this directory and no hook emits
+# log_path: the daily's output goes to journald, which the panel already reads
+# through /mgmt/schedule/journal. So pruning is a no-op in production today —
+# it returns at the is_dir() check. It ships anyway because the dangling-pointer
+# sweep repairs log_path whoever eventually fills it, and because turning a
+# retention policy on later is worse than having it already correct.
 #
 # Its own SUBDIRECTORY, not data/runs/ itself. That directory belongs to
 # src/api/runner.py, which writes {timestamp}-{slug}.log for manual panel runs
@@ -89,10 +101,11 @@ _SERVICE_WRITABLE = frozenset({
     "fecha_desde",
     "fecha_hasta",
     "exit_code",
-    # No event sets status='skipped': a skipped service writes no row at all,
-    # and the read side rebuilds it from overrides_snapshot (design decision
-    # E5). skip_reason stays writable for that read side and for a future
-    # explicit skip hook — the recorder itself never fills it.
+    # Written by the service_skipped hook, correcting design decision E5: the
+    # reason is computed at runtime ("dia 3 < 8: margen para cargar los
+    # objetivos del mes") and appears in no config file, so rebuilding it from
+    # overrides_snapshot at read time would lose it. Read-time reconstruction
+    # still covers services that left no row at all — the ones --only excluded.
     "skip_reason",
     "delivery_gate",
     "delivery_gate_detail",
@@ -189,6 +202,12 @@ def _derive_delivery_status(
         # different problems and lead to different fixes.
         return "suppressed" if delivery_gate else "none_configured"
     if fields.get("solo_canal", solo_canal):
+        return "partial"
+    if delivery_gate:
+        # Delivery happened, but a gate already changed what went out. The RAM
+        # guard is the live case: it drops the images and lets the mail go, so
+        # whoever waits for them in the WhatsApp group gets nothing. Calling
+        # that "sent" would hide the case the guard exists to make visible.
         return "partial"
     return "sent"
 
@@ -292,6 +311,14 @@ class RunRecorder:
                 row.status = "running"
                 row.started_at = now.isoformat()
 
+            elif event == "service_skipped":
+                # Written down rather than rebuilt at read time, because the
+                # reason is computed at runtime: `desde_dia_del_mes` produces
+                # "dia 3 < 8: margen para cargar los objetivos del mes", a
+                # sentence that appears in no config file. started_at stays
+                # NULL — it never started.
+                row.status = "skipped"
+
             elif event == "service_done":
                 # Delivery is answered even when generation is unclear: the two
                 # axes are independent and one missing reading must not blank
@@ -314,10 +341,16 @@ class RunRecorder:
                 else:
                     row.status = "success" if exit_code == 0 else "error"
                     self._finish(row, now)
+                self._record_artifacts(session, row, now)
 
             elif event == "service_exception":
                 row.status = "exception"
                 self._finish(row, now)
+                # Also here, not only on service_done: a service that wrote its
+                # xlsx and then crashed in the delivery step still produced the
+                # file, and that is precisely the run where someone needs to
+                # know which files exist.
+                self._record_artifacts(session, row, now)
                 # delivery_status is deliberately left as it stands. This hook
                 # fires from an except block that knows nothing about whether
                 # anything was sent, and a crash can land on either side of the
@@ -326,6 +359,108 @@ class RunRecorder:
                 # delivery_gate still says so.
 
             session.commit()
+
+    def _record_artifacts(
+        self, session: Session, row: DailyRunService, now: datetime
+    ) -> None:
+        """Record the files this service just wrote (RF-06).
+
+        Discovery is by filesystem, not by asking the pipeline: the services
+        are off limits to this feature, and they do not report what they wrote.
+        Both the monthly and the daily layout are probed rather than keeping a
+        slug-to-granularity table that would go stale the next time a service
+        is added.
+
+        Wrapped in its own try/except so a filesystem that will not cooperate
+        costs the run its file list, not its service row.
+        """
+        try:
+            session.flush()  # the row needs an id before artifacts can point at it
+            started = self._parse_started(row) or self.started_at
+            sent = row.delivery_status in ("sent", "partial")
+            # Seeded with what this row already has, not just with what this
+            # call finds. Discovery runs on both the done and the exception
+            # path, and a service_done followed by a failure in the temp-file
+            # cleanup reaches both — listing every file twice on exactly the
+            # run that is already confusing.
+            seen: set[str] = set(
+                session.execute(
+                    select(RunArtifact.path).where(
+                        RunArtifact.service_row_id == row.id
+                    )
+                ).scalars()
+            )
+
+            for granularity in ("month", "day"):
+                directory = service_output_dir(row.servicio, row.fecha_desde, granularity)
+                for path in self._iter_output_files(directory):
+                    try:
+                        stat = path.stat()
+                    except OSError:
+                        continue
+                    modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+                    # Last month's report is still on disk; it is not today's
+                    # output. The window is what this service ran in.
+                    if not (started <= modified <= now):
+                        continue
+                    relative = self._relative_to_output(path)
+                    if relative in seen:
+                        continue
+                    seen.add(relative)
+                    session.add(
+                        RunArtifact(
+                            service_row_id=row.id,
+                            path=relative,
+                            kind=path.suffix.lstrip(".").lower() or None,
+                            size_bytes=stat.st_size,
+                            mtime=modified.isoformat(),
+                            # Per service, not per file: the pipeline reports one
+                            # delivery outcome for the whole report, so this is an
+                            # approximation and a documented one.
+                            sent=sent,
+                        )
+                    )
+        except Exception as exc:  # noqa: BLE001 — same contract as emit()
+            logger.warning(
+                "daily_recorder: could not list the output of %s (non-fatal): %r",
+                row.servicio,
+                exc,
+            )
+
+    @staticmethod
+    def _iter_output_files(directory: Path):
+        """Files directly in the period directory, plus one level below it.
+
+        One level is what graficos-cobertura needs for its png/ subdirectory,
+        and it stops short of walking a tree nobody bounded.
+        """
+        if not directory.is_dir():
+            return
+        for entry in directory.iterdir():
+            if entry.is_file():
+                yield entry
+            elif entry.is_dir():
+                for child in entry.iterdir():
+                    if child.is_file():
+                        yield child
+
+    @staticmethod
+    def _relative_to_output(path: Path) -> str:
+        import config.settings as _settings  # call-time bind, as output_paths does
+
+        try:
+            return str(path.resolve().relative_to(Path(_settings.DATA_OUTPUT).resolve()))
+        except (OSError, ValueError):
+            return str(path)
+
+    @staticmethod
+    def _parse_started(row: DailyRunService) -> Optional[datetime]:
+        if not row.started_at:
+            return None
+        try:
+            return datetime.fromisoformat(row.started_at)
+        except ValueError:
+            return None
 
     @staticmethod
     def _finish(row: DailyRunService, now: datetime) -> None:
@@ -471,6 +606,8 @@ def _sweep_missing_log_pointers(engine) -> None:
     panel. Checking existence rather than replaying what this function just
     deleted also repairs logs taken by logrotate, tmpfiles or a human.
     """
+    if engine is None:
+        return
     with Session(engine) as session:
         for model in (DailyRun, DailyRunService):
             rows = session.execute(
@@ -480,6 +617,35 @@ def _sweep_missing_log_pointers(engine) -> None:
                 if not _resolve_log(row.log_path).exists():
                     row.log_path = None
         session.commit()
+
+
+def _prune_log_files(
+    runs_dir: Path,
+    max_age_days: float = _LOG_MAX_AGE_DAYS,
+    max_total_mb: float = _LOG_MAX_TOTAL_MB,
+) -> None:
+    """Delete old log FILES. Never raises.
+
+    Separate from the pointer repair because it does not need the database: a
+    store that will not open is no reason to let the disk keep filling.
+    """
+    try:
+        _delete_stale_logs(Path(runs_dir), max_age_days, max_total_mb)
+    except Exception as exc:  # noqa: BLE001 — same contract as emit()
+        logger.warning("daily_recorder: log pruning failed (non-fatal): %r", exc)
+
+
+def _repair_log_pointers(engine) -> None:
+    """NULL log_path rows whose file is gone. Never raises.
+
+    Runs only after the store is initialized: on a fresh install the tables do
+    not exist yet, and querying them would log a warning about a problem that
+    is not one.
+    """
+    try:
+        _sweep_missing_log_pointers(engine)
+    except Exception as exc:  # noqa: BLE001 — same contract as emit()
+        logger.warning("daily_recorder: log pointer sweep failed (non-fatal): %r", exc)
 
 
 def _prune_logs(
@@ -492,19 +658,9 @@ def _prune_logs(
 
     A run's outcome stays interesting for months; its stdout for about a week.
     So the history never shrinks — only the text does.
-
-    Two independent try/excepts on purpose: a database that cannot be swept is
-    no reason to let the disk keep filling.
     """
-    try:
-        _delete_stale_logs(Path(runs_dir), max_age_days, max_total_mb)
-    except Exception as exc:  # noqa: BLE001 — same contract as emit()
-        logger.warning("daily_recorder: log pruning failed (non-fatal): %r", exc)
-
-    try:
-        _sweep_missing_log_pointers(engine)
-    except Exception as exc:  # noqa: BLE001 — same contract as emit()
-        logger.warning("daily_recorder: log pointer sweep failed (non-fatal): %r", exc)
+    _prune_log_files(runs_dir, max_age_days, max_total_mb)
+    _repair_log_pointers(engine)
 
 
 _current: ContextVar[Optional[RunRecorder]] = ContextVar("_current_recorder", default=None)
@@ -535,10 +691,22 @@ def _open_recorder(
     try:
         if engine is None:
             engine = _default_engine()
+    except Exception as exc:  # noqa: BLE001 — same contract as emit()
+        logger.warning(
+            "daily_recorder: no engine, instrumentation disabled for this run: %r", exc
+        )
+        return NullRecorder(run_id=run_id, started_at=started_at)
+
+    # Housekeeping rides the run that is about to start: it is the one moment
+    # this code is guaranteed to execute, and neither half ever raises. The
+    # file half goes BEFORE the store is initialized — a database that will not
+    # open is no reason to let the disk keep filling. The pointer repair goes
+    # after, because on a fresh install the tables do not exist yet.
+    _prune_log_files(RUNS_DIR)
+
+    try:
         init_daily_store(engine)
-        # Housekeeping rides the run that is about to start: it is the one
-        # moment this code is guaranteed to execute, and it never raises.
-        _prune_logs(RUNS_DIR, engine)
+        _repair_log_pointers(engine)
         with Session(engine) as session:
             session.add(
                 DailyRun(

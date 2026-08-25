@@ -276,11 +276,26 @@ desarrollo, por eso el panel usa 8010. El proxy de Vite apunta ahi
 Modulo que registra cada corrida del daily en `data/mgmt.db` (tablas de
 `src/api/daily_store.py`).
 
-> **Todavia NO esta enganchado.** `scripts/run_daily.py` no lo importa: los
-> hooks implican editar el script que systemd corre a las 07:00, y eso es una
-> unidad de trabajo aparte. Hasta que entre, nada de esto se ejecuta fuera de
-> los tests y `run_artifacts` queda vacia (el descubrimiento de archivos vive
-> en el hook `service_done`).
+Enganchado en `scripts/run_daily.py` como **ocho llamadas de una linea**
+(siete eventos; `gate` aparece dos veces, una por compuerta):
+
+| Hook | Que captura |
+|---|---|
+| `run_meta` | overrides, branch/sha/arbol sucio, RAM libre |
+| `service_skipped` | la razon que el daily calculo para no correrlo |
+| `service_start` | la ventana de fechas ya patcheada |
+| `gate` | que compuerta cambio la entrega, y como |
+| `service_done` | exit code y si salio |
+| `service_exception` | el traceback |
+| `run_done` | el exit code que `main()` devuelve |
+
+Ninguno lleva try/except propio — un test parsea `run_daily.py` con `ast` para
+que siga siendo cierto.
+
+Tres capturan cosas que no existen en ningun otro lado: la ventana patcheada
+solo vive en memoria (va a un temp file que el `finally` borra), el traceback se
+descarta hoy (el `except` guarda `repr(exc)` y la pila se pierde), y el exit code
+de la corrida se calculaba y se tiraba.
 
 La regla que gobierna todo el diseno: **la
 instrumentacion nunca puede ser la razon de que un informe falle.** El
@@ -301,15 +316,61 @@ Dos ejes que no se colapsan (RF-04):
 Un avance generado bien y frenado despues por el guard de RAM es un exito
 suprimido, no una falla.
 
+### Las dos compuertas no significan lo mismo
+
+| Compuerta | Que hace | `delivery_status` |
+|---|---|---|
+| `objetivo_no_cargado` | pone `enviar=False`: no sale nada | `suppressed` |
+| `ram_guard_imagenes` | saca las capturas, el mail sale igual | `partial` |
+
+El guard de RAM **no frena la entrega**, la degrada: el mail sale con el xlsx y
+el grupo de WhatsApp no recibe nada. Registrar eso como `sent` esconderia
+justamente el caso que el guard existe para hacer visible. Por eso la regla
+general es: entrega que ocurrio con una compuerta ya disparada es `partial`.
+
+### Los skips SI se escriben (correccion a E5)
+
+El diseno original los reconstruia 100% en lectura desde `overrides_snapshot`.
+No alcanza: `_resolver_flags` arma la razon en tiempo de ejecucion
+(`"dia 3 < 8: margen para cargar los objetivos del mes"`), una frase que no
+esta en ningun archivo. El hook `service_skipped` la escribe donde se conoce.
+
+La reconstruccion en lectura sigue existiendo para lo que no dejo fila —
+por ejemplo los servicios que `--only` dejo afuera.
+
 **Tres lugares se niegan a adivinar**: un servicio que sigue en `running` al
 cerrar (nunca reporto) cierra la corrida en `partial`/`interrupted` en vez de
 contarlo como exito; un `service_done` sin exit code deja la fila en `running`;
 git que no se pudo leer guarda NULL, no `False`.
 
+### Descubrimiento de artefactos (RF-06)
+
+En `service_done` **y en `service_exception`** el recorder lista lo que el
+servicio escribio. Tambien en la excepcion porque un servicio puede escribir su
+xlsx y romperse despues en la entrega — y esa es justo la corrida donde hace
+falta saber que archivos hay. Prueba
+`service_output_dir(nombre, fecha_desde, "month")` **y** `("day")` — asi
+agregar un servicio nuevo no obliga a mantener una tabla slug-a-granularidad — y
+se queda con los archivos cuyo `mtime` cae dentro de la ventana del servicio.
+El informe del mes pasado sigue en disco y no es salida de hoy.
+
+Baja un nivel de subdirectorio (`graficos-cobertura/{YYYY-MM}/png/`) y no mas.
+`sent` es **por servicio, no por archivo**: el pipeline reporta una sola
+entrega para todo el reporte.
+
 #### Retencion de logs
 
-`_prune_logs()` corre al abrir cada corrida. Borra **archivos**, nunca filas: el
-resultado de una corrida sirve por meses, su stdout por una semana.
+> **Todavia no hay productor.** Nada escribe archivos en `data/runs/daily/` y
+> ningun hook emite `log_path`: la salida del daily va a journald, que el panel
+> ya lee por `/mgmt/schedule/journal`. O sea que hoy la poda es un no-op — sale
+> por el chequeo de `is_dir()`. Va igual porque el barrido de punteros repara
+> `log_path` sea quien sea que lo llene, y porque encender una politica de
+> retencion despues es peor que tenerla ya correcta.
+
+`_prune_logs()` corre al abrir cada corrida, **antes** de inicializar el store:
+una base que no abre no es motivo para dejar que el disco se siga llenando.
+Borra **archivos**, nunca filas: el resultado de una corrida sirve por meses,
+su stdout por una semana.
 
 | Umbral | Valor |
 |--------|-------|

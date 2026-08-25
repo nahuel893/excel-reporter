@@ -552,3 +552,296 @@ def test_started_at_is_utc_and_iso(engine):
     parsed = datetime.fromisoformat(_runs(engine)[0].started_at)
     assert parsed.tzinfo is not None
     assert parsed.utcoffset() == timezone.utc.utcoffset(None)
+
+
+# ---------------------------------------------------------------------------
+# Skipped services (the daily decides this at runtime, not in the config)
+# ---------------------------------------------------------------------------
+
+
+def test_a_skipped_service_records_the_reason_the_daily_computed(engine):
+    """The reason is not always in the overrides file.
+
+    `desde_dia_del_mes: 8` produces "dia 3 < 8: margen para cargar los
+    objetivos del mes" at runtime — a sentence that exists nowhere on disk.
+    Rebuilding the row from the overrides at read time would lose it, so the
+    skip is written down where it is known.
+    """
+    with recording_run(hoy="2026-08-03", test_mode=False, engine=engine) as rec:
+        emit(
+            "service_skipped",
+            service="avance-badie",
+            skip_reason="dia 3 < 8: margen para cargar los objetivos del mes",
+        )
+
+    row = _services(engine, rec.run_id)[0]
+    assert row.status == "skipped"
+    assert "margen para cargar los objetivos" in row.skip_reason
+    assert row.delivery_status is None
+    assert row.started_at is None  # it never started
+
+
+def test_a_run_of_only_skips_is_not_a_failure(engine):
+    with recording_run(hoy="2026-08-03", test_mode=False, engine=engine):
+        emit("service_skipped", service="a", skip_reason="apagado")
+        emit("service_skipped", service="b", skip_reason="apagado")
+
+    assert _runs(engine)[0].status == "success"
+
+
+# ---------------------------------------------------------------------------
+# A gate that degrades delivery without stopping it
+# ---------------------------------------------------------------------------
+
+
+def test_a_gate_that_did_not_stop_delivery_still_makes_it_partial(engine):
+    """The RAM guard drops the images and lets the mail go.
+
+    So `enviar` is still true and something did go out — but not what the
+    config asked for: whoever waits for the images in the WhatsApp group gets
+    nothing. Calling that 'sent' would hide exactly the case the guard exists
+    to make visible.
+    """
+    with recording_run(hoy="2026-08-24", test_mode=False, engine=engine) as rec:
+        emit("service_start", service="avance-badie")
+        emit(
+            "gate",
+            service="avance-badie",
+            delivery_gate="ram_guard_imagenes",
+            delivery_gate_detail="MemAvailable=812 MB < 1000 MB",
+        )
+        emit("service_done", service="avance-badie", exit_code=0, enviar=True)
+
+    row = _services(engine, rec.run_id)[0]
+    assert row.status == "success"
+    assert row.delivery_status == "partial"
+    assert row.delivery_gate == "ram_guard_imagenes"
+
+
+def test_delivery_with_no_gate_is_plainly_sent(engine):
+    with recording_run(hoy="2026-08-24", test_mode=False, engine=engine) as rec:
+        emit("service_start", service="ventas")
+        emit("service_done", service="ventas", exit_code=0, enviar=True)
+
+    assert _services(engine, rec.run_id)[0].delivery_status == "sent"
+
+
+# ---------------------------------------------------------------------------
+# Artifact discovery (RF-06)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def output_root(tmp_path, monkeypatch):
+    """Point data/output/ at a temp tree.
+
+    service_output_dir binds config.settings.DATA_OUTPUT at call time exactly
+    so this works.
+    """
+    import config.settings as settings
+
+    root = tmp_path / "output"
+    root.mkdir()
+    monkeypatch.setattr(settings, "DATA_OUTPUT", root)
+    return root
+
+
+def _artifacts(engine, run_id: str):
+    from src.api.daily_store import RunArtifact
+
+    with Session(engine) as s:
+        rows = list(s.execute(select(DailyRunService.id).where(
+            DailyRunService.run_id == run_id
+        )).scalars())
+        if not rows:
+            return []
+        return list(s.execute(
+            select(RunArtifact).where(RunArtifact.service_row_id.in_(rows))
+        ).scalars())
+
+
+def test_files_a_service_produced_are_recorded(engine, output_root):
+    period = output_root / "ventas" / "2026-08"
+    period.mkdir(parents=True)
+
+    with recording_run(hoy="2026-08-24", test_mode=False, engine=engine) as rec:
+        emit("service_start", service="ventas", fecha_desde="2026-08-01")
+        (period / "Ventas.xlsx").write_text("x", encoding="utf-8")
+        emit("service_done", service="ventas", exit_code=0, enviar=True)
+
+    found = _artifacts(engine, rec.run_id)
+    assert [a.path for a in found] == ["ventas/2026-08/Ventas.xlsx"]
+    assert found[0].kind == "xlsx"
+    assert found[0].size_bytes == 1
+
+
+def test_a_file_from_an_earlier_run_is_not_claimed_by_this_one(engine, output_root):
+    """Last month's report is still on disk. It is not today's output."""
+    import os
+    import time
+
+    period = output_root / "ventas" / "2026-08"
+    period.mkdir(parents=True)
+    stale = period / "Viejo.xlsx"
+    stale.write_text("x", encoding="utf-8")
+    old = time.time() - 86_400
+    os.utime(stale, (old, old))
+
+    with recording_run(hoy="2026-08-24", test_mode=False, engine=engine) as rec:
+        emit("service_start", service="ventas", fecha_desde="2026-08-01")
+        (period / "Nuevo.xlsx").write_text("x", encoding="utf-8")
+        emit("service_done", service="ventas", exit_code=0, enviar=True)
+
+    assert [a.path for a in _artifacts(engine, rec.run_id)] == ["ventas/2026-08/Nuevo.xlsx"]
+
+
+def test_images_in_a_subdirectory_are_found_too(engine, output_root):
+    """graficos-cobertura drops ~50 PNGs under png/."""
+    png_dir = output_root / "graficos-cobertura" / "2026-08" / "png"
+    png_dir.mkdir(parents=True)
+
+    with recording_run(hoy="2026-08-24", test_mode=False, engine=engine) as rec:
+        emit("service_start", service="graficos-cobertura", fecha_desde="2026-08-01")
+        (png_dir / "zona.png").write_text("x", encoding="utf-8")
+        emit("service_done", service="graficos-cobertura", exit_code=0, enviar=True)
+
+    found = _artifacts(engine, rec.run_id)
+    assert [a.path for a in found] == ["graficos-cobertura/2026-08/png/zona.png"]
+    assert found[0].kind == "png"
+
+
+def test_a_daily_granularity_service_is_found_without_a_hardcoded_mapping(engine, output_root):
+    """stock-diario writes YYYY-MM-DD. Both layouts are probed, so adding a
+    service never means updating a slug-to-granularity table."""
+    period = output_root / "stock-diario" / "2026-08-24"
+    period.mkdir(parents=True)
+
+    with recording_run(hoy="2026-08-24", test_mode=False, engine=engine) as rec:
+        emit("service_start", service="stock-diario", fecha_desde="2026-08-24")
+        (period / "Stock.xlsx").write_text("x", encoding="utf-8")
+        emit("service_done", service="stock-diario", exit_code=0, enviar=True)
+
+    assert [a.path for a in _artifacts(engine, rec.run_id)] == [
+        "stock-diario/2026-08-24/Stock.xlsx"
+    ]
+
+
+def test_sent_mirrors_whether_the_service_delivered(engine, output_root):
+    """Per service, not per file: the pipeline does not report file by file."""
+    period = output_root / "ventas" / "2026-08"
+    period.mkdir(parents=True)
+
+    with recording_run(hoy="2026-08-24", test_mode=False, engine=engine) as rec:
+        emit("service_start", service="ventas", fecha_desde="2026-08-01")
+        (period / "Ventas.xlsx").write_text("x", encoding="utf-8")
+        emit("service_done", service="ventas", exit_code=0, enviar=False)
+
+    found = _artifacts(engine, rec.run_id)
+    assert found[0].sent is False
+
+
+def test_a_missing_output_directory_is_not_an_error(engine, output_root):
+    with recording_run(hoy="2026-08-24", test_mode=False, engine=engine) as rec:
+        emit("service_start", service="servicio-sin-carpeta", fecha_desde="2026-08-01")
+        emit("service_done", service="servicio-sin-carpeta", exit_code=0, enviar=True)
+
+    assert _artifacts(engine, rec.run_id) == []
+    assert _services(engine, rec.run_id)[0].status == "success"
+
+
+def test_artifact_discovery_failing_does_not_fail_the_service_row(engine, monkeypatch):
+    """Same contract as everything else here: best-effort, never fatal."""
+    import scripts.daily_recorder as mod
+
+    def boom(*a, **kw):
+        raise OSError("filesystem went away")
+
+    monkeypatch.setattr(mod, "service_output_dir", boom)
+
+    with recording_run(hoy="2026-08-24", test_mode=False, engine=engine) as rec:
+        emit("service_start", service="ventas", fecha_desde="2026-08-01")
+        emit("service_done", service="ventas", exit_code=0, enviar=True)
+
+    row = _services(engine, rec.run_id)[0]
+    assert row.status == "success"
+    assert row.delivery_status == "sent"
+
+
+def test_a_service_that_crashed_after_writing_still_lists_its_files(engine, output_root):
+    """The delivery step can fail after the xlsx is already on disk.
+
+    That is the run where someone most needs to know which files exist — so
+    the file list is taken on the exception path too, not only on the happy one.
+    """
+    period = output_root / "avance-badie" / "2026-08"
+    period.mkdir(parents=True)
+
+    with recording_run(hoy="2026-08-24", test_mode=False, engine=engine) as rec:
+        emit("service_start", service="avance-badie", fecha_desde="2026-08-01")
+        (period / "Avance.xlsx").write_text("x", encoding="utf-8")
+        emit(
+            "service_exception",
+            service="avance-badie",
+            error_repr="ConnectionError()",
+            error_traceback="Traceback...\nConnectionError",
+        )
+
+    row = _services(engine, rec.run_id)[0]
+    assert row.status == "exception"
+    assert [a.path for a in _artifacts(engine, rec.run_id)] == [
+        "avance-badie/2026-08/Avance.xlsx"
+    ]
+
+
+def test_files_of_a_crashed_service_are_never_marked_as_sent(engine, output_root):
+    """delivery_status is NULL on the exception path, so nothing claims it went out."""
+    period = output_root / "avance-badie" / "2026-08"
+    period.mkdir(parents=True)
+
+    with recording_run(hoy="2026-08-24", test_mode=False, engine=engine) as rec:
+        emit("service_start", service="avance-badie", fecha_desde="2026-08-01")
+        (period / "Avance.xlsx").write_text("x", encoding="utf-8")
+        emit("service_exception", service="avance-badie", error_repr="X()")
+
+    assert _artifacts(engine, rec.run_id)[0].sent is False
+
+
+def test_the_same_file_is_never_recorded_twice_for_one_service(engine, output_root):
+    """Discovery runs on both the done and the exception path.
+
+    A service_done followed by a failure in the temp-file cleanup reaches both,
+    and listing every file twice on exactly the run that is already confusing
+    is the worst moment for it.
+    """
+    period = output_root / "ventas" / "2026-08"
+    period.mkdir(parents=True)
+
+    with recording_run(hoy="2026-08-24", test_mode=False, engine=engine) as rec:
+        emit("service_start", service="ventas", fecha_desde="2026-08-01")
+        (period / "Ventas.xlsx").write_text("x", encoding="utf-8")
+        emit("service_done", service="ventas", exit_code=0, enviar=True)
+        emit("service_exception", service="ventas", error_repr="OSError()")
+
+    assert [a.path for a in _artifacts(engine, rec.run_id)] == [
+        "ventas/2026-08/Ventas.xlsx"
+    ]
+
+
+def test_the_pointer_repair_waits_for_the_tables_to_exist(tmp_path, caplog):
+    """On a fresh install the store has no tables when the file half runs.
+
+    Querying them there would log a warning about a problem that is not one.
+    """
+    import logging
+
+    from scripts.daily_recorder import _prune_log_files, _repair_log_pointers
+
+    fresh = engine_from_url(f"sqlite:///{tmp_path}/fresh.db")
+    runs = tmp_path / "runs"
+    runs.mkdir()
+
+    with caplog.at_level(logging.WARNING):
+        _prune_log_files(runs)          # no database involved at all
+    assert not caplog.records
+
+    _repair_log_pointers(fresh)         # tables absent: survives, does not raise

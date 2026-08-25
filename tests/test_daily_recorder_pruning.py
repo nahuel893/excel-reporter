@@ -267,19 +267,30 @@ def test_an_undeletable_log_does_not_stop_the_rest(engine, runs_dir, monkeypatch
 # ---------------------------------------------------------------------------
 
 
-def test_opening_a_run_prunes_first(tmp_path, monkeypatch):
-    """Pruning has to run somewhere, and a daily run is the natural moment."""
+def test_opening_a_run_does_the_housekeeping(tmp_path, monkeypatch):
+    """Pruning has to run somewhere, and a daily run is the natural moment.
+
+    Order matters and is asserted: the file half runs BEFORE the store is
+    initialized, so a database that will not open still does not let the disk
+    fill; the pointer repair runs AFTER, because on a fresh install the tables
+    do not exist yet and querying them would warn about a non-problem.
+    """
     from scripts import daily_recorder
 
-    calls = []
+    order = []
     monkeypatch.setattr(
-        daily_recorder,
-        "_prune_logs",
-        lambda *a, **kw: calls.append((a, kw)),
+        daily_recorder, "_prune_log_files", lambda *a, **kw: order.append("files")
+    )
+    monkeypatch.setattr(
+        daily_recorder, "init_daily_store", lambda engine: order.append("init")
+    )
+    monkeypatch.setattr(
+        daily_recorder, "_repair_log_pointers", lambda *a, **kw: order.append("repair")
     )
 
     eng = engine_from_url(f"sqlite:///{tmp_path}/daily.db")
+    init_daily_store(eng)  # the real tables, since init is stubbed above
     with daily_recorder.recording_run(hoy="2026-08-24", test_mode=False, engine=eng):
         pass
 
-    assert len(calls) == 1
+    assert order == ["files", "init", "repair"]

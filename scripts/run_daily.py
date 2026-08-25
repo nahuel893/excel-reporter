@@ -47,6 +47,7 @@ import argparse
 import json
 import sys
 import tempfile
+import traceback
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -67,6 +68,10 @@ from src.core.periodos import (  # noqa: E402
     rango_mes_a_hoy,
     rango_mes_completo,
 )
+# Instrumentation. Every emit() below is one line and carries no error handling:
+# the contract that recording never breaks a report lives inside the recorder,
+# in exactly one place. A store that cannot be opened turns emit() into a no-op.
+from scripts.daily_recorder import recording_run, emit  # noqa: E402
 
 
 def _refresh_mv_resumen_mensual() -> None:
@@ -603,6 +608,12 @@ def _ejecutar_servicio(
     raw = json.loads(svc.config_path.read_text(encoding="utf-8"))
     patched = svc.patch(raw, hoy)
 
+    # The only moment the patched window exists in memory: it goes to a temp
+    # file that the finally block below deletes.
+    emit("service_start", service=svc.nombre, fecha_modo=svc.fecha_modo,
+         fecha_desde=patched.get("filtros", {}).get("fecha_desde"),
+         fecha_hasta=patched.get("filtros", {}).get("fecha_hasta"))
+
     # Objetivo gate: opt-in reports (filtros.esperar_objetivo) only deliver once
     # the month's cupos are loaded in gold. Otherwise generate but hold the send.
     if enviar and _objetivo_gate_bloquea(patched):
@@ -612,6 +623,8 @@ def _ejecutar_servicio(
             f"(sucursal {f.get('id_sucursal')}, periodo {str(f.get('fecha_desde', ''))[:7]}) "
             f"— se genera pero NO se envía"
         )
+        emit("gate", service=svc.nombre, delivery_gate="objetivo_no_cargado",
+             delivery_gate_detail=f"sucursal {f.get('id_sucursal')}, periodo {str(f.get('fecha_desde', ''))[:7]}")
         enviar = False
 
     # RAM guard: image-rendering reports (LibreOffice capture, ~2.5 GB) can get
@@ -634,6 +647,8 @@ def _ejecutar_servicio(
                 f"  🧠 {svc.nombre}: RAM insuficiente ({avail} MB < {RAM_MIN_MB_IMAGENES} MB) — "
                 f"se OMITEN las imágenes; el mail sale igual, el grupo no recibe nada"
             )
+            emit("gate", service=svc.nombre, delivery_gate="ram_guard_imagenes",
+                 delivery_gate_detail=f"MemAvailable={avail} MB < {RAM_MIN_MB_IMAGENES} MB — se omiten las imagenes")
             patched = _sacar_capturas(patched)
             _alertar_ram_baja(svc.nombre, avail)
 
@@ -653,7 +668,12 @@ def _ejecutar_servicio(
         report_config = load_report_config(tmp_path)
         contactos = load_contacts(CONTACTOS_PATH) if CONTACTOS_PATH.exists() else {}
         report_config.validate_contacts(contactos)
-        return _run_reportes(report_config, contactos, test_mode=test_mode)
+        code = _run_reportes(report_config, contactos, test_mode=test_mode)
+        # `enviar` is the local value, already lowered by the objetivo gate if
+        # it fired. test_mode and solo_canal belong to the run and the recorder
+        # already has them.
+        emit("service_done", service=svc.nombre, exit_code=code, enviar=enviar)
+        return code
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -710,34 +730,55 @@ def main() -> int:
             print(f"  fecha_hasta: {f.get('fecha_hasta')}")
         return 0
 
-    errores: list[str] = []
-    for svc in servicios:
-        ejecutar, enviar, razon = _resolver_flags(overrides.get(svc.nombre, {}), hoy)
+    # Everything from here on is recorded. The dry-run and the MV refresh above
+    # stay outside: a dry run executes nothing, so there is no run to describe.
+    with recording_run(
+        hoy=hoy.isoformat(),
+        test_mode=test_mode,
+        triggered_by="schedule",
+        solo_canal=args.solo_canal,
+    ):
+        emit("run_meta", overrides=overrides)
+
+        errores: list[str] = []
+        for svc in servicios:
+            ejecutar, enviar, razon = _resolver_flags(overrides.get(svc.nombre, {}), hoy)
+
+            print(f"\n{'=' * 60}")
+            if not ejecutar:
+                print(f"  ⏭️  SKIP: {svc.nombre}{f' — {razon}' if razon else ''}")
+                print(f"{'=' * 60}")
+                # Written down rather than inferred later: _resolver_flags builds
+                # this reason at runtime and it appears in no config file.
+                emit("service_skipped", service=svc.nombre, skip_reason=razon or None)
+                continue
+            if not enviar:
+                print(f"  Ejecutando: {svc.nombre}  (📵 sin envío{f' — {razon}' if razon else ''})")
+            else:
+                print(f"  Ejecutando: {svc.nombre}")
+            print(f"{'=' * 60}")
+            try:
+                code = _ejecutar_servicio(svc, hoy, test_mode=test_mode, enviar=enviar, solo_canal=args.solo_canal)
+                if code != 0:
+                    errores.append(f"{svc.nombre} (exit {code})")
+            except Exception as exc:  # noqa: BLE001
+                # The only place the traceback still exists: the print below
+                # keeps just repr(exc) and the stack is gone after this.
+                emit("service_exception", service=svc.nombre, error_repr=repr(exc),
+                     error_traceback=traceback.format_exc())
+                print(f"ERROR en {svc.nombre}: {exc!r}")
+                errores.append(f"{svc.nombre} (exception: {exc})")
 
         print(f"\n{'=' * 60}")
-        if not ejecutar:
-            print(f"  ⏭️  SKIP: {svc.nombre}{f' — {razon}' if razon else ''}")
-            print(f"{'=' * 60}")
-            continue
-        if not enviar:
-            print(f"  Ejecutando: {svc.nombre}  (📵 sin envío{f' — {razon}' if razon else ''})")
-        else:
-            print(f"  Ejecutando: {svc.nombre}")
-        print(f"{'=' * 60}")
-        try:
-            code = _ejecutar_servicio(svc, hoy, test_mode=test_mode, enviar=enviar, solo_canal=args.solo_canal)
-            if code != 0:
-                errores.append(f"{svc.nombre} (exit {code})")
-        except Exception as exc:  # noqa: BLE001
-            print(f"ERROR en {svc.nombre}: {exc!r}")
-            errores.append(f"{svc.nombre} (exception: {exc})")
-
-    print(f"\n{'=' * 60}")
-    if errores:
-        print(f"Completado con errores: {errores}")
-        return 1
-    print(f"Todos los servicios OK ({len(servicios)}/{len(servicios)})")
-    return 0
+        if errores:
+            print(f"Completado con errores: {errores}")
+            # The number systemd acts on. Derived from the children it would be
+            # a guess; here it is the value actually returned.
+            emit("run_done", exit_code=1)
+            return 1
+        print(f"Todos los servicios OK ({len(servicios)}/{len(servicios)})")
+        emit("run_done", exit_code=0)
+        return 0
 
 
 if __name__ == "__main__":
