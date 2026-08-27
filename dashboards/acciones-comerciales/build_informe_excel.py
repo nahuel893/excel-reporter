@@ -604,12 +604,25 @@ def load_gold():
         WHERE fv.fecha_comprobante BETWEEN '{PERIODO_DESDE}' AND '{PERIODO_HASTA}'
           AND fv.anulado = false
         GROUP BY 1,2,3""", dl.engine)
-    cob = pd.read_sql("""
-        SELECT ds_sucursal AS sucursal, generico, des_lista_precio AS lista,
-               SUM(clientes_compradores) AS clientes_cob, SUM(volumen_total) AS volumen
-        FROM gold.cob_sucursal_lista_generico
-        WHERE periodo = '2026-07-01'
-        GROUP BY 1,2,3""", dl.engine)
+    # Cobertura al grano (sucursal, generico), del periodo del informe.
+    #
+    # Dos correcciones respecto de lo que hacia antes:
+    #  1. El periodo estaba escrito a mano ('2026-07-01'). Se deriva del corte,
+    #     asi no puede volver a quedar un mes atras sin que nadie lo note.
+    #  2. Salia de cob_sucursal_lista_generico SUMANDO las listas. La cobertura
+    #     NO es aditiva: el mismo cliente compra en dos listas y se cuenta dos
+    #     veces. Ademas ese corte trae 130 filas contra las 144 del corte por
+    #     generico, o sea que ademas perdia combinaciones. Se lee la tabla que
+    #     ya esta calculada en el grano que se quiere mostrar.
+    periodo_cob = PERIODO_DESDE[:8] + "01"
+    cob = pd.read_sql(f"""
+        SELECT ds_sucursal AS sucursal, generico,
+               clientes_compradores AS clientes_cob, volumen_total AS volumen
+        FROM gold.cob_sucursal_generico
+        WHERE periodo = '{periodo_cob}'""", dl.engine)
+    if cob.empty:
+        print(f"    WARN: no hay cobertura para el periodo {periodo_cob} en "
+              f"gold.cob_sucursal_generico; las columnas de cobertura quedan vacias")
     # Evolucion diaria: facturacion y descuentos POR DIA, abiertos en CCU y
     # resto. Antes esta hoja salia del wapi, que trae SOLO las lineas con
     # accion promocional: la facturacion quedaba corta ($3.424 M contra los
@@ -1880,11 +1893,12 @@ def build(out_path: Path):
     base["Clientes"] = pd.to_numeric(base.Clientes, errors="coerce")
     accs = acc.groupby("sucursal").accion.nunique().rename("Acciones")
     base = base.merge(accs, left_on="Sucursal", right_index=True, how="left")
-    cobs = cob.groupby("sucursal").clientes_cob.sum().rename("Cobertura")
-    base["sn"] = base.Sucursal.str.replace(r"^\d+\s*-\s*", "", regex=True).str.upper().str.strip()
-    base = base.merge(cobs.rename_axis("sn").reset_index().assign(sn=lambda d: d.sn.str.upper().str.strip()),
-                      on="sn", how="left")
-    mat = base[["Facturación", "Descuentos", "% Desc.", "Bultos", "Clientes", "Acciones", "Cobertura"]].astype(float)
+    # Antes: cob.groupby("sucursal").clientes_cob.sum() — sumaba la cobertura de
+    # todos los genericos de la sucursal. Un cliente que compra 4 genericos
+    # contaba 4 veces: daba 35.729 contra 11.415 clientes reales (+213%).
+    # La cobertura de una sucursal es un conteo de clientes distintos, no una
+    # suma de coberturas; `Clientes` ya lo trae contado al grano sucursal.
+    mat = base[["Facturación", "Descuentos", "% Desc.", "Bultos", "Clientes", "Acciones"]].astype(float)
     mat = mat.dropna(axis=1, how="all")
 
     img_corr = IMG_DIR / "corr.png"
@@ -1910,10 +1924,11 @@ def build(out_path: Path):
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 30, "C": 22, "D": 16, "E": 16, "F": 12, "G": 14})
     r = title(ws, 2, "Cobertura vs presión de descuento",
-              "Fuente C · gold.cob_sucursal_lista_generico + fact_ventas",
-              alcance=ALC_TODOS)
-    cg2 = (cob.groupby(["sucursal", "generico"]).agg(clientes_cob=("clientes_cob", "sum"),
-                                                     volumen=("volumen", "sum")).reset_index())
+              "Fuente C · gold.cob_sucursal_generico + fact_ventas",
+              alcance=(ALC_TODOS + " «Clientes cob.» NO se suma entre filas: la "
+                       "cobertura no es aditiva entre genéricos ni entre sucursales."))
+    # cob ya viene al grano (sucursal, generico): se usa tal cual, sin agregar.
+    cg2 = cob
     vg = ventas.groupby(["sucursal", "generico"]).agg(facturacion=("facturacion", "sum"),
                                                       descuentos=("descuentos", "sum")).reset_index()
     cx = vg.merge(cg2, on=["sucursal", "generico"], how="left")
@@ -1933,10 +1948,20 @@ def build(out_path: Path):
                              "facturacion": "Facturación", "descuentos": "Descuentos",
                              "clientes_cob": "Clientes cob.", "volumen": "Volumen",
                              "pct_desc": "% Desc."}).sort_values("Descuentos", ascending=False)
-    cxo = cxo[["Sucursal", "Genérico", "Facturación", "Descuentos", "% Desc.", "Clientes cob.", "Volumen"]].head(60)
+    # Sin .head(60): antes la tabla se cortaba en 60 filas sin decirlo, asi que
+    # el pie no era el total de nada. Van todas las combinaciones con venta.
+    cxo = cxo[["Sucursal", "Genérico", "Facturación", "Descuentos", "% Desc.", "Clientes cob.", "Volumen"]]
     r = write_df(ws, cxo, r, {"Facturación": F_MONEY, "Descuentos": F_MONEY, "% Desc.": F_PCT,
                               "Clientes cob.": F_INT, "Volumen": F_DEC},
-                 start_col=2, table_name="tblCob")
+                 start_col=2, table_name="tblCob",
+                 no_total=("Clientes cob.", "% Desc."))
+    ws.cell(row=r - 1, column=7, value="no sumable").font = Font(size=8, italic=True, color=BADIE)
+    ws.cell(row=r, column=2, value=(
+        f"{len(cxo):,} combinaciones sucursal × genérico con venta en el período. "
+        "La columna «Clientes cob.» no lleva total: la cobertura cuenta clientes distintos "
+        "dentro de su corte y sumarla entre genéricos cuenta al mismo cliente una vez por "
+        "genérico que compró. Los clientes distintos de la empresa están en «Sucursales»."
+    )).font = Font(size=9, italic=True, color=INK_MUTE)
 
     # ============ 12. CLIENTES ============
     ws = wb.create_sheet("Clientes")
