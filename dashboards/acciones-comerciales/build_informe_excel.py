@@ -584,10 +584,43 @@ def load_gold():
         FROM gold.cob_sucursal_lista_generico
         WHERE periodo = '2026-07-01'
         GROUP BY 1,2,3""", dl.engine)
+    # Evolucion diaria: facturacion y descuentos POR DIA, abiertos en CCU y
+    # resto. Antes esta hoja salia del wapi, que trae SOLO las lineas con
+    # accion promocional: la facturacion quedaba corta ($3.424 M contra los
+    # $4.572 M reales de CCU en agosto-2026) y el % Desc. salia inflado
+    # porque dividia el descuento por un subconjunto de la venta, no por la
+    # venta. Los descuentos coincidian por las dos vias (0,04%), asi que lo
+    # unico que faltaba era el denominador.
+    # Clientes por sucursal al GRANO SUCURSAL. El `clientes` de `ventas` esta
+    # contado por (sucursal, generico, marca): sumarlo cuenta al mismo cliente
+    # una vez por cada marca que compro. Daba 59.595 contra 11.415 reales
+    # (agosto-2026, 5,2x). La cobertura NO es aditiva entre marcas ni
+    # genericos — hay que contarla en el corte donde se la quiere mostrar.
+    cli_suc = pd.read_sql(f"""
+        SELECT ds.descripcion AS sucursal,
+               COUNT(DISTINCT fv.id_cliente) AS clientes
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_sucursal ds ON fv.id_sucursal = ds.id_sucursal
+        WHERE fv.fecha_comprobante BETWEEN '{PERIODO_DESDE}' AND '{PERIODO_HASTA}'
+          AND fv.anulado = false
+        GROUP BY 1""", dl.engine)
+
+    ccu_sql = ", ".join(f"'{g}'" for g in sorted(CCU))
+    diario = pd.read_sql(f"""
+        SELECT fv.fecha_comprobante AS fecha,
+               (da.generico IN ({ccu_sql})) AS es_ccu,
+               SUM(fv.facturacion_neta) AS facturacion,
+               SUM(fv.descuentos)       AS descuentos,
+               COUNT(*)                 AS lineas
+        FROM gold.fact_ventas fv
+        JOIN gold.dim_articulo da ON fv.id_articulo = da.id_articulo
+        WHERE fv.fecha_comprobante BETWEEN '{PERIODO_DESDE}' AND '{PERIODO_HASTA}'
+          AND fv.anulado = false
+        GROUP BY 1,2 ORDER BY 1,2""", dl.engine)
     # El mapa articulo -> generico sale del mismo cursor: lo necesita el
     # recalculo de la tasa y no justifica una segunda conexion.
     art = pd.read_sql("SELECT id_articulo, generico FROM gold.dim_articulo", dl.engine)
-    return ventas, cob, dict(zip(art.id_articulo, art.generico))
+    return ventas, cob, dict(zip(art.id_articulo, art.generico)), diario, cli_suc
 
 
 # ---------------- graficos matplotlib (lo que Excel no hace bien) ----------------
@@ -1228,7 +1261,7 @@ def build(out_path: Path):
     inf = load_informe()
 
     print("Cargando gold ...")
-    ventas, cob, generico_por_articulo = load_gold()
+    ventas, cob, generico_por_articulo, diario_gold, clientes_suc = load_gold()
 
     # Modelo de tasa recalculado desde los insumos. Si algo falta, se cae al
     # bloque leido del .xlsm — mejor un dato viejo declarado que uno inventado.
@@ -1478,23 +1511,52 @@ def build(out_path: Path):
     # ============ 4. EVOLUCION DIARIA ============
     ws = wb.create_sheet("Evolución Diaria")
     ws.sheet_view.showGridLines = False
-    widths(ws, {"A": 3, "B": 13, "C": 18, "D": 17, "E": 13, "F": 13})
-    # OJO: la Facturación de esta hoja NO coincide con la de «Genéricos» y no
-    # tiene por qué. Acá se mide el archivo wapi de CCU — sólo las líneas CON
-    # acción promocional. «Genéricos» mide la venta completa de BADIE. Los
-    # Descuentos sí cierran entre las dos (el descuento sólo existe donde hay
-    # acción); la Facturación no, porque son universos distintos.
+    widths(ws, {"A": 3, "B": 13, "C": 19, "D": 17, "E": 11, "F": 19, "G": 17,
+                "H": 11, "I": 19})
+    # La facturacion sale de gold (fact_ventas), NO del wapi. El wapi trae solo
+    # las lineas CON accion promocional: como denominador del % Desc. subestima
+    # la venta y el porcentaje sale inflado. Los descuentos son los mismos por
+    # las dos vias (0,04% de diferencia en agosto-2026) porque el descuento solo
+    # existe donde hay accion; lo que faltaba era la venta contra la que medirlo.
     r = title(ws, 2, "Evolución diaria",
-              "Fuente A · BASE control · hoja wapi — SÓLO líneas con acción CCU "
-              "(la facturación no cuadra con «Genéricos»: ver nota al pie)")
-    dd = daily.copy()
-    dd["pct"] = dd.descuentos / dd.facturacion.replace(0, pd.NA)
-    dd = dd.rename(columns={"fecha": "Fecha", "facturacion": "Facturación",
-                            "descuentos": "Descuentos", "operaciones": "Operaciones", "pct": "% Desc."})
+              "Fuente C · gold.fact_ventas — venta COMPLETA, abierta en CCU y resto · "
+              "el % se mide contra la venta del genérico, no contra las líneas promocionadas")
+    dg = diario_gold.copy()
+    dg["fecha"] = dg["fecha"].astype(str)
+    dg["es_ccu"] = dg["es_ccu"].astype(bool)
+    piv = dg.pivot_table(index="fecha", columns="es_ccu",
+                         values=["facturacion", "descuentos"], aggfunc="sum", fill_value=0.0)
+    fechas = sorted(piv.index)
+
+    def _v(campo, ccu, f):
+        try:
+            return float(piv.loc[f, (campo, ccu)])
+        except KeyError:
+            return 0.0
+
+    dd = pd.DataFrame({
+        "Fecha": fechas,
+        "Fact. CCU": [_v("facturacion", True, f) for f in fechas],
+        "Desc. CCU": [_v("descuentos", True, f) for f in fechas],
+        "Fact. resto": [_v("facturacion", False, f) for f in fechas],
+        "Desc. resto": [_v("descuentos", False, f) for f in fechas],
+    })
+    dd["% Desc. CCU"] = dd["Desc. CCU"] / dd["Fact. CCU"].replace(0, pd.NA)
+    dd["% Desc. resto"] = dd["Desc. resto"] / dd["Fact. resto"].replace(0, pd.NA)
+    dd["Fact. TOTAL"] = dd["Fact. CCU"] + dd["Fact. resto"]
+    dd = dd[["Fecha", "Fact. CCU", "Desc. CCU", "% Desc. CCU",
+             "Fact. resto", "Desc. resto", "% Desc. resto", "Fact. TOTAL"]]
     start = r
-    r = write_df(ws, dd[["Fecha", "Facturación", "Descuentos", "Operaciones", "% Desc."]], r,
-                 {"Facturación": F_MONEY, "Descuentos": F_MONEY, "Operaciones": F_INT, "% Desc.": F_PCT},
+    r = write_df(ws, dd, r,
+                 {"Fact. CCU": F_MONEY, "Desc. CCU": F_MONEY, "% Desc. CCU": F_PCT,
+                  "Fact. resto": F_MONEY, "Desc. resto": F_MONEY, "% Desc. resto": F_PCT,
+                  "Fact. TOTAL": F_MONEY},
                  start_col=2, table_name="tblDiario")
+    # Los % de la fila de total no son sumables: se recalculan como cociente de
+    # los totales, que es lo que significan.
+    _tot = r - 1
+    ws.cell(row=_tot, column=5, value=f"=IF(D{_tot}=0,\"\",D{_tot}/C{_tot})").number_format = F_PCT
+    ws.cell(row=_tot, column=8, value=f"=IF(G{_tot}=0,\"\",G{_tot}/F{_tot})").number_format = F_PCT
 
     lc = LineChart()
     d = Reference(ws, min_col=3, max_col=4, min_row=start, max_row=r - 2)
@@ -1507,48 +1569,57 @@ def build(out_path: Path):
     lc.series[1].graphicalProperties.line.solidFill = BADIE
     lc.series[1].graphicalProperties.line.width = 22000
     lc.series[1].marker = Marker(symbol="diamond", size=5)
-    style_chart(lc, "Facturación y descuentos por día", x_title="Fecha", y_title="ARS", w=26, h=11)
-    ws.add_chart(lc, f"H{start}")
+    style_chart(lc, "CCU — facturación y descuentos por día", x_title="Fecha", y_title="ARS", w=26, h=11)
+    ws.add_chart(lc, f"K{start}")
 
     lc2 = LineChart()
-    d2 = Reference(ws, min_col=6, max_col=6, min_row=start, max_row=r - 2)
+    d2 = Reference(ws, min_col=5, max_col=5, min_row=start, max_row=r - 2)
     lc2.add_data(d2, titles_from_data=True)
     lc2.set_categories(cats)
     lc2.series[0].graphicalProperties.line.solidFill = WARN
     lc2.series[0].graphicalProperties.line.width = 24000
     lc2.series[0].marker = Marker(symbol="triangle", size=5)
-    style_chart(lc2, "% Descuento diario (Desc. / Fact.)", x_title="Fecha", w=26, h=10)
-    ws.add_chart(lc2, f"H{start + 23}")
+    style_chart(lc2, "CCU — % descuento diario (Desc. / Fact. del genérico)", x_title="Fecha", w=26, h=10)
+    ws.add_chart(lc2, f"K{start + 23}")
 
-    # Conciliacion explicita contra la hoja «Genéricos». Sin esto, dos hojas
-    # con la misma etiqueta «Facturación» y totales distintos se leen como un
-    # error del informe. Los numeros se calculan, no se declaran.
+    # Conciliacion calculada contra «Genéricos» y contra el wapi. Los numeros se
+    # calculan, no se declaran: si un dia dejan de cerrar, la hoja lo muestra.
     rn = r + 2
-    rn = band(ws, rn, "POR QUÉ ESTE TOTAL NO ES EL DE «GENÉRICOS»", col=2, span=5)
-    f_wapi, d_wapi = float(dd["Facturación"].sum()), float(dd["Descuentos"].sum())
+    rn = band(ws, rn, "CONCILIACIÓN — de dónde sale cada total", col=2, span=7)
+    f_ccu_d, d_ccu_d = float(dd["Fact. CCU"].sum()), float(dd["Desc. CCU"].sum())
+    f_tot_d = float(dd["Fact. TOTAL"].sum())
     ccu_mask = fact["generico"].isin(CCU)
-    f_ccu, d_ccu = float(fact.loc[ccu_mask, "facturacion"].sum()), float(fact.loc[ccu_mask, "descuentos"].sum())
-    f_all, d_all = float(fact["facturacion"].sum()), float(fact["descuentos"].sum())
+    f_ccu_g = float(fact.loc[ccu_mask, "facturacion"].sum())
+    d_ccu_g = float(fact.loc[ccu_mask, "descuentos"].sum())
+    f_all_g, d_all_g = float(fact["facturacion"].sum()), float(fact["descuentos"].sum())
+    f_wapi = float(daily["facturacion"].sum()) if len(daily) else 0.0
+    d_wapi = float(daily["descuentos"].sum()) if len(daily) else 0.0
+    ws.cell(row=rn - 1, column=4, value="Facturación").font = Font(size=8, bold=True, color=INK_MUTE)
+    ws.cell(row=rn - 1, column=5, value="Descuentos").font = Font(size=8, bold=True, color=INK_MUTE)
     for etiqueta, fv, dv in [
-        ("Esta hoja (wapi: sólo líneas con acción CCU)", f_wapi, d_wapi),
-        ("«Genéricos» acotado a los 5 genéricos CCU", f_ccu, d_ccu),
-        ("«Genéricos» completo (toda la venta BADIE)", f_all, d_all),
+        ("Esta hoja — columna CCU", f_ccu_d, d_ccu_d),
+        ("«Genéricos» acotado a los 5 genéricos CCU", f_ccu_g, d_ccu_g),
+        ("Esta hoja — CCU + resto", f_tot_d, float(dd["Desc. CCU"].sum() + dd["Desc. resto"].sum())),
+        ("«Genéricos» completo (toda la venta BADIE)", f_all_g, d_all_g),
+        ("wapi (sólo líneas CON acción) — ya no se usa acá", f_wapi, d_wapi),
     ]:
         ws.cell(row=rn, column=2, value=etiqueta).font = Font(size=9, color=INK)
         c = ws.cell(row=rn, column=4, value=fv); c.number_format = F_MONEY; c.font = Font(size=9)
         c = ws.cell(row=rn, column=5, value=dv); c.number_format = F_MONEY; c.font = Font(size=9)
         rn += 1
-    ws.cell(row=rn - 3, column=3, value="Facturación").font = Font(size=8, bold=True, color=INK_MUTE)
-    dif_pct = (d_wapi / d_ccu - 1) if d_ccu else 0
+    dif_f = (f_ccu_d / f_ccu_g - 1) if f_ccu_g else 0
+    dif_d = (d_wapi / d_ccu_d - 1) if d_ccu_d else 0
+    falta = f_ccu_d - f_wapi
     rn += 1
     ws.cell(row=rn, column=2, value=(
-        f"Los DESCUENTOS cierran ({dif_pct:+.2%} contra el corte CCU de «Genéricos»): el descuento "
-        f"sólo existe donde hay acción. La FACTURACIÓN no cierra y no debe: el wapi trae únicamente "
-        f"las líneas promocionadas, mientras que «Genéricos» mide la venta completa. Comparar los dos "
-        f"totales de facturación entre sí no significa nada."
+        f"La columna CCU cierra contra «Genéricos» ({dif_f:+.3%}): las dos miden la venta de los 5 "
+        f"genéricos CCU en gold. El wapi mide otra cosa — sólo las líneas CON acción promocional — y "
+        f"por eso queda ${falta:,.0f} corto: es venta de producto CCU que no tuvo acción. Los "
+        f"DESCUENTOS sí coinciden por las dos vías ({dif_d:+.2%}), porque el descuento sólo existe "
+        f"donde hay acción. Usar el wapi como denominador del % inflaba el porcentaje."
     )).font = Font(size=9, italic=True, color=INK_MUTE)
     ws.cell(row=rn, column=2).alignment = Alignment(wrap_text=True, vertical="top")
-    ws.merge_cells(start_row=rn, start_column=2, end_row=rn + 2, end_column=6)
+    ws.merge_cells(start_row=rn, start_column=2, end_row=rn + 2, end_column=9)
 
     # ============ 5. GENERICOS ============
     ws = wb.create_sheet("Genéricos")
@@ -1602,7 +1673,11 @@ def build(out_path: Path):
                                       Artículos=("codigo", "nunique")).reset_index())
     s["Zona"] = s.sucursal.map(inf["zona_map"]).fillna("—")
     s["Supervisor"] = s.sucursal.map(inf["sup_map"]).fillna("—")
-    gv = ventas.groupby("sucursal").agg(Bultos=("bultos", "sum"), Clientes=("clientes", "sum")).reset_index()
+    # Bultos SI se suma (es volumen). Clientes NO: viene contado por
+    # (sucursal, generico, marca) y sumarlo cuenta al mismo cliente una vez por
+    # marca. Se toma del conteo hecho al grano sucursal.
+    gv = ventas.groupby("sucursal").agg(Bultos=("bultos", "sum")).reset_index()
+    gv = gv.merge(clientes_suc.rename(columns={"clientes": "Clientes"}), on="sucursal", how="left")
     gv["sucursal_norm"] = gv.sucursal.str.upper().str.strip()
     s["sucursal_norm"] = s.sucursal.str.replace(r"^\d+\s*-\s*", "", regex=True).str.upper().str.strip()
     s = s.merge(gv[["sucursal_norm", "Bultos", "Clientes"]], on="sucursal_norm", how="left")
