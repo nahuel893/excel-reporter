@@ -140,13 +140,39 @@ def hdr(ws, row, headers, start=1, fill=INK, color=PAPER):
     ws.row_dimensions[row].height = 28
 
 
-def title(ws, row, text, sub=None, col=1):
+def title(ws, row, text, sub=None, col=1, alcance=None):
+    """Encabezado de hoja. `alcance` escribe una linea extra que dice QUE
+    GENERICOS suma la hoja.
+
+    El informe mezcla tres universos — los 2 genericos con tasa negociada, los
+    5 genericos CCU, y la venta completa de BADIE — y hasta ahora habia que
+    deducirlo de la fuente. Dos hojas con la misma etiqueta «Facturación» y
+    totales distintos se leen como un error del informe cuando en realidad
+    miden cosas distintas."""
     c = ws.cell(row=row, column=col, value=text)
     c.font = Font(name="Calibri", size=16, bold=True, color=INK)
+    n = 2
     if sub:
         s = ws.cell(row=row + 1, column=col, value=sub)
         s.font = Font(name="Calibri", size=9, italic=True, color=INK_MUTE)
-    return row + (3 if sub else 2)
+        n = 3
+    if alcance:
+        a = ws.cell(row=row + n - 1, column=col, value=f"ALCANCE · {alcance}")
+        a.font = Font(name="Consolas", size=8.5, bold=True, color=BADIE)
+        n += 1
+    return row + n
+
+
+# Los tres universos que convive el informe. Se escriben una sola vez para que
+# dos hojas del mismo alcance no puedan describirse distinto.
+ALC_CCU5 = "CERVEZAS · AGUAS DANONE · VINOS CCU · SIDRAS Y LICORES · PERNOD RICARD"
+ALC_TASA = ("SÓLO CERVEZAS y AGUAS DANONE — los 2 genéricos con tasa negociada. "
+            "VINOS CCU, SIDRAS Y LICORES y PERNOD RICARD son CCU pero no tienen "
+            "tasa y no entran acá.")
+ALC_ACCION = (f"SÓLO los 5 genéricos CCU ({ALC_CCU5}) y SÓLO las líneas CON "
+              "acción promocional — no es la venta del genérico.")
+ALC_TODOS = ("TODOS los genéricos de BADIE, no sólo CCU. El total no es "
+             "comparable contra las hojas de alcance CCU.")
 
 
 def band(ws, row, text, col=1, span=8, fill=TEAL):
@@ -1015,7 +1041,10 @@ def _hoja_compras_crudo(wb, inf: dict, layout: dict) -> None:
     archivo = inf.get("compras_archivo", "compras.xls")
     r = title(ws, 2, "Compras — filas crudas",
               f"Fuente C · {archivo} · período {_label_periodo()} · "
-              "de acá sale la columna Compras del Modelo Tasa")
+              "de acá sale la columna Compras del Modelo Tasa",
+              alcance=("SÓLO lo que BADIE le compra a CCU. El Modelo Tasa usa "
+                       "de acá sólo CERVEZAS y AGUAS DANONE; VINOS CCU y "
+                       "SIDRAS Y LICORES están en la hoja pero no en el cuadro."))
     if crudo is None or not len(crudo):
         ws.cell(row=r, column=2, value="No se pudo leer el export de compras.").font = Font(
             size=10, italic=True, color=BADIE)
@@ -1065,8 +1094,8 @@ def _hoja_wapi_crudo(wb, wapi: pd.DataFrame) -> None:
     widths(ws, {"A": 3, "B": 11, "C": 14, "D": 11, "E": 34, "F": 11, "G": 34,
                 "H": 18, "I": 10, "J": 34, "K": 24, "L": 16, "M": 14, "N": 16})
     r = title(ws, 2, "wapi — filas crudas",
-              "Fuente A · hoja wapi de la BASE control · SÓLO líneas con acción CCU · "
-              "de acá sale «Evolución Diaria»")
+              "Fuente A · hoja wapi de la BASE control",
+              alcance=ALC_ACCION)
     if wapi is None or not len(wapi):
         ws.cell(row=r, column=2, value="La BASE no trajo filas de wapi.").font = Font(
             size=10, italic=True, color=BADIE)
@@ -1357,7 +1386,8 @@ def build(out_path: Path):
     ws = wb.create_sheet("Resumen")
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 30, "C": 20, "D": 20, "E": 20, "F": 20, "G": 20})
-    r = title(ws, 2, "Resumen ejecutivo", f"Período {PERIODO_DESDE} → {PERIODO_HASTA}")
+    r = title(ws, 2, "Resumen ejecutivo", f"Período {PERIODO_DESDE} → {PERIODO_HASTA}",
+              alcance="Cada fila declara su propio alcance — el informe mezcla los tres.")
 
     tot_f, tot_d = fact.facturacion.sum(), fact.descuentos.sum()
     tasa_tot = inf["tasa"][inf["tasa"].zona.str.startswith("—")]
@@ -1417,9 +1447,10 @@ def build(out_path: Path):
     widths(ws, {"A": 3, "B": 20, "C": 22, "D": 16, "E": 16, "F": 11, "G": 16, "H": 17, "I": 19})
     r = title(ws, 2, "Modelo de tasa — ¿la inversión promocional se paga sola?",
               ("Descuentos y Compras RECALCULADOS de los insumos · "
-               f"Tasa % {_origen_tasa(inf)} · sólo CCU · período {_label_periodo()}"
+               f"Tasa % {_origen_tasa(inf)} · período {_label_periodo()}"
                if inf.get("tasa_calculada")
-               else f"Fuente B · informe final · sólo CCU · {_label_corte(inf.get('cortes'))}"))
+               else f"Fuente B · informe final · {_label_corte(inf.get('cortes'))}"),
+              alcance=ALC_TASA)
     ws.cell(row=r, column=2, value="Tasa Generada = Compras × Tasa%     ·     Diferencia = Tasa Generada − Descuentos     ·     Compra Necesaria = Compras − (Descuentos / Tasa%)").font = Font(name="Consolas", size=8.5, color=TEAL)
     r += 2
 
@@ -1519,8 +1550,10 @@ def build(out_path: Path):
     # las dos vias (0,04% de diferencia en agosto-2026) porque el descuento solo
     # existe donde hay accion; lo que faltaba era la venta contra la que medirlo.
     r = title(ws, 2, "Evolución diaria",
-              "Fuente C · gold.fact_ventas — venta COMPLETA, abierta en CCU y resto · "
-              "el % se mide contra la venta del genérico, no contra las líneas promocionadas")
+              "Fuente C · gold.fact_ventas — el % se mide contra la venta del "
+              "genérico, no contra las líneas promocionadas",
+              alcance=(f"Columnas CCU = {ALC_CCU5}. Columnas «resto» = todo lo "
+                       "demás. Las dos juntas son la venta completa de BADIE."))
     dg = diario_gold.copy()
     dg["fecha"] = dg["fecha"].astype(str)
     dg["es_ccu"] = dg["es_ccu"].astype(bool)
@@ -1626,8 +1659,8 @@ def build(out_path: Path):
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 22, "C": 18, "D": 17, "E": 12, "F": 11, "G": 10})
     r = title(ws, 2, "Mix y presión promocional por genérico",
-              "Fuente A · BASE control · hoja FACT_NET — venta COMPLETA de BADIE, "
-              "todos los genéricos (no sólo CCU)")
+              "Fuente A · BASE control · hoja FACT_NET",
+              alcance=ALC_TODOS)
     g = (fact.groupby("generico").agg(Facturación=("facturacion", "sum"),
                                       Descuentos=("descuentos", "sum"),
                                       Artículos=("codigo", "nunique")).reset_index()
@@ -1667,7 +1700,9 @@ def build(out_path: Path):
     ws = wb.create_sheet("Sucursales")
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 30, "C": 17, "D": 12, "E": 18, "F": 17, "G": 11, "H": 12, "I": 12, "J": 12})
-    r = title(ws, 2, "Ranking de sucursales", "Fuentes A (fact/desc) + B (zona, supervisor) + C (bultos, clientes de gold)")
+    r = title(ws, 2, "Ranking de sucursales",
+              "Fuentes A (fact/desc) + B (zona, supervisor) + C (bultos, clientes de gold)",
+              alcance=ALC_TODOS)
     s = (fact.groupby("sucursal").agg(Facturación=("facturacion", "sum"),
                                       Descuentos=("descuentos", "sum"),
                                       Artículos=("codigo", "nunique")).reset_index())
@@ -1712,9 +1747,10 @@ def build(out_path: Path):
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 34, "C": 18, "D": 12, "E": 11})
     r = title(ws, 2, "Descuento por canal (lista de precios)",
-              ("Descuentos de la BASE · padrón LISTA del informe manual · " + _label_periodo())
-              if inf.get("canal_calculado")
-              else "Fuente B · informe final · columna LISTA PRECIO")
+              (("Descuentos de la BASE · padrón LISTA del informe manual · " + _label_periodo())
+               if inf.get("canal_calculado")
+               else "Fuente B · informe final · columna LISTA PRECIO"),
+              alcance=ALC_ACCION)
     cn = inf["canal"].rename(columns={"canal": "Canal", "descuento": "Descuento", "lineas": "Líneas"})
     cn["Share"] = cn.Descuento / cn.Descuento.sum()
     start = r
@@ -1753,7 +1789,8 @@ def build(out_path: Path):
     ws = wb.create_sheet("Códigos de Acción")
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 46, "C": 48, "D": 14, "E": 18, "F": 11, "G": 11, "H": 13})
-    r = title(ws, 2, "Códigos de acción", "Fuente A (montos) + B (flag reversa)")
+    r = title(ws, 2, "Códigos de acción", "Fuente A (montos) + B (flag reversa)",
+              alcance=ALC_ACCION)
     a = (acc.groupby(["accion", "desc_accion"]).agg(Descuento=("descuento", "sum"),
                                                     Artículos=("codigo", "nunique"),
                                                     Sucursales=("sucursal", "nunique")).reset_index())
@@ -1808,7 +1845,9 @@ def build(out_path: Path):
     # ============ 9. MATRIZ SUC x GEN ============
     ws = wb.create_sheet("Matriz Suc x Gen")
     ws.sheet_view.showGridLines = False
-    r = title(ws, 2, "Matriz sucursal × genérico", "Fuente A · descuento cruzado · escala de color por intensidad")
+    r = title(ws, 2, "Matriz sucursal × genérico",
+              "Fuente A · descuento cruzado · escala de color por intensidad",
+              alcance=ALC_TODOS)
     m = fact.pivot_table(index="sucursal", columns="generico", values="descuentos",
                          aggfunc="sum", fill_value=0)
     m = m.loc[m.sum(axis=1).sort_values(ascending=False).index,
@@ -1831,7 +1870,8 @@ def build(out_path: Path):
     ws = wb.create_sheet("Correlaciones")
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 30})
-    r = title(ws, 2, "Correlaciones entre métricas", "Fuentes A + C · Pearson sobre las 13 sucursales")
+    r = title(ws, 2, "Correlaciones entre métricas",
+              "Fuentes A + C · Pearson sobre las 13 sucursales", alcance=ALC_TODOS)
     ws.cell(row=r, column=2, value="Con n=13 sucursales, |r| por debajo de ~0.55 no es concluyente. La correlación no implica causalidad.").font = Font(size=9, italic=True, color=BADIE)
     r += 2
 
@@ -1869,7 +1909,9 @@ def build(out_path: Path):
     ws = wb.create_sheet("Cobertura")
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 30, "C": 22, "D": 16, "E": 16, "F": 12, "G": 14})
-    r = title(ws, 2, "Cobertura vs presión de descuento", "Fuente C · gold.cob_sucursal_lista_generico + fact_ventas")
+    r = title(ws, 2, "Cobertura vs presión de descuento",
+              "Fuente C · gold.cob_sucursal_lista_generico + fact_ventas",
+              alcance=ALC_TODOS)
     cg2 = (cob.groupby(["sucursal", "generico"]).agg(clientes_cob=("clientes_cob", "sum"),
                                                      volumen=("volumen", "sum")).reset_index())
     vg = ventas.groupby(["sucursal", "generico"]).agg(facturacion=("facturacion", "sum"),
@@ -1901,7 +1943,8 @@ def build(out_path: Path):
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 11, "C": 34, "D": 26, "E": 17, "F": 10, "G": 10, "H": 10, "I": 11})
     r = title(ws, 2, "Clientes que reciben descuento",
-              "Fuente A · BASE control · hoja CLIENTE-FECHA · grano cliente × acción × artículo")
+              "Fuente A · BASE control · hoja CLIENTE-FECHA · grano cliente × acción × artículo",
+              alcance=ALC_ACCION)
 
     cres = (cli.groupby(["cod_cliente", "razon_social", "sucursal"])
             .agg(Descuento=("descuento", "sum"),
@@ -1985,7 +2028,8 @@ def build(out_path: Path):
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 26, "C": 20, "D": 14, "E": 4, "F": 20, "G": 14})
     r = title(ws, 2, "Tablero CCU",
-              "Réplica de la hoja TABLERO del informe original · sólo los 5 genéricos CCU")
+              "Réplica de la hoja TABLERO del informe original",
+              alcance=f"SÓLO los 5 genéricos CCU ({ALC_CCU5}).")
     ws.cell(row=r, column=2, value=(
         "El TABLERO original corta SÓLO por genéricos CCU. La hoja «Genéricos» de este "
         "informe abre el universo completo, por eso sus totales son mayores. No son "
@@ -2023,7 +2067,8 @@ def build(out_path: Path):
     ws = wb.create_sheet("Acción x Genérico")
     ws.sheet_view.showGridLines = False
     r = title(ws, 2, "Acción × Genérico por sucursal",
-              "Réplica de la hoja ACC-GEN del original · fuente A · BASE control")
+              "Réplica de la hoja ACC-GEN del original · fuente A · BASE control",
+              alcance=ALC_ACCION)
     if len(accgen):
         gcols = [c for c in accgen.columns if c not in ("sucursal", "accion", "desc_accion", "mvb")]
         ag = accgen.rename(columns={"sucursal": "Sucursal", "accion": "Acción",
@@ -2052,7 +2097,8 @@ def build(out_path: Path):
     ws.sheet_view.showGridLines = False
     widths(ws, {"A": 3, "B": 11, "C": 34, "D": 30, "E": 24, "F": 18})
     r = title(ws, 2, "Reversa por categoría de cliente",
-              "Réplica de la hoja Reversa del original · fuente B")
+              "Réplica de la hoja Reversa del original · fuente B",
+              alcance="Clasificación MANUAL de clientes del informe. No corta por genérico.")
     rvc = inf.get("reversa_clientes")
     if rvc is not None and len(rvc):
         ws.cell(row=r, column=2, value=(
@@ -2090,7 +2136,8 @@ def build(out_path: Path):
     widths(ws, {"A": 3, "B": 30, "C": 18, "D": 14, "E": 20, "F": 10, "G": 34,
                 "H": 18, "I": 18, "J": 16, "K": 16})
     r = title(ws, 2, "Datos base",
-              "Fuente A · FACT_NET completo · de acá salen los Descuentos del Modelo Tasa")
+              "Fuente A · FACT_NET completo · de acá salen los Descuentos del Modelo Tasa",
+              alcance=ALC_TODOS)
     fd = fact.rename(columns={"sucursal": "Sucursal", "codigo": "Código", "articulo": "Artículo",
                               "marca": "Marca", "generico": "Genérico",
                               "facturacion": "Facturación", "descuentos": "Descuentos"})
