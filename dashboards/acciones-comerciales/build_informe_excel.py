@@ -91,18 +91,22 @@ LISTA_PRECIO_ID = {
 #   ADO (AGUAS DANONE) Jujuy Interior 9,5%   Salta Int. Norte 9,1%
 # Corregido el 2026-08-19:
 #   CCU (CERVEZAS)     Salta Capital 13,4%   (el .xlsm traia 12,8%)
+# Corregido el 2026-08-28:
+#   CCU (CERVEZAS)     Salta Capital 13,5%   (venia de 13,4%)
+#   ADO (AGUAS DANONE) Salta Capital  9,1%   (el .xlsm traia 9,6%)
 #
 # SALTA INT. SUR no se informo: sigue saliendo del .xlsm. Una zona ausente
 # aca NO se pisa.
 # ─────────────────────────────────────────────────────────────────────────
 TASA_OVERRIDE = {
-    ("CERVEZAS", "SALTA CAPITAL"): 0.134,
+    ("CERVEZAS", "SALTA CAPITAL"): 0.135,        # 13,4% -> 13,5% (28-ago-2026)
     ("CERVEZAS", "JUJUY INTERIOR"): 0.053,
     ("CERVEZAS", "SALTA INT. NORTE"): 0.075,
+    ("AGUAS DANONE", "SALTA CAPITAL"): 0.091,    # el .xlsm traia 9,6% (28-ago-2026)
     ("AGUAS DANONE", "JUJUY INTERIOR"): 0.095,
     ("AGUAS DANONE", "SALTA INT. NORTE"): 0.091,
 }
-TASA_OVERRIDE_FUENTE = "informada por CCU (18/19-ago-2026)"
+TASA_OVERRIDE_FUENTE = "informada por CCU (18/19-ago-2026; Salta Capital actualizada el 28-ago)"
 
 
 def etiquetar_lista(nombre) -> str:
