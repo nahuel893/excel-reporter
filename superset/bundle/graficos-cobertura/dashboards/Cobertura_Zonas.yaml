@@ -1,0 +1,351 @@
+dashboard_title: Cobertura Zonas
+description: Cobertura por zona (5 zonas NOA) — virtual dataset
+css: ''
+slug: cobertura-zonas
+certified_by: ''
+certification_details: ''
+published: true
+uuid: 8c744af9-31d2-4a78-af0c-d04d35badddd
+position:
+  DASHBOARD_VERSION_KEY: v2
+  ROOT_ID:
+    type: ROOT
+    id: ROOT_ID
+    children:
+    - GRID_ID
+  GRID_ID:
+    type: GRID
+    id: GRID_ID
+    children:
+    - ROW-kpi-total
+    - ROW-perzona
+    - ROW-marca-mes
+    - ROW-pivot
+    - ROW-yoy-mix
+    parents:
+    - ROOT_ID
+  HEADER_ID:
+    type: HEADER
+    id: HEADER_ID
+    meta:
+      text: Cobertura Zonas
+  ROW-kpi-total:
+    type: ROW
+    id: ROW-kpi-total
+    children:
+    - CH-kpi-total
+    - CH-kpi-noa-norte
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+  ROW-perzona:
+    type: ROW
+    id: ROW-perzona
+    children:
+    - CH-perzona
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+  ROW-marca-mes:
+    type: ROW
+    id: ROW-marca-mes
+    children:
+    - CH-marca-mes
+    - CH-generico-mes
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+  ROW-pivot:
+    type: ROW
+    id: ROW-pivot
+    children:
+    - CH-pivot
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+  ROW-yoy-mix:
+    type: ROW
+    id: ROW-yoy-mix
+    children:
+    - CH-yoy
+    - CH-mix
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+  CH-kpi-total:
+    type: CHART
+    id: CH-kpi-total
+    children: []
+    meta:
+      chartId: 1
+      width: 6
+      height: 50
+      sliceName: "Cobertura \xB7 Clientes TOTAL"
+      uuid: 8f6a6a94-a970-4e65-ae8b-5495b0cd2873
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-kpi-total
+  CH-kpi-noa-norte:
+    type: CHART
+    id: CH-kpi-noa-norte
+    children: []
+    meta:
+      chartId: 2
+      width: 6
+      height: 50
+      sliceName: "Cobertura \xB7 NOA NORTE"
+      uuid: 19fed235-731d-45e6-a8f6-e35afc522c11
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-kpi-total
+  CH-perzona:
+    type: CHART
+    id: CH-perzona
+    children: []
+    meta:
+      chartId: 8
+      width: 12
+      height: 60
+      sliceName: "Cobertura \xB7 Clientes por Zona"
+      uuid: 7ca6e9f9-c0a3-426c-bda5-38ef80b65023
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-perzona
+  CH-marca-mes:
+    type: CHART
+    id: CH-marca-mes
+    children: []
+    meta:
+      chartId: 3
+      width: 8
+      height: 80
+      sliceName: "Cobertura \xB7 Marca \xD7 Mes"
+      uuid: 903b0637-75cf-46e2-8f20-b43f14ad4b86
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-marca-mes
+  CH-generico-mes:
+    type: CHART
+    id: CH-generico-mes
+    children: []
+    meta:
+      chartId: 4
+      width: 4
+      height: 80
+      sliceName: "Cobertura \xB7 Gen\xE9rico \xD7 Mes"
+      uuid: e1f71e5c-0604-464b-803c-6947c8838e34
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-marca-mes
+  CH-pivot:
+    type: CHART
+    id: CH-pivot
+    children: []
+    meta:
+      chartId: 5
+      width: 12
+      height: 90
+      sliceName: "Cobertura \xB7 Pivot (zona \xD7 per\xEDodo)"
+      uuid: 531845ad-087d-433a-a46e-588f16222396
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-pivot
+  CH-yoy:
+    type: CHART
+    id: CH-yoy
+    children: []
+    meta:
+      chartId: 6
+      width: 8
+      height: 80
+      sliceName: "Cobertura \xB7 YoY Comparativo"
+      uuid: 680725a0-f388-41bf-af13-c78ae8f16736
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-yoy-mix
+  CH-mix:
+    type: CHART
+    id: CH-mix
+    children: []
+    meta:
+      chartId: 7
+      width: 4
+      height: 80
+      sliceName: "Cobertura \xB7 Gen\xE9rico Mix (%)"
+      uuid: 323ec863-a7c7-4679-9b5f-278c08cd93f3
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-yoy-mix
+metadata:
+  native_filter_configuration:
+  - id: NATIVE_FILTER-periodo
+    filterType: filter_select
+    name: "Per\xEDodo"
+    type: NATIVE_FILTER
+    targets:
+    - column:
+        name: periodo
+      datasetUuid: 81b9016f-b213-4840-9f48-ca4aa69bb652
+    defaultDataMask:
+      filterState:
+        value: []
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    controlValues:
+      multiSelect: true
+      enableEmptyFilter: true
+      defaultToFirstItem: false
+      searchAllOptions: false
+      inverseSelection: false
+    cascadeParentIds: []
+    chartsInScope:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    tabsInScope: []
+  - id: NATIVE_FILTER-zona
+    filterType: filter_select
+    name: Zona
+    type: NATIVE_FILTER
+    targets:
+    - column:
+        name: zona
+      datasetUuid: 81b9016f-b213-4840-9f48-ca4aa69bb652
+    defaultDataMask:
+      filterState:
+        value: []
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    controlValues:
+      multiSelect: true
+      enableEmptyFilter: true
+      defaultToFirstItem: false
+      searchAllOptions: false
+      inverseSelection: false
+    cascadeParentIds: []
+    chartsInScope:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    tabsInScope: []
+  - id: NATIVE_FILTER-generico
+    filterType: filter_select
+    name: "Gen\xE9rico"
+    type: NATIVE_FILTER
+    targets:
+    - column:
+        name: generico
+      datasetUuid: 81b9016f-b213-4840-9f48-ca4aa69bb652
+    defaultDataMask:
+      filterState:
+        value: []
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    controlValues:
+      multiSelect: true
+      enableEmptyFilter: true
+      defaultToFirstItem: false
+      searchAllOptions: false
+      inverseSelection: false
+    cascadeParentIds: []
+    chartsInScope:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    tabsInScope: []
+  - id: NATIVE_FILTER-marca
+    filterType: filter_select
+    name: Marca
+    type: NATIVE_FILTER
+    targets:
+    - column:
+        name: marca
+      datasetUuid: 81b9016f-b213-4840-9f48-ca4aa69bb652
+    defaultDataMask:
+      filterState:
+        value: []
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    controlValues:
+      multiSelect: true
+      enableEmptyFilter: true
+      defaultToFirstItem: false
+      searchAllOptions: false
+      inverseSelection: false
+    cascadeParentIds: []
+    chartsInScope:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    tabsInScope: []
+  color_scheme: supersetColors
+  refresh_frequency: 0
+  expanded_slices: {}
+  label_colors: {}
+  cross_filters_enabled: true
+  chart_configuration: {}
+  global_chart_configuration:
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    chartsInScope:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+  shared_label_colors: {}
+  timed_refresh_immune_slices: []
+  color_scheme_domain: []
+  default_filters: '{}'
+version: 1.0.0

@@ -1,0 +1,23 @@
+slice_name: "Cobertura \xB7 YoY Comparativo"
+description: Barras agrupadas a\xF1o actual vs a\xF1o anterior (marca-stacked)
+certified_by: null
+certification_details: null
+viz_type: dist_bar
+params:
+  viz_type: dist_bar
+  metrics:
+  - sum_clientes
+  groupby:
+  - marca
+  columns:
+  - anio
+  row_limit: 1000
+  show_legend: true
+  y_axis_format: ',.0f'
+  datasource: 1__table
+  adhoc_filters: []
+query_context: null
+cache_timeout: null
+uuid: 680725a0-f388-41bf-af13-c78ae8f16736
+version: 1.0.0
+dataset_uuid: 81b9016f-b213-4840-9f48-ca4aa69bb652

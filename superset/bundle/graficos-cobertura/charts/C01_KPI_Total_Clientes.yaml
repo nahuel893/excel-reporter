@@ -1,0 +1,18 @@
+slice_name: "Cobertura \xB7 Clientes TOTAL"
+description: SUM(clientes) total para el (periodo, generico) seleccionado
+certified_by: null
+certification_details: null
+viz_type: big_number_total
+params:
+  viz_type: big_number_total
+  metric: sum_clientes
+  subheader: "Clientes (todos zonas)"
+  header_font_size: 0.3
+  subheader_font_size: 0.125
+  datasource: 1__table
+  adhoc_filters: []
+query_context: null
+cache_timeout: null
+uuid: 8f6a6a94-a970-4e65-ae8b-5495b0cd2873
+version: 1.0.0
+dataset_uuid: 81b9016f-b213-4840-9f48-ca4aa69bb652
