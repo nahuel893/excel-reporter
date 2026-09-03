@@ -35,10 +35,10 @@ sys.path.insert(0, str(ROOT))
 from src.core.data_loader import DataLoader  # noqa: E402
 
 # --- Periodo y destino ------------------------------------------------------
-PERIODO = "2026-08"
-HIST_DESDE, HIST_HASTA = "2026-07-01", "2026-08-01"
+PERIODO = "2026-09"
+HIST_DESDE, HIST_HASTA = "2026-08-01", "2026-09-01"
 SALIDA = ROOT / "data/output/cupos" / PERIODO / (
-    "CUPO DESAGREGADO POR RUTA GUEMES - AGOSTO 2026.xlsx")
+    "CUPO DESAGREGADO POR RUTA GUEMES - SEPTIEMBRE 2026.xlsx")
 HOJA = "Base Pivot GUEMES"
 
 ID_SUCURSAL = 16
@@ -60,12 +60,13 @@ MARCAS_IMPORTADAS = {"BLUE MOON", "KUNSTMAN", "KUNSTMANN"}
 MARCAS_PROPIAS = {"HEINEKEN", "IMPERIAL", "MILLER"}
 
 # Cupos de agosto 2026. MULTICCU = 510 = 400 + 10 + 100.
+# SEPTIEMBRE 2026. MULTI CCU cierra en 260 = 150 vinos + 30 sidras + 80 PR.
 CUPOS: dict[str, float] = {
-    "CERVEZAS": 3500,
-    "AGUA DANONE": 2200,
-    "VINOS CCU": 400,
-    "SIDRAS Y LICORES": 10,
-    "PERNOD RICARD": 100,
+    "CERVEZAS": 4700,
+    "AGUA DANONE": 4000,
+    "VINOS CCU": 150,
+    "SIDRAS Y LICORES": 30,
+    "PERNOD RICARD": 80,
 }
 
 # (clave_interna, GRUPO, CATEGORIA, NIVEL). GRUPO -> generico y
