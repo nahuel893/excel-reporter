@@ -74,7 +74,11 @@ VERDE = "C6EFCE"         # celdas que se tipean a mano
 GRIS = "F2F2F2"
 NARANJA = "FCE4D6"       # TOTAL GENERAL
 BORDE = Border(*[Side(style="thin", color="BFBFBF")] * 4)
-FMT = "#,##0.00"
+# Sin decimales: son bultos, y el libro se lee de un pantallazo. El VALOR
+# sigue con todos sus decimales — esto es formato de celda, no ROUND, asi la
+# suma de las partes cierra exacto contra el cupo tipeado.
+FMT = "#,##0"
+FMT_PCT = "0.0%"
 
 
 def _txt(v) -> str:
@@ -183,12 +187,20 @@ def _encabezado(ws, headers: list[str], anchos: list[int]):
     ws.freeze_panes = "A2"
 
 
-def _cerrar(ws, primera_num: int, filas_total: list[int] = ()):
-    """Bordes, formato numerico y pintado de las filas de total."""
+def _cerrar(ws, primera_num: int, filas_total: list[int] = (),
+            cols_pct: tuple[int, ...] = ()):
+    """Bordes, formato numerico y pintado de las filas de total.
+
+    `cols_pct` va aparte porque este barrido pisa cualquier `number_format`
+    puesto celda por celda antes: sin esto las columnas de PESO y % PART
+    quedaban con formato de bultos y se leian como 0.
+    """
     for fila in ws.iter_rows(min_row=2, max_row=ws.max_row):
         for i, c in enumerate(fila, start=1):
             c.border = BORDE
-            if i >= primera_num:
+            if i in cols_pct:
+                c.number_format = FMT_PCT
+            elif i >= primera_num:
                 c.number_format = FMT
     for r in filas_total:
         for c in ws[r]:
@@ -234,8 +246,7 @@ def construir(rutas, hist, meses):
             # % de participacion de la categoria dentro de su sucursal
             tot = get_column_letter(3 + len(meses))
             ws.cell(r, 4 + len(meses),
-                    f'=IFERROR({tot}{r}/SUMIFS(${tot}:${tot},$A:$A,$A{r}),0)'
-                    ).number_format = "0.0%"
+                    f'=IFERROR({tot}{r}/SUMIFS(${tot}:${tot},$A:$A,$A{r}),0)')
             cupo = ws.cell(r, 5 + len(meses))
             cupo.fill = PatternFill("solid", fgColor=VERDE)
             fila_cupos[(suc, cat)] = r
@@ -247,45 +258,56 @@ def construir(rutas, hist, meses):
     for col in (*range(3, 3 + len(meses)), 3 + len(meses), 5 + len(meses)):
         L = get_column_letter(col)
         ws.cell(r, col, f"=SUM({L}2:{L}{r - 1})")
-    _cerrar(ws, primera_num=3, filas_total=[r])
-    ws.cell(r, 4 + len(meses)).number_format = "0.0%"
+    _cerrar(ws, primera_num=3, filas_total=[r], cols_pct=(4 + len(meses),))
     total_cupos = r
     ws.auto_filter.ref = f"A1:{col_cupo}{r - 1}"
 
     # ------------------------------------------------------ Cupo Preventista
     wsp = wb.create_sheet("Cupo Preventista")
-    _encabezado(wsp, ["SUCURSAL", "PREVENTISTA", "CATEGORIA", "VENTA 3M",
-                      "PESO", "OBJETIVO"], [30, 26, 16, 14, 10, 14])
+    # La venta va ABIERTA POR MES, no solo el acumulado: sirve para ver si un
+    # preventista viene cayendo o creciendo antes de aceptar el reparto.
+    _encabezado(wsp, ["SUCURSAL", "PREVENTISTA", "CATEGORIA", *meses,
+                      "TOTAL 3M", "PESO", "OBJETIVO"],
+                [30, 26, 16, 12, 12, 12, 13, 10, 14])
+    n_mes = len(meses)
+    c_m0 = get_column_letter(4)                  # primer mes
+    c_m1 = get_column_letter(3 + n_mes)          # ultimo mes
+    c_tot = get_column_letter(4 + n_mes)         # TOTAL 3M
+    c_peso = get_column_letter(5 + n_mes)
+    c_obj = get_column_letter(6 + n_mes)
     fila_prev: dict[tuple[str, str, str], int] = {}
     r = 2
     for (suc, prev) in sorted(rutas):
         for cat in CATEGORIAS:
-            venta = 0.0
+            por_mes = {mes: 0.0 for mes in meses}
             for id_suc, ruta, _ in rutas[(suc, prev)]:
                 for c in (GEN_MULTICCU if cat == MULTICCU else [cat]):
                     for mes in meses:
-                        venta += hist.get((id_suc, ruta, c, mes), 0.0)
+                        por_mes[mes] += hist.get((id_suc, ruta, c, mes), 0.0)
             wsp.cell(r, 1, suc)
             wsp.cell(r, 2, prev)
             wsp.cell(r, 3, cat)
-            # Las notas de credito no restan cupo: el peso arranca en cero.
-            wsp.cell(r, 4, max(venta, 0.0))
-            wsp.cell(r, 5, f'=IFERROR($D{r}/SUMIFS($D:$D,$A:$A,$A{r},$C:$C,$C{r}),0)'
-                     ).number_format = "0.00%"
+            for i, mes in enumerate(meses):
+                wsp.cell(r, 4 + i, por_mes[mes])
+            # Las notas de credito no restan cupo: el peso arranca en cero. Un
+            # mes puede quedar negativo, el TOTAL que pondera nunca.
+            wsp.cell(r, 4 + n_mes, f"=MAX(0,SUM({c_m0}{r}:{c_m1}{r}))")
+            base = f'SUMIFS(${c_tot}:${c_tot},$A:$A,$A{r},$C:$C,$C{r})'
+            wsp.cell(r, 5 + n_mes, f'=IFERROR(${c_tot}{r}/{base},0)')
             cupo_ref = f"SUMIFS(Cupos!${col_cupo}:${col_cupo},Cupos!$A:$A,$A{r},Cupos!$B:$B,$C{r})"
             # Sin historia en toda la sucursal-categoria, reparto parejo.
-            wsp.cell(r, 6,
-                     f'=IF(SUMIFS($D:$D,$A:$A,$A{r},$C:$C,$C{r})=0,'
+            wsp.cell(r, 6 + n_mes,
+                     f'=IF({base}=0,'
                      f'IFERROR({cupo_ref}/COUNTIFS($A:$A,$A{r},$C:$C,$C{r}),0),'
-                     f'$E{r}*{cupo_ref})')
+                     f'${c_peso}{r}*{cupo_ref})')
             fila_prev[(suc, prev, cat)] = r
             r += 1
     wsp.cell(r, 1, "TOTAL GENERAL")
-    for col in (4, 6):
+    for col in (*range(4, 4 + n_mes), 4 + n_mes, 6 + n_mes):
         L = get_column_letter(col)
         wsp.cell(r, col, f"=SUM({L}2:{L}{r - 1})")
-    _cerrar(wsp, primera_num=4, filas_total=[r])
-    wsp.auto_filter.ref = f"A1:F{r - 1}"
+    _cerrar(wsp, primera_num=4, filas_total=[r], cols_pct=(5 + n_mes,))
+    wsp.auto_filter.ref = f"A1:{c_obj}{r - 1}"
 
     # ------------------------------------------------------------- Cupo Ruta
     wsr = wb.create_sheet("Cupo Ruta")
@@ -310,8 +332,8 @@ def construir(rutas, hist, meses):
                     # El peso es dentro del PREVENTISTA, no de la sucursal: asi la
                     # suma de sus rutas da exacto su objetivo.
                     base = f'SUMIFS($G:$G,$A:$A,$A{r},$B:$B,$B{r},$F:$F,$F{r})'
-                    wsr.cell(r, 8, f'=IFERROR($G{r}/{base},0)').number_format = "0.00%"
-                    obj = (f"SUMIFS('Cupo Preventista'!$F:$F,"
+                    wsr.cell(r, 8, f'=IFERROR($G{r}/{base},0)')
+                    obj = (f"SUMIFS('Cupo Preventista'!${c_obj}:${c_obj},"
                            f"'Cupo Preventista'!$A:$A,$A{r},"
                            f"'Cupo Preventista'!$B:$B,$B{r},"
                            f"'Cupo Preventista'!$C:$C,$F{r})")
@@ -325,7 +347,7 @@ def construir(rutas, hist, meses):
     for col in (7, 9):
         L = get_column_letter(col)
         wsr.cell(r, col, f"=SUM({L}2:{L}{r - 1})")
-    _cerrar(wsr, primera_num=7, filas_total=[r])
+    _cerrar(wsr, primera_num=7, filas_total=[r], cols_pct=(8,))
     wsr.auto_filter.ref = f"A1:I{r - 1}"
 
     # -------------------------------------------------- Base Pivot SUCURSALES
