@@ -427,7 +427,27 @@ Tabla opcional: `gold.cob_sucursal_aguas` — si no existe en el ambiente se
 loguea WARN y las subdivisiones de AGUAS (SABORIZADAS/MINERAL) se omiten.
 Controlable tambien via `con_aguas: false` en el config.
 
-## Avance BADIE
+## Avances (badie, branca, guemes)
+
+> ### 🚨 ANTES DE TOCAR UN AVANCE: leer `docs/avances-reglas.md`
+>
+> Son cuatro reglas cortas, cada una salida de un incidente real. Lo minimo:
+>
+> 1. **Los rangos de captura NO son estables entre meses.** El libro cambia (se
+>    va un preventista, aparecen columnas ocultas). Un rango que anduvo el mes
+>    pasado puede recortar mal este mes. Mapear el libro, renderizar y **MIRAR
+>    el PNG** antes de darlo por bueno.
+> 2. **Nunca regenerar para mandar**: `main.py --config` pisa las ediciones a
+>    mano de Nahuel. Entregar el archivo que ya existe con `resolve_delivery` +
+>    `DeliveryPipeline`, o `scripts/reenviar_fallidos.py`.
+> 3. **Dry-run antes de cada envio** y leer los destinos. Van a grupos de
+>    preventistas reales. Si pide "pasamelo a mi", mandar solo a el.
+> 4. **El primer dia habil del mes es el CIERRE** y esta exento de
+>    `desde_dia_del_mes`: es la unica corrida con el mes anterior completo.
+>
+> Vocabulario: "pararlo" = `ejecutar: false` (el servicio entero, no solo la
+> entrega). "los avances" = los **tres**. "el cierre" = la corrida del primer
+> dia habil.
 
 Reporte diario de CASA CENTRAL contra los cupos del mes. Es el mas delicado del
 sistema: **no se genera de cero, se actualiza in-place** sobre un Excel que
@@ -445,6 +465,11 @@ config, las capturas o el flujo diario. Lo minimo que hay que saber:
 - El daily lo corre `mes_a_hoy` con dos compuertas: `desde_dia_del_mes` (no
   entrega los primeros dias del mes, mientras se cargan los objetivos) y el
   guard de RAM (si falta memoria omite las imagenes pero manda el xlsx igual).
+- **El primer dia HABIL esta exento de `desde_dia_del_mes`: ese dia sale el
+  CIERRE del mes anterior**, que es la unica corrida con el mes completo (la del
+  31 a la manana no tiene el ultimo dia). Ese dia `mes_a_hoy` da el mes anterior
+  cerrado, asi que los objetivos del mes nuevo no hacen falta. Sin esa exencion
+  el cierre no salia nunca.
 - Un rango correcto en el config NO garantiza una imagen correcta: renderizar y
   verificar el PNG antes de dar por buena una captura nueva.
 

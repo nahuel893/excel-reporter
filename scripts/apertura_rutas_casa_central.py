@@ -40,8 +40,8 @@ sys.path.insert(0, str(ROOT))
 from src.core.data_loader import DataLoader  # noqa: E402
 
 # --- Periodo ---------------------------------------------------------------
-PERIODO = "2026-08"
-HIST_DESDE, HIST_HASTA = "2026-07-01", "2026-08-01"
+PERIODO = "2026-09"
+HIST_DESDE, HIST_HASTA = "2026-08-01", "2026-09-01"
 
 # --- Identificacion para la carga en gold.fact_cupos -------------------------
 PROVEEDOR = "CCU"
@@ -76,7 +76,7 @@ CAMPOS_BD = ["periodo", "proveedor", "id_sucursal", "sucursal", "id_ruta",
              "descripcion", "preventista", "generico", "desagregado", "cupo"]
 # Todos los informes de cupos van a data/output/cupos/{mes}/.
 SALIDA = ROOT / "data/output/cupos" / PERIODO / (
-    "CUPO DESAGREGADO POR RUTA CASA CENTRAL - AGOSTO 2026.xlsx")
+    "CUPO DESAGREGADO POR RUTA CASA CENTRAL - SEPTIEMBRE 2026.xlsx")
 
 # --- Zonas virtuales de CASA CENTRAL (ver config/settings.py) ---------------
 RUTAS_VALLE = {81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 118, 119, 120, 122}
@@ -181,16 +181,28 @@ REDISTRIBUCIONES = [
 MARCAS_SEGUIDAS = {r.marca_origen for r in REDISTRIBUCIONES if r.activo}
 
 # --- Cupos del mes, por zona ------------------------------------------------
+# SEPTIEMBRE 2026. MULTI CCU cierra en 7.004 = 504 sidras + 5.000 vinos + 1.500 PR.
 CUPOS: dict[str, dict[str, float]] = {
-    "CASA CENTRAL": {"CERVEZAS": 70000, "AGUA DANONE": 25000,
-                     "VINOS CCU": 4300, "SIDRAS Y LICORES": 80,
+    "CASA CENTRAL": {"CERVEZAS": 81000, "AGUA DANONE": 30000,
+                     "VINOS CCU": 3300, "SIDRAS Y LICORES": 504,
                      "PERNOD RICARD": 1000},
-    "VALLE SALTA": {"CERVEZAS": 10000, "AGUA DANONE": 3000,
-                    "VINOS CCU": 1000, "SIDRAS Y LICORES": 10,
-                    "PERNOD RICARD": 100},
-    "SUB DISTRIBUIDORES": {"CERVEZAS": 10000, "AGUA DANONE": 2000,
-                           "VINOS CCU": 700, "SIDRAS Y LICORES": 10,
-                           "PERNOD RICARD": 100},
+    "VALLE SALTA": {"CERVEZAS": 12000, "AGUA DANONE": 3000,
+                    "VINOS CCU": 1000, "SIDRAS Y LICORES": 0,
+                    "PERNOD RICARD": 200},
+    "SUB DISTRIBUIDORES": {"CERVEZAS": 12000, "AGUA DANONE": 2000,
+                           "VINOS CCU": 700, "SIDRAS Y LICORES": 0,
+                           "PERNOD RICARD": 300},
+}
+
+# Cupo FIJO por preventista, no proporcional a la historia. Septiembre 2026:
+# "sidras y licores 504, 18 por preventista preventa" — y CASA CENTRAL tiene
+# exactamente 28 preventistas, asi que 18 x 28 = 504 cierra al bulto.
+# Repartir esos 504 por historia daria muy distinto: los preventistas que hoy
+# no venden sidra quedarian en cero, que es justo lo contrario de lo que pide
+# un objetivo de 18 parejo. Dentro de cada preventista SI se abre por historia,
+# para que el numero baje a ruta.
+CUPO_FIJO_POR_PREVENTISTA: dict[tuple[str, str], float] = {
+    ("CASA CENTRAL", "SIDRAS Y LICORES"): 18.0,
 }
 
 
@@ -328,6 +340,18 @@ def repartir(rutas, historia) -> dict[int, dict[str, float]]:
             valores[ruta][cat] = parte
 
         for cat in OTRAS_CATS:
+            fijo = CUPO_FIJO_POR_PREVENTISTA.get((zona, cat))
+            if fijo is not None:
+                # Cada preventista recibe el mismo cupo; adentro se abre por
+                # historia entre SUS rutas.
+                por_prev: dict[str, list] = {}
+                for ruta, _, prev in del_zona:
+                    por_prev.setdefault(prev, []).append(ruta)
+                for prev, sus in sorted(por_prev.items()):
+                    pesos = [historia.get((ruta, cat), 0.0) for ruta in sus]
+                    for ruta, parte in zip(sus, split_proporcional(fijo, pesos)):
+                        valores[ruta][cat] = parte
+                continue
             pesos = [historia.get((ruta, cat), 0.0) for ruta, _, _ in del_zona]
             partes = split_proporcional(float(CUPOS[zona].get(cat, 0)), pesos)
             for (ruta, _, _), parte in zip(del_zona, partes):

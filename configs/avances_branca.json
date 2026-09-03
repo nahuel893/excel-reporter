@@ -3,6 +3,8 @@
     "filtros": {
         "fecha_desde": "2026-07-01",
         "fecha_hasta": "2026-07-31",
+        "_ventana_nota": "mes_a_hoy: las fechas de arriba solo documentan el formato; se recalculan en cada corrida. El daily ya lo pasaba por afuera, pero sin esta clave una corrida a mano con `main.py --config` usaba las fechas guardadas y generaba el mes equivocado (2026-09-01: branca y guemes salieron JULIO).",
+        "fecha_modo": "mes_a_hoy",
         "archivo_plantilla": "data/input/avances/AVANCE BRANCA.xlsx",
         "id_sucursal": 1,
         "id_fuerza_ventas": 4,
@@ -12,15 +14,16 @@
     "reportes": [
         {
             "nombre": "AVANCE BRANCA - {MES} {AÑO}",
+            "_capturas_nota": "Los rangos arrancan en A y no en B: la columna A tiene la etiqueta de categoria (ANTICA, CARPANO, FERNET...). Sin ella la imagen es una grilla de numeros sin saber que fila es cual. Y cierran en la ultima columna VISIBLE con datos, no mas alla: AN en adelante son formulas sueltas (AU14:AU22) que salian como una columna de basura al costado. Verificado contra el libro de AGOSTO 2026, que ya no tiene a GONZALO LOPEZ ni a LUCIANO GUZMAN.",
             "capture_images": [
                 {
                     "hoja": "AVANCE",
-                    "rango": "B2:AX35",
+                    "rango": "A2:AM35",
                     "renderer": "libreoffice"
                 },
                 {
                     "hoja": "Cobertura",
-                    "rango": "B2:AR37",
+                    "rango": "A2:AO37",
                     "renderer": "libreoffice"
                 }
             ],

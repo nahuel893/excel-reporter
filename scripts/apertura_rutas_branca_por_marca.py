@@ -72,8 +72,8 @@ sys.path.insert(0, str(ROOT))
 from src.core.data_loader import DataLoader  # noqa: E402
 
 # --- Periodo y destino ------------------------------------------------------
-PERIODO = "2026-08"
-PERIODO_ANTERIOR = "2026-07"          # de donde se heredan las etiquetas
+PERIODO = "2026-09"
+PERIODO_ANTERIOR = "2026-08"          # de donde se heredan las etiquetas
 # UN mes, igual que cerveza. La ventana larga no es neutral: promedia regimenes
 # distintos y termina premiando lo que se muere. TORO paso de 3.455 bultos en
 # febrero a 293 en julio mientras ARIZU saltaba de 241 a 1.904; con seis meses
@@ -83,9 +83,9 @@ PERIODO_ANTERIOR = "2026-07"          # de donde se heredan las etiquetas
 # El costo de la ventana corta —nueve etiquetas de veintiuna sin historia— lo
 # absorbe el piso, que existe justamente para eso: son 81 cajas sobre 9.900.
 # Sin el piso esta ventana no serviria, porque esas nueve quedaban en cero.
-HIST_DESDE, HIST_HASTA = "2026-07-01", "2026-08-01"
+HIST_DESDE, HIST_HASTA = "2026-08-01", "2026-09-01"
 SALIDA = ROOT / "data/output/cupos" / PERIODO / (
-    "CUPO BRANCA POR RUTA Y MARCA - AGOSTO 2026.xlsx")
+    "CUPO BRANCA POR RUTA Y MARCA - SEPTIEMBRE 2026.xlsx")
 
 ID_SUCURSAL = 1
 
@@ -115,11 +115,13 @@ BRANCA, VINOS, VINOS_FINOS, QUARA, JUGOS = (
 # quedo fuera del cupo, asi que tampoco pesa en el reparto.
 MARCAS_VINOS = ["ARIZU", "TORO", "ANIMANA1", "CANCILLER"]
 
+# SEPTIEMBRE 2026. BRANCA cierra en 3.000 y VINOS en 3.000 (arizu, canciller,
+# animana y toro). JUGOS sigue sin cupo.
 CUPOS: dict[str, dict[str, float]] = {
     #                    BRANCA  VINOS  VINOS FINOS  QUARA  JUGOS
-    "CASA CENTRAL":       {BRANCA: 5000, VINOS: 2500, VINOS_FINOS: 370, QUARA: 450, JUGOS: 0},
-    "VALLE SALTA":        {BRANCA:  800, VINOS:  500, VINOS_FINOS:  30, QUARA:  50, JUGOS: 0},
-    "SUB DISTRIBUIDORES": {BRANCA:  200, VINOS:    0, VINOS_FINOS:   0, QUARA:   0, JUGOS: 0},
+    "CASA CENTRAL":       {BRANCA: 2400, VINOS: 2500, VINOS_FINOS: 550, QUARA: 450, JUGOS: 0},
+    "VALLE SALTA":        {BRANCA:  500, VINOS:  500, VINOS_FINOS:  50, QUARA:  50, JUGOS: 0},
+    "SUB DISTRIBUIDORES": {BRANCA:  100, VINOS:    0, VINOS_FINOS:   0, QUARA:   0, JUGOS: 0},
 }
 
 
