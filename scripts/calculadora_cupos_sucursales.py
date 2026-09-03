@@ -72,6 +72,8 @@ AZUL = "1F4E78"
 AMARILLO = "FFFF00"      # pestana de la hoja que se carga en la base
 VERDE = "C6EFCE"         # celdas que se tipean a mano
 GRIS = "F2F2F2"
+GRIS_BANDA = "808080"    # banda de los bloques de solo lectura
+VERDE_BANDA = "375623"   # banda del bloque que se tipea
 NARANJA = "FCE4D6"       # TOTAL GENERAL
 BORDE = Border(*[Side(style="thin", color="BFBFBF")] * 4)
 # Sin decimales: son bultos, y el libro se lee de un pantallazo. El VALOR
@@ -176,6 +178,67 @@ def cargar_historia(dl: DataLoader, meses: list[str]):
     return hist
 
 
+def _banda(ws, r: int, ancho: int, texto: str, color: str):
+    """Fila-titulo de un bloque de la matriz."""
+    ws.cell(r, 1, texto).font = Font(bold=True, color="FFFFFF")
+    for c in range(1, ancho + 1):
+        ws.cell(r, c).fill = PatternFill("solid", fgColor=color)
+    return r
+
+
+def _bloque_matriz(ws, r0: int, titulo: str, color_banda: str, sucursales: list[str],
+                   cats: list[str], valor=None, editable: bool = False,
+                   fmt: str = None, total=None):
+    """Un bloque `sucursal x categoria` con su banda de titulo y sus totales.
+
+    `valor(suc, cat)` devuelve lo que va en cada celda — un numero o una formula.
+    Devuelve (fila_encabezado, primera_fila_datos, ultima_fila_datos).
+    """
+    ancho = len(cats) + 2                      # SUCURSAL + categorias + TOTAL
+    _banda(ws, r0, ancho, titulo, color_banda)
+    rh = r0 + 1
+    ws.cell(rh, 1, "SUCURSAL")
+    for j, cat in enumerate(cats):
+        ws.cell(rh, 2 + j, cat)
+    ws.cell(rh, ancho, "TOTAL")
+    for c in range(1, ancho + 1):
+        cel = ws.cell(rh, c)
+        cel.fill = PatternFill("solid", fgColor=AZUL)
+        cel.font = Font(bold=True, color="FFFFFF")
+        cel.alignment = Alignment(horizontal="center", wrap_text=True)
+    r = rh + 1
+    for suc in sucursales:
+        ws.cell(r, 1, suc)
+        for j, cat in enumerate(cats):
+            cel = ws.cell(r, 2 + j)
+            if valor is not None:
+                cel.value = valor(suc, cat)
+            if editable:
+                cel.fill = PatternFill("solid", fgColor=VERDE)
+        c0, c1 = get_column_letter(2), get_column_letter(1 + len(cats))
+        # `total` existe porque un bloque de ratios no se totaliza sumando:
+        # la suma de nueve porcentajes no significa nada.
+        ws.cell(r, ancho, total("fila", r, None) if total
+                else f"=SUM({c0}{r}:{c1}{r})")
+        r += 1
+    ultima = r - 1
+    ws.cell(r, 1, "TOTAL")
+    for c in range(2, ancho + 1):
+        L = get_column_letter(c)
+        ws.cell(r, c, total("col", r, c) if total
+                else f"=SUM({L}{rh + 1}:{L}{ultima})")
+    for c in range(1, ancho + 1):
+        cel = ws.cell(r, c)
+        cel.font = Font(bold=True)
+        cel.fill = PatternFill("solid", fgColor=NARANJA)
+    for fila in ws.iter_rows(min_row=rh + 1, max_row=r, min_col=1, max_col=ancho):
+        for i, cel in enumerate(fila, start=1):
+            cel.border = BORDE
+            if i >= 2:
+                cel.number_format = fmt or FMT
+    return rh, rh + 1, ultima
+
+
 def _encabezado(ws, headers: list[str], anchos: list[int]):
     ws.append(headers)
     for c in ws[1]:
@@ -217,50 +280,71 @@ def construir(rutas, hist, meses):
     ws = wb.active
     ws.title = "Cupos"
     ws.sheet_properties.tabColor = VERDE
-    _encabezado(ws, ["SUCURSAL", "CATEGORIA", *meses, "TOTAL 3M", "% PART", "CUPO"],
-                [30, 16, 13, 13, 13, 14, 10, 14])
 
     sucursales = sorted({s for s, _ in rutas})
-    # (sucursal, categoria) -> venta por mes, ya agrupada al padre
-    venta_suc: dict[tuple[str, str], dict[str, float]] = {}
+    # (sucursal, categoria, mes) -> bultos, ya agrupado al padre
+    venta_suc: dict[tuple[str, str, str], float] = {}
     for (suc, prev), rs in rutas.items():
         for id_suc, ruta, _ in rs:
             for cat in CATEGORIAS + GEN_MULTICCU:
                 for mes in meses:
                     q = hist.get((id_suc, ruta, cat, mes), 0.0)
                     if q:
-                        d = venta_suc.setdefault((suc, categoria_padre(cat)), {})
-                        d[mes] = d.get(mes, 0.0) + q
+                        k = (suc, categoria_padre(cat), mes)
+                        venta_suc[k] = venta_suc.get(k, 0.0) + q
 
-    fila_cupos: dict[tuple[str, str], int] = {}
-    r = 2
-    for suc in sucursales:
-        for cat in CATEGORIAS:
-            d = venta_suc.get((suc, cat), {})
-            ws.cell(r, 1, suc)
-            ws.cell(r, 2, cat)
-            for i, mes in enumerate(meses):
-                ws.cell(r, 3 + i, d.get(mes, 0.0))
-            c0, c1 = get_column_letter(3), get_column_letter(2 + len(meses))
-            ws.cell(r, 3 + len(meses), f"=SUM({c0}{r}:{c1}{r})")
-            # % de participacion de la categoria dentro de su sucursal
-            tot = get_column_letter(3 + len(meses))
-            ws.cell(r, 4 + len(meses),
-                    f'=IFERROR({tot}{r}/SUMIFS(${tot}:${tot},$A:$A,$A{r}),0)')
-            cupo = ws.cell(r, 5 + len(meses))
-            cupo.fill = PatternFill("solid", fgColor=VERDE)
-            fila_cupos[(suc, cat)] = r
-            r += 1
-    col_tot, col_pct, col_cupo = (get_column_letter(3 + len(meses)),
-                                  get_column_letter(4 + len(meses)),
-                                  get_column_letter(5 + len(meses)))
-    ws.cell(r, 1, "TOTAL GENERAL")
-    for col in (*range(3, 3 + len(meses)), 3 + len(meses), 5 + len(meses)):
-        L = get_column_letter(col)
-        ws.cell(r, col, f"=SUM({L}2:{L}{r - 1})")
-    _cerrar(ws, primera_num=3, filas_total=[r], cols_pct=(4 + len(meses),))
-    total_cupos = r
-    ws.auto_filter.ref = f"A1:{col_cupo}{r - 1}"
+    ancho = len(CATEGORIAS) + 2
+    ws.column_dimensions["A"].width = 30
+    for j in range(len(CATEGORIAS) + 1):
+        ws.column_dimensions[get_column_letter(2 + j)].width = 13
+
+    r = 1
+    # Un bloque por mes: se ve la tendencia sin salir de la hoja donde se tipea.
+    for mes in meses:
+        _, _, _ = _bloque_matriz(
+            ws, r, f"VENTA {mes}", GRIS_BANDA, sucursales, CATEGORIAS,
+            valor=lambda suc, cat, _m=mes: venta_suc.get((suc, cat, _m), 0.0))
+        r += len(sucursales) + 4
+    _, f_v3m0, f_v3m1 = _bloque_matriz(
+        ws, r, "VENTA TOTAL 3 MESES", GRIS_BANDA, sucursales, CATEGORIAS,
+        valor=lambda suc, cat: sum(venta_suc.get((suc, cat, m), 0.0) for m in meses))
+    r += len(sucursales) + 4
+
+    # El bloque que se tipea. Es el unico editable de todo el libro.
+    h_cupo, f_cupo0, f_cupo1 = _bloque_matriz(
+        ws, r, "CUPO A TIPEAR  (unico bloque editable)", VERDE_BANDA,
+        sucursales, CATEGORIAS, editable=True)
+    r += len(sucursales) + 4
+
+    # Control de razonabilidad: cuanto pide el cupo contra lo que se vendio.
+    # Un 400% avisa de un cero mal tipeado antes de que baje a las rutas.
+    col_ini, col_fin = get_column_letter(2), get_column_letter(1 + len(CATEGORIAS))
+    ancho_m = len(CATEGORIAS) + 2
+
+    def _ratio_celda(suc, cat):
+        L = get_column_letter(2 + CATEGORIAS.index(cat))
+        i = sucursales.index(suc)
+        return (f"=IFERROR({L}{f_cupo0 + i}/{L}{f_v3m0 + i},\"\")")
+
+    def _ratio_total(clase, r_, c_):
+        # El total del bloque es el ratio de los TOTALES, no la suma de ratios.
+        if clase == "fila":
+            i = r_ - (r + 2)                       # offset dentro del bloque
+            L = get_column_letter(ancho_m)
+            return f"=IFERROR({L}{f_cupo0 + i}/{L}{f_v3m0 + i},\"\")"
+        L = get_column_letter(c_)
+        return f"=IFERROR({L}{f_cupo1 + 1}/{L}{f_v3m1 + 1},\"\")"
+
+    _bloque_matriz(
+        ws, r, "CUPO / VENTA 3M", GRIS_BANDA, sucursales, CATEGORIAS,
+        valor=_ratio_celda, fmt=FMT_PCT, total=_ratio_total)
+
+    ws.freeze_panes = "B2"
+    # Coordenadas del bloque de cupo, para el INDEX/MATCH de las otras hojas.
+    rango_cupo = (f"Cupos!${col_ini}${f_cupo0}:${col_fin}${f_cupo1}",
+                  f"Cupos!$A${f_cupo0}:$A${f_cupo1}",
+                  f"Cupos!${col_ini}${h_cupo}:${col_fin}${h_cupo}")
+    total_cupos = len(sucursales) * len(CATEGORIAS)
 
     # ------------------------------------------------------ Cupo Preventista
     wsp = wb.create_sheet("Cupo Preventista")
@@ -294,7 +378,11 @@ def construir(rutas, hist, meses):
             wsp.cell(r, 4 + n_mes, f"=MAX(0,SUM({c_m0}{r}:{c_m1}{r}))")
             base = f'SUMIFS(${c_tot}:${c_tot},$A:$A,$A{r},$C:$C,$C{r})'
             wsp.cell(r, 5 + n_mes, f'=IFERROR(${c_tot}{r}/{base},0)')
-            cupo_ref = f"SUMIFS(Cupos!${col_cupo}:${col_cupo},Cupos!$A:$A,$A{r},Cupos!$B:$B,$C{r})"
+            # La hoja Cupos es una matriz: la celda se ubica cruzando sucursal
+            # (filas) con categoria (columnas), no con SUMIFS sobre una columna.
+            cupo_ref = (f"IFERROR(INDEX({rango_cupo[0]},"
+                        f"MATCH($A{r},{rango_cupo[1]},0),"
+                        f"MATCH($C{r},{rango_cupo[2]},0)),0)")
             # Sin historia en toda la sucursal-categoria, reparto parejo.
             wsp.cell(r, 6 + n_mes,
                      f'=IF({base}=0,'
@@ -311,9 +399,16 @@ def construir(rutas, hist, meses):
 
     # ------------------------------------------------------------- Cupo Ruta
     wsr = wb.create_sheet("Cupo Ruta")
+    # Tambien abierta por mes, igual que la de preventista.
     _encabezado(wsr, ["SUCURSAL", "PREVENTISTA", "CÓDIGO", "RUTA", "GRUPO",
-                      "CATEGORIA", "VENTA 3M", "PESO", "OBJETIVO"],
-                [30, 26, 9, 22, 18, 16, 13, 10, 14])
+                      "CATEGORIA", *meses, "TOTAL 3M", "PESO", "OBJETIVO"],
+                [30, 26, 9, 22, 18, 16, 12, 12, 12, 13, 10, 14])
+    r_m0 = get_column_letter(7)                  # primer mes
+    r_m1 = get_column_letter(6 + n_mes)          # ultimo mes
+    r_tot = get_column_letter(7 + n_mes)         # TOTAL 3M
+    r_peso = get_column_letter(8 + n_mes)
+    r_obj = get_column_letter(9 + n_mes)
+    col_obj_ruta = 9 + n_mes
     filas_ruta: list[tuple[int, int, int, str, str, str]] = []
     r = 2
     for (suc, prev) in sorted(rutas):
@@ -321,34 +416,36 @@ def construir(rutas, hist, meses):
             for cat in CATEGORIAS:
                 # MULTI CCU baja abierto en sus tres genericos; el resto va uno a uno.
                 for gen in (GEN_MULTICCU if cat == MULTICCU else [cat]):
-                    venta = sum(hist.get((id_suc, ruta, gen, mes), 0.0) for mes in meses)
                     wsr.cell(r, 1, suc)
                     wsr.cell(r, 2, prev)
                     wsr.cell(r, 3, ruta)
                     wsr.cell(r, 4, des_ruta)
                     wsr.cell(r, 5, gen)
                     wsr.cell(r, 6, cat)
-                    wsr.cell(r, 7, max(venta, 0.0))
+                    for i, mes in enumerate(meses):
+                        wsr.cell(r, 7 + i, hist.get((id_suc, ruta, gen, mes), 0.0))
+                    wsr.cell(r, 7 + n_mes, f"=MAX(0,SUM({r_m0}{r}:{r_m1}{r}))")
                     # El peso es dentro del PREVENTISTA, no de la sucursal: asi la
                     # suma de sus rutas da exacto su objetivo.
-                    base = f'SUMIFS($G:$G,$A:$A,$A{r},$B:$B,$B{r},$F:$F,$F{r})'
-                    wsr.cell(r, 8, f'=IFERROR($G{r}/{base},0)')
+                    base = (f'SUMIFS(${r_tot}:${r_tot},$A:$A,$A{r},'
+                            f'$B:$B,$B{r},$F:$F,$F{r})')
+                    wsr.cell(r, 8 + n_mes, f'=IFERROR(${r_tot}{r}/{base},0)')
                     obj = (f"SUMIFS('Cupo Preventista'!${c_obj}:${c_obj},"
                            f"'Cupo Preventista'!$A:$A,$A{r},"
                            f"'Cupo Preventista'!$B:$B,$B{r},"
                            f"'Cupo Preventista'!$C:$C,$F{r})")
-                    wsr.cell(r, 9,
+                    wsr.cell(r, col_obj_ruta,
                              f'=IF({base}=0,'
                              f'IFERROR({obj}/COUNTIFS($A:$A,$A{r},$B:$B,$B{r},$F:$F,$F{r}),0),'
-                             f'$H{r}*{obj})')
+                             f'${r_peso}{r}*{obj})')
                     filas_ruta.append((r, id_suc, ruta, des_ruta, gen, cat))
                     r += 1
     wsr.cell(r, 1, "TOTAL GENERAL")
-    for col in (7, 9):
+    for col in (*range(7, 7 + n_mes), 7 + n_mes, col_obj_ruta):
         L = get_column_letter(col)
         wsr.cell(r, col, f"=SUM({L}2:{L}{r - 1})")
-    _cerrar(wsr, primera_num=7, filas_total=[r], cols_pct=(8,))
-    wsr.auto_filter.ref = f"A1:I{r - 1}"
+    _cerrar(wsr, primera_num=7, filas_total=[r], cols_pct=(8 + n_mes,))
+    wsr.auto_filter.ref = f"A1:{r_obj}{r - 1}"
 
     # -------------------------------------------------- Base Pivot SUCURSALES
     # La hoja que carga el ETL. GRUPO = CATEGORIA = la etiqueta, salvo los tres
@@ -375,20 +472,20 @@ def construir(rutas, hist, meses):
         des_ruta = items[0][1]
         refs = {gen: fr for fr, _, gen, _ in items}
         # CERVEZAS: el total, suma de sus ocho.
-        suma = "+".join(f"'Cupo Ruta'!$I${refs[c]}" for c in CERVEZA_CATS if c in refs)
+        suma = "+".join(f"'Cupo Ruta'!${r_obj}${refs[c]}" for c in CERVEZA_CATS if c in refs)
         wsb.append([z, prev, clave[1], des_ruta, "DETALLE", "CERVEZAS", "CERVEZAS",
                     f"={suma}" if suma else 0])
         r += 1
         for cat in CERVEZA_CATS:
             if cat in refs:
                 wsb.append([z, prev, clave[1], des_ruta, "DETALLE", cat, cat,
-                            f"='Cupo Ruta'!$I${refs[cat]}"])
+                            f"='Cupo Ruta'!${r_obj}${refs[cat]}"])
                 r += 1
         if "AGUAS DANONE" in refs:
             wsb.append([z, prev, clave[1], des_ruta, "DETALLE", "AGUAS DANONE",
-                        "AGUAS DANONE", f"='Cupo Ruta'!$I${refs['AGUAS DANONE']}"])
+                        "AGUAS DANONE", f"='Cupo Ruta'!${r_obj}${refs['AGUAS DANONE']}"])
             r += 1
-        suma_m = "+".join(f"'Cupo Ruta'!$I${refs[g]}" for g in GEN_MULTICCU if g in refs)
+        suma_m = "+".join(f"'Cupo Ruta'!${r_obj}${refs[g]}" for g in GEN_MULTICCU if g in refs)
         if suma_m:
             wsb.append([z, prev, clave[1], des_ruta, "AGREGADO", "TOTAL MULTICCU",
                         "TOTAL MULTICCU", f"={suma_m}"])
@@ -396,7 +493,7 @@ def construir(rutas, hist, meses):
             for gen in GEN_MULTICCU:
                 if gen in refs:
                     wsb.append([z, prev, clave[1], des_ruta, "DETALLE", gen,
-                                "MULTICCU", f"='Cupo Ruta'!$I${refs[gen]}"])
+                                "MULTICCU", f"='Cupo Ruta'!${r_obj}${refs[gen]}"])
                     r += 1
     _cerrar(wsb, primera_num=8)
     wsb.auto_filter.ref = f"A1:H{r - 1}"
@@ -429,7 +526,7 @@ def main() -> int:
         return 1
     wb.save(salida)
     print(f"\nGuardado: {salida}")
-    print(f"  Cupos             {filas_cupos - 2} filas para tipear")
+    print(f"  Cupos             {filas_cupos} celdas para tipear (matriz)")
     print(f"  Cupo Preventista  {len(rutas) * len(CATEGORIAS)} filas")
     print(f"  Cupo Ruta         {filas_ruta} filas")
     return 0
